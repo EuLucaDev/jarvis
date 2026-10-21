@@ -9,6 +9,7 @@ import {
   CloudSun,
   Droplets,
   ExternalLink,
+  LineChart,
   ListChecks,
   Loader2,
   Mail,
@@ -63,6 +64,7 @@ function labelFor(kind: Card['kind']) {
     noticia: 'Notícias',
     carregando: 'Resumo executivo',
     camera: 'Câmera · Ao vivo',
+    mercado: 'Mercado · Cotações',
   }[kind]
 }
 
@@ -337,6 +339,51 @@ function CameraCard({ card, onClose }: { card: Card; onClose?: () => void }) {
   )
 }
 
+function Spark({ serie, up }: { serie: number[]; up: boolean }) {
+  if (serie.length < 2) return null
+  const min = Math.min(...serie)
+  const max = Math.max(...serie)
+  const pts = serie.map((v, i) => `${(i / (serie.length - 1)) * 100},${28 - ((v - min) / (max - min || 1)) * 26}`).join(' ')
+  return (
+    <svg className={`spark ${up ? 'up' : 'down'}`} viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={pts} />
+    </svg>
+  )
+}
+
+const money = (v: number, cur?: string) =>
+  v.toLocaleString('pt-BR', { minimumFractionDigits: v < 100 ? 2 : 0, maximumFractionDigits: v < 100 ? 2 : 0 }) + (cur && cur !== 'BRL' ? ` ${cur}` : '')
+
+function Mercado({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const ativos: any[] = card.data.ativos ?? []
+  return (
+    <>
+      <Head card={card} icon={LineChart} onClose={onClose} />
+      <ul className="market">
+        {ativos.map((a) => (
+          <li key={a.simbolo}>
+            <div className="m-name">
+              <strong>{a.nome}</strong>
+              <span className="muted">{a.simbolo}</span>
+            </div>
+            <Spark serie={a.serie ?? []} up={(a.variacao ?? 0) >= 0} />
+            <div className="m-val">
+              <b>{money(a.preco, a.moeda)}</b>
+              <span className={(a.variacao ?? 0) >= 0 ? 'pos' : 'neg'}>
+                {a.variacao == null ? '—' : `${a.variacao > 0 ? '+' : ''}${a.variacao.toLocaleString('pt-BR')}%`}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <footer className="card-foot">
+        <span>Yahoo Finance · variação do dia</span>
+        <span>{card.at}</span>
+      </footer>
+    </>
+  )
+}
+
 export function CardView({ card, onClose }: { card: Card; onClose?: () => void }) {
   return (
     <article className={`card card-${card.kind}`} key={card.id}>
@@ -348,6 +395,7 @@ export function CardView({ card, onClose }: { card: Card; onClose?: () => void }
       {card.kind === 'noticia' && <Noticia card={card} onClose={onClose} />}
       {card.kind === 'carregando' && <Carregando card={card} />}
       {card.kind === 'camera' && <CameraCard card={card} onClose={onClose} />}
+      {card.kind === 'mercado' && <Mercado card={card} onClose={onClose} />}
     </article>
   )
 }
@@ -362,7 +410,9 @@ export function CardChip({ card, active, onClick }: { card: Card; active: boolea
         ? `Notícias · ${d.tema}`
         : card.kind === 'camera'
           ? 'Câmera'
-          : (d.categoria ?? labelFor(card.kind))
+          : card.kind === 'mercado'
+            ? 'Mercado'
+            : (d.categoria ?? labelFor(card.kind))
   const title =
     card.kind === 'clima'
       ? d.condicao
@@ -376,7 +426,9 @@ export function CardChip({ card, active, onClick }: { card: Card; active: boolea
             ? `${d.itens?.length ?? 0} pedem atenção`
             : card.kind === 'camera'
               ? d.nome
-              : d.titulo
+              : card.kind === 'mercado'
+                ? (d.ativos ?? []).slice(0, 2).map((a: any) => `${a.nome} ${a.variacao > 0 ? '+' : ''}${a.variacao}%`).join(' · ')
+                : d.titulo
   const big =
     card.kind === 'clima'
       ? `${num(d.temperatura)}°`

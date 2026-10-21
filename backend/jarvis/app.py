@@ -1,7 +1,9 @@
 """Servidor do Jarvis: API do painel, WebSocket de eventos/voz e o frontend compilado."""
 
 import asyncio
+import base64
 import collections
+import datetime as dt
 import json
 import logging
 import time
@@ -134,7 +136,7 @@ async def apresentar_briefing():
 
 # ---------- ajustes ----------
 
-EDITABLE = {"briefing", "telas", "cameras", "atalhos"}
+EDITABLE = {"briefing", "telas", "cameras", "atalhos", "alexa", "mercado", "presenca"}
 
 
 @app.get("/api/ajustes/{chave}")
@@ -180,6 +182,61 @@ async def testar_fontes():
 @app.get("/api/atalhos/disponiveis")
 async def atalhos_disponiveis():
     return await asyncio.to_thread(system.shortcuts_available)
+
+
+# ---------- mercado ----------
+
+
+@app.get("/api/mercado")
+async def mercado(periodo: str = "1mo"):
+    from . import market
+
+    return await market.quotes(None, periodo)
+
+
+# ---------- rosto e presença ----------
+
+
+@app.get("/api/rosto")
+async def rosto():
+    r = store.get("rosto")
+    return {"nome": r.get("nome"), "amostras": len(r.get("descritores", [])), "descritores": r.get("descritores", [])}
+
+
+@app.put("/api/rosto")
+async def salvar_rosto(body: dict = Body(...)):
+    descs = [d for d in body.get("descritores", []) if isinstance(d, list) and len(d) == 128]
+    if not descs:
+        raise HTTPException(400, "Nenhuma amostra válida.")
+    r = store.get("rosto")
+    r["descritores"] = (r.get("descritores", []) + descs)[-12:] if body.get("adicionar") else descs
+    if body.get("nome"):
+        r["nome"] = body["nome"]
+    store.put("rosto", r)
+    return {"ok": True, "amostras": len(r["descritores"])}
+
+
+@app.delete("/api/rosto")
+async def apagar_rosto():
+    store.put("rosto", {**store.get("rosto"), "descritores": []})
+    return {"ok": True}
+
+
+def _deve_briefing() -> bool:
+    p = store.get("presenca")
+    hoje = dt.date.today().isoformat()
+    return bool(p.get("briefing_auto")) and p.get("ultimo_briefing") != hoje and 5 <= dt.datetime.now().hour < 12
+
+
+@app.get("/api/presenca")
+async def presenca():
+    return {"briefing": _deve_briefing()}
+
+
+@app.post("/api/presenca/briefing")
+async def marcar_briefing():
+    store.put("presenca", {**store.get("presenca"), "ultimo_briefing": dt.date.today().isoformat()})
+    return {"ok": True}
 
 
 # ---------- câmeras ----------
@@ -271,6 +328,13 @@ async def ws_endpoint(ws: WebSocket):
                 await hub.clear_cards()
             elif kind == "sequence.show" and mine:
                 await mine.show_planned(int(data.get("index", -1)))
+            elif kind == "video.frame" and mine and data.get("jpeg"):
+                await mine.send_image(base64.b64decode(data["jpeg"]))
+            elif kind == "presenca":
+                # passos do reconhecimento vão para todas as telas; reconhecido desbloqueia
+                await hub.broadcast({"type": "presenca", "etapa": data.get("etapa")})
+                if data.get("etapa") == "reconhecido":
+                    await hub.set_screens("ativas")
             elif kind == "telas" and data.get("estado") in ("ativas", "bloqueadas"):
                 await hub.set_screens(data["estado"])
     except WebSocketDisconnect:

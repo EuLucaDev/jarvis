@@ -26,6 +26,12 @@ Abrir `http://localhost:8000` no Chrome (o microfone precisa de permissão do na
 - `frontend/src/tela/`: telas extras `/tela/<id>` (bloqueio compartilhado, widgets, Personalizar tela).
 - `frontend/src/admin/`: painel `/admin/<página>` no estilo WorkFlow.
 - `frontend/src/lib/wake.ts`: palavra de ativação "Jarvis" pelo reconhecimento de fala do Chrome.
+- `frontend/src/lib/face.ts` + `hud/Presence.tsx`: reconhecimento facial local com face-api (modelos em `frontend/public/models`); descritores salvos em `ajustes.rosto`.
+- `backend/jarvis/market.py`: cotações grátis do Yahoo Finance.
+
+### Segurança das ações
+
+Ações destrutivas (`arquivos` → organizar, lixeira) exigem `confirmado=true` numa segunda chamada, depois do sim do usuário. Arquivos só dentro da pasta pessoal; lixeira usa a Lixeira do Finder (recuperável). Sem execução de comando livre.
 
 ### Sincronia fala × legenda × cartões
 
@@ -42,7 +48,7 @@ SQLite local em `data/jarvis.db`, sem custo. Tipos: perfil, preferencia, correca
 
 ## Visual
 
-Linguagem do vídeo (azul-noite, esfera de fitas luminosas, rótulos de estado em mono espaçado, cartões translúcidos com borda clara) sobre a arquitetura de camadas da skill `estilo-workflow`. O painel administrativo (Fase 4) segue `estilo-workflow` e as regras de app da `design-taste-frontend`.
+Segue o Jarvis de referência (`docs/referencia-lucas-victor.md`): azul-noite, acento ciano, Space Grotesk / Manrope / JetBrains Mono, painéis com borda ciano e brilho. HUD em três colunas (sinal, espectro, leitura e serviços à esquerda; esfera no centro; clima e canal de conversa à direita), barras superior e inferior iguais às do monitor de referência, e "Gerenciar HUD" para mover/esconder painéis. Telas extras com abas de visões (Centro de comando, Agenda tática, Comunicações, Radar, Núcleo). O painel usa a mesma linguagem sobre a arquitetura de camadas da skill `estilo-workflow`.
 
 ## Fases
 
@@ -56,7 +62,8 @@ Linguagem do vídeo (azul-noite, esfera de fitas luminosas, rótulos de estado e
 | 4 | Painel admin (`/admin`): chat, briefing, fontes de dados, memórias, conversas, telas, integrações, sistema/logs | feito |
 | 5 | Telas extras (`/tela/:id`): bloqueio/desbloqueio por voz ("ativar monitores"), widgets, Personalizar tela, sincronização | feito |
 | 6 | Computador (apps, sites, mídia, volume), Atalhos do macOS como ponte para celular/HomeKit/Alexa, câmeras, palavra de ativação, telemetria | feito; falta o Luca criar/liberar Atalhos e cadastrar câmeras |
-| 7 | Ideias seguintes: reconhecimento facial real no desbloqueio, Alexa nativa (skill própria), notificações push no celular, acesso remoto via Coolify | |
+| 7 | Mescla com o Jarvis de referência: HUD em 3 colunas, telas com abas, Conexões em grade, Financeiro (Yahoo Finance), Alexa (Voice Monkey), Lembretes da Apple, arquivos com confirmação, brilho/bloqueio, visão (câmera e tela vão para a Gemini), presença com reconhecimento facial local (face-api) e bom dia automático | feito; reconhecimento facial, câmera e Alexa aguardam teste do Luca |
+| 8 | Ideias seguintes: saúde (Apple Saúde/WHOOP), Notion/Obsidian, WhatsApp/iMessage, gestos pela câmera, acesso remoto via Coolify, iniciar sozinho com o Mac | |
 
 ## Convenções
 

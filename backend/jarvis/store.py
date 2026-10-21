@@ -27,9 +27,13 @@ DEFAULTS: dict[str, Any] = {
     ],
     "cameras": [],  # [{"id": "garagem", "nome": "Garagem", "url": "rtsp://... ou http://.../snapshot.jpg"}]
     "atalhos": [],  # nomes de Atalhos do macOS que o Jarvis pode rodar
+    "alexa": {"token": "", "dispositivos": []},  # [{"nome": "luz da sala", "ligar": "luz-on", "desligar": "luz-off"}]
+    "mercado": {"ativos": ["^BVSP", "BRL=X", "BTC-USD", "PETR4.SA", "VALE3.SA"]},
+    "rosto": {"descritores": [], "nome": "Luca"},  # reconhecimento facial local
+    "presenca": {"briefing_auto": True, "ultimo_briefing": ""},
 }
 
-SECRET_FIELDS = {"senha_app"}
+SECRET_FIELDS = {"senha_app", "token"}
 
 
 def _db() -> sqlite3.Connection:

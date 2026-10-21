@@ -4,6 +4,7 @@ import { Admin } from './admin/Admin'
 import { Hud } from './hud/Hud'
 import { Tela } from './tela/Tela'
 import './hud/hud.css'
+import './tela/tela.css'
 
 // /           HUD com a esfera (monitor principal)
 // /tela/<id>  tela extra com widgets

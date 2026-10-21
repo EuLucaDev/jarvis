@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Player } from '../lib/audio'
 import { JarvisSocket, type Card, type ScreenConfig, type ServerEvent, type Telemetry, type VoiceStatus } from '../lib/socket'
+import { frameJpeg } from '../lib/face'
 import { WakeWord } from '../lib/wake'
 
 export type Phase = 'espera' | 'ouvindo' | 'pensando' | 'falando'
@@ -19,7 +20,15 @@ const BARGE_KEY = 'jarvis.bargeIn'
 const WAKE_KEY = 'jarvis.wake'
 const IDLE_MS = 45000 // com a palavra de ativação ligada, a sessão volta a dormir após esse silêncio
 
+export type LogLine = { quem: 'voce' | 'jarvis'; texto: string }
+export type Vision = 'off' | 'camera' | 'tela'
+
 export function useJarvis(role = 'hud', query = '') {
+  const [log, setLog] = useState<LogLine[]>([])
+  const [presence, setPresence] = useState<string | null>(null)
+  const [vision, setVision] = useState<Vision>('off')
+  const visionStream = useRef<MediaStream | null>(null)
+  const visionVideo = useRef<HTMLVideoElement | null>(null)
   const [status, setStatus] = useState<VoiceStatus>({ voice: 'off' })
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null)
   const [screens, setScreens] = useState<ScreenConfig[] | null>(null)
@@ -65,6 +74,15 @@ export function useJarvis(role = 'hud', query = '') {
   const stopRef = useRef<() => void>(() => {})
   const wakeWord = useRef<WakeWord | null>(null)
   const quietAt = useRef(0)
+  const pendingAsk = useRef<string | null>(null) // texto que espera a voz ficar ao vivo
+
+  const pushLog = useCallback((quem: LogLine['quem'], texto: string, novo: boolean) => {
+    setLog((l) => {
+      const last = l.at(-1)
+      if (!novo && last && last.quem === quem) return [...l.slice(0, -1), { quem, texto: (last.texto + texto).slice(-600) }]
+      return [...l, { quem, texto }].slice(-30)
+    })
+  }, [])
 
   const onEvent = useCallback((e: ServerEvent) => {
     const L = live.current
@@ -77,6 +95,10 @@ export function useJarvis(role = 'hud', query = '') {
         break
       case 'status':
         setStatus({ voice: e.voice, model: e.model, error: e.error, telas: e.telas })
+        if (e.voice === 'live' && pendingAsk.current) {
+          sock.current?.send({ type: 'text', text: pendingAsk.current })
+          pendingAsk.current = null
+        }
         break
       case 'telemetria':
         setTelemetry(e)
@@ -84,14 +106,20 @@ export function useJarvis(role = 'hud', query = '') {
       case 'telas.config':
         setScreens(e.telas)
         break
-      case 'user.text':
-        if (L.turnDone || L.lastModel > L.lastUser) {
+      case 'user.text': {
+        const novo = L.turnDone || L.lastModel > L.lastUser
+        if (novo) {
           setUserLine('')
           modelBuf.current = ''
         }
+        pushLog('voce', e.text, novo || !!e.typed)
         L.turnDone = false
         L.lastUser = now
         setUserLine((s) => (e.typed ? e.text : s + e.text).slice(-160))
+        break
+      }
+      case 'presenca':
+        setPresence(e.etapa)
         break
       case 'model.text':
         if (L.turnDone) {
@@ -131,7 +159,7 @@ export function useJarvis(role = 'hud', query = '') {
         player.current?.flush()
         break
     }
-  }, [])
+  }, [pushLog])
 
   useEffect(() => {
     player.current = new Player()
@@ -191,6 +219,7 @@ export function useJarvis(role = 'hud', query = '') {
         }
         if (n > 0) {
           const chunk = pending.current.splice(0, n).map((x) => x.t).join('')
+          pushLog('jarvis', chunk, modelBuf.current === '')
           modelBuf.current += chunk
           setCaption(lastWords(modelBuf.current, 8))
           // briefing: pede o próximo cartão quando a fala chega no trecho dele
@@ -217,7 +246,48 @@ export function useJarvis(role = 'hud', query = '') {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
+  }, [pushLog])
+
+  // Visão: câmera ou tela vão para a Gemini a 1 quadro por segundo, enquanto a voz está ao vivo.
+  useEffect(() => {
+    if (vision === 'off' || status.voice !== 'live') return
+    const t = setInterval(() => {
+      const v = visionVideo.current
+      const jpeg = v && frameJpeg(v)
+      if (jpeg) sock.current?.send({ type: 'video.frame', jpeg })
+    }, 1000)
+    return () => clearInterval(t)
+  }, [vision, status.voice])
+
+  const stopVision = useCallback(() => {
+    visionStream.current?.getTracks().forEach((t) => t.stop())
+    visionStream.current = null
+    setVision('off')
   }, [])
+
+  const startVision = useCallback(
+    async (kind: Exclude<Vision, 'off'>) => {
+      stopVision()
+      try {
+        const stream =
+          kind === 'camera'
+            ? await navigator.mediaDevices.getUserMedia({ video: { width: 960 }, audio: false })
+            : await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 2 }, audio: false })
+        stream.getVideoTracks()[0].onended = () => setVision('off')
+        visionStream.current = stream
+        const v = visionVideo.current ?? document.createElement('video')
+        v.muted = true
+        v.playsInline = true
+        v.srcObject = stream
+        await v.play()
+        visionVideo.current = v
+        setVision(kind)
+      } catch {
+        setVision('off')
+      }
+    },
+    [stopVision],
+  )
 
   // A legenda some um tempo depois que ele termina de falar.
   useEffect(() => {
@@ -295,7 +365,37 @@ export function useJarvis(role = 'hud', query = '') {
     })
   }, [])
 
+  /** Pergunta por texto; se a voz estiver desligada, liga e envia assim que conectar. */
+  const ask = useCallback(
+    async (text: string) => {
+      if (statusRef.current.voice === 'live') {
+        sock.current?.send({ type: 'text', text })
+        return
+      }
+      pendingAsk.current = text
+      await startVoice()
+    },
+    [startVoice],
+  )
+
+  /** Analisador do que está soando agora: a voz do Jarvis falando, senão o microfone. */
+  const scope = useCallback(() => {
+    if (player.current?.playing()) return player.current.analyser()
+    return mic.current?.analyser() ?? null
+  }, [])
+
   return {
+    ask,
+    send: (msg: object) => sock.current?.send(msg),
+    log,
+    presence,
+    vision,
+    visionVideo,
+    visionStream,
+    startVision,
+    stopVision,
+    scope,
+    micOn: () => !!mic.current,
     status,
     telemetry,
     screens,

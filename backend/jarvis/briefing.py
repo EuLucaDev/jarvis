@@ -65,18 +65,24 @@ Para cada um: motivo em até 12 palavras e, se houver, a ação sugerida em até
     except Exception as exc:  # noqa: BLE001
         log.warning("classificação de e-mails falhou: %s", exc)
         ranked = []
-    atencao = []
+    atencao, relevantes = [], []
     for r in ranked or []:
         i = r.get("indice")
-        if r.get("prioridade") == "alta" and isinstance(i, int) and 0 <= i < len(items):
-            atencao.append({**items[i], "motivo": r.get("motivo"), "acao": r.get("acao")})
-    return {"total": total, "atencao": atencao[:6], "outros": max(0, len(items) - len(atencao))}
+        if not (isinstance(i, int) and 0 <= i < len(items)):
+            continue
+        item = {**items[i], "motivo": r.get("motivo"), "acao": r.get("acao")}
+        if r.get("prioridade") == "alta":
+            atencao.append(item)
+        elif r.get("prioridade") == "media":
+            relevantes.append(item)
+    return {"total": total, "atencao": atencao[:6], "relevantes": relevantes[:4], "outros": max(0, len(items) - len(atencao))}
 
 
 async def _agenda(cfg: dict) -> list[dict]:
+    """Próximos 7 dias; o de hoje é filtrado no build."""
     if not cfg.get("agendas"):
         return []
-    return await agenda_src.fetch(cfg["agendas"], cfg.get("fuso", "America/Maceio"))
+    return await agenda_src.fetch(cfg["agendas"], cfg.get("fuso", "America/Maceio"), dias=7)
 
 
 async def _news(cfg: dict) -> list[dict]:
@@ -175,13 +181,15 @@ async def build(force: bool = False) -> dict:
             erros.append(f"{name}: {str(exc)[:140]}")
             return default
 
-    clima, emails, agenda, noticias = await asyncio.gather(
+    clima, emails, semana, noticias = await asyncio.gather(
         safe("clima", _weather(cfg), None),
-        safe("e-mails", _emails(cfg), {"total": 0, "atencao": [], "outros": 0}),
+        safe("e-mails", _emails(cfg), {"total": 0, "atencao": [], "relevantes": [], "outros": 0}),
         safe("agenda", _agenda(cfg), []),
         safe("notícias", _news(cfg), []),
     )
     now = dt.datetime.now(tz)
+    hoje_iso = now.strftime("%Y-%m-%d")
+    agenda = [e for e in semana if e.get("data") == hoje_iso]
     dias = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
     data = {
         "ts": time.time(),
@@ -190,6 +198,7 @@ async def build(force: bool = False) -> dict:
         "clima": clima,
         "emails": emails,
         "agenda": agenda,
+        "agenda_semana": semana,
         "noticias": noticias,
         "configurado": {"gmail": bool(cfg.get("gmail")), "agenda": bool(cfg.get("agendas"))},
         "erros": erros,

@@ -1,18 +1,17 @@
-import { ArrowDown, ArrowUp, Lock, Settings2, Unlock, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, CalendarDays, Expand, Lock, Mail, Newspaper, RefreshCw, Settings2, Unlock, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import type { ScreenConfig, Telemetry } from '../lib/socket'
 import { CardView } from '../hud/Cards'
 import { Orb } from '../hud/Orb'
 import { useJarvis } from '../hud/useJarvis'
-import './tela.css'
 
 // Catálogo de widgets. "noticias:<tema>" e "camera:<id>" são gerados a partir dos ajustes.
 const BASE_WIDGETS: { id: string; nome: string; desc: string }[] = [
   { id: 'orbe', nome: 'Orbe de voz', desc: 'A esfera sincronizada com a voz do Jarvis.' },
   { id: 'relogio', nome: 'Relógio', desc: 'Hora e data grandes.' },
-  { id: 'agenda', nome: 'Agenda', desc: 'Compromissos de hoje.' },
-  { id: 'emails', nome: 'E-mails', desc: 'Mensagens que pedem atenção.' },
+  { id: 'agenda', nome: 'Agenda', desc: 'Próximos 7 dias, com o próximo compromisso em destaque.' },
+  { id: 'emails', nome: 'Comunicações', desc: 'E-mails que pedem ação e outros relevantes.' },
   { id: 'clima', nome: 'Clima', desc: 'Condição agora e máxima do dia.' },
   { id: 'cartoes', nome: 'Cartões visuais', desc: 'O cartão que o Jarvis está mostrando agora.' },
   { id: 'sistema', nome: 'Sistema', desc: 'CPU, memória, disco, rede e bateria do Mac.' },
@@ -30,7 +29,23 @@ export function Tela({ id }: { id: string }) {
   const [editing, setEditing] = useState(false)
   const [phase, setPhase] = useState<'locked' | 'unlocking' | 'open'>('locked')
   const [lines, setLines] = useState<{ quem: string; texto: string }[]>([])
+  const [view, setView] = useState<string>(() => {
+    try {
+      return localStorage.getItem(`jarvis.tela.${id}`) || 'propria'
+    } catch {
+      return 'propria'
+    }
+  })
+  const [refreshing, setRefreshing] = useState(false)
+  const now = useNow()
   const prev = useRef(j.status.telas)
+  useEffect(() => {
+    try {
+      localStorage.setItem(`jarvis.tela.${id}`, view)
+    } catch {
+      /* só nesta aba */
+    }
+  }, [id, view])
 
   useEffect(() => {
     api<ScreenConfig[]>('/api/ajustes/telas').then(setAll)
@@ -97,18 +112,42 @@ export function Tela({ id }: { id: string }) {
     await api('/api/ajustes/telas', { method: 'PUT', json: list })
   }
 
-  const widgets = screen?.widgets ?? []
+  const temas: string[] = (brief.noticias ?? []).map((n: any) => n.tema)
+  const views = [
+    { id: 'propria', nome: screen?.nome ?? 'Esta tela', widgets: screen?.widgets ?? [] },
+    { id: 'agenda', nome: 'Agenda tática', widgets: ['agenda', 'relogio', 'clima'] },
+    { id: 'comunicacoes', nome: 'Comunicações', widgets: ['emails', 'transcricao'] },
+    { id: 'radar', nome: 'Radar de notícias', widgets: temas.map((t) => `noticias:${t}`) },
+    { id: 'nucleo', nome: 'Núcleo do sistema', widgets: ['sistema', 'sessao', 'orbe', 'transcricao'] },
+  ]
+  // sem aba repetida quando a tela já tem o nome de uma visão pronta
+  const own = views[0].nome.toLowerCase()
+  for (let i = views.length - 1; i > 0; i--) if (views[i].nome.toLowerCase() === own) views.splice(i, 1)
+  const current = views.find((v) => v.id === view) ?? views[0]
+  const widgets = current.widgets
   const card = j.cards.find((c) => c.id === j.focusId) ?? j.cards.at(-1)
+  const refresh = async () => {
+    setRefreshing(true)
+    try {
+      setBrief(await api('/api/briefing/gerar', { method: 'POST' }))
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   return (
-    <main className={`tela tela-${phase}`}>
+    <main className={`tela tela-${phase} ${phase === 'open' ? 'has-tabs' : ''}`}>
       <div className="hud-grid" aria-hidden="true" />
       <header className="tela-bar">
-        <span className="hud-brand">J.A.R.V.I.S.</span>
-        <span>{screen?.nome ?? '…'}</span>
+        <b className="tb-brand">JARVIS</b>
+        <span className="tb-name">{current.nome}</span>
         <span className="hud-spacer" />
         <span className={`hud-dot ${j.online ? 'on' : ''}`} />
-        <span>{j.online ? 'Sincronizada' : 'Reconectando'}</span>
+        <span>{j.online ? 'Sincronizado' : 'Reconectando'}</span>
+        <time className="tb-clock">{now.toLocaleTimeString('pt-BR')}</time>
+        <button className="icon-btn" onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen())} aria-label="Tela cheia">
+          <Expand size={14} />
+        </button>
         <button className="icon-btn" onClick={() => setEditing(true)} aria-label="Personalizar tela">
           <Settings2 size={15} />
         </button>
@@ -145,14 +184,34 @@ export function Tela({ id }: { id: string }) {
       )}
 
       {phase === 'open' && (
-        <section className="widgets">
+        <nav className="tabs" aria-label="Visões desta tela">
+          {views.map((v) => (
+            <button key={v.id} className={v.id === current.id ? 'on' : ''} onClick={() => setView(v.id)}>
+              {v.nome}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {phase === 'open' && (
+        <section className="widgets" key={current.id}>
           {widgets.map((w, i) => (
             <div className={`widget w-${w.split(':')[0]}`} key={w} style={{ animationDelay: `${i * 90}ms` }}>
               <Widget id={w} j={j} brief={brief} card={card} lines={lines} cams={cams} />
             </div>
           ))}
-          {widgets.length === 0 && <p className="muted">Nenhum widget nesta tela. Abra a engrenagem para montar.</p>}
+          {widgets.length === 0 && <p className="muted">Nenhum widget nesta visão. Abra a engrenagem para montar.</p>}
         </section>
+      )}
+
+      {phase === 'open' && (
+        <footer className="tela-foot">
+          <span>{current.nome}</span>
+          <button className="unlock-btn" onClick={refresh} disabled={refreshing}>
+            <RefreshCw size={12} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Atualizando…' : 'Atualizar dados'}
+          </button>
+          <span>Monitor ativo</span>
+        </footer>
       )}
 
       {editing && screen && (
@@ -208,19 +267,167 @@ function Widget({ id, j, brief, card, lines, cams }: { id: string; j: ReturnType
     )
   if (kind === 'sessao') return <Session status={j.status} />
   if (kind === 'clima' && brief.clima) return <CardView card={{ id: 'w-clima', kind: 'clima', at: brief.gerado ?? '', data: brief.clima }} />
-  if (kind === 'agenda')
-    return <CardView card={{ id: 'w-ag', kind: 'agenda', at: brief.gerado ?? '', data: { titulo: 'Agenda de hoje', eventos: brief.agenda ?? [], hoje: brief.hoje, configurado: brief.configurado?.agenda } }} />
-  if (kind === 'emails' && brief.emails)
-    return <CardView card={{ id: 'w-em', kind: 'emails', at: brief.gerado ?? '', data: { titulo: 'Pedem sua atenção', total: brief.emails.total, itens: brief.emails.atencao, outros: brief.emails.outros, configurado: brief.configurado?.gmail } }} />
+  if (kind === 'agenda') return <AgendaWeek brief={brief} />
+  if (kind === 'emails') return <Comms brief={brief} />
   if (kind === 'noticias') {
     const n = (brief.noticias ?? []).find((x: any) => x.tema === arg)
-    return n ? <CardView card={{ id: `w-n-${arg}`, kind: 'noticia', at: brief.gerado ?? '', data: n }} /> : <Empty title={`Notícias · ${arg}`} text="Aparece depois do próximo briefing." />
+    return n ? <Radar tema={arg} itens={n.itens} /> : <Empty title={`Radar · ${arg}`} text="Aparece depois do próximo briefing." />
   }
   if (kind === 'camera') {
     const cam = cams.find((c) => c.id === arg)
     return cam ? <CamFeed id={cam.id} nome={cam.nome} /> : <Empty title="Câmera" text="Câmera removida dos ajustes." />
   }
   return <Empty title={id} text="Carregando dados do briefing…" />
+}
+
+function TW({ icon: Icon, eyebrow, title, tag, foot, children }: { icon: typeof Mail; eyebrow: string; title: string; tag?: string; foot: string; children: React.ReactNode }) {
+  return (
+    <div className="tw">
+      <header>
+        <span className="tw-ico">
+          <Icon size={15} strokeWidth={1.6} />
+        </span>
+        <div>
+          <span className="tw-eye">{eyebrow}</span>
+          <h3>{title}</h3>
+        </div>
+        {tag && <em className="tw-tag">{tag}</em>}
+      </header>
+      {children}
+      <footer>{foot}</footer>
+    </div>
+  )
+}
+
+const DIAS = ['dom.', 'seg.', 'ter.', 'qua.', 'qui.', 'sex.', 'sáb.']
+function fmtDay(iso: string) {
+  const d = new Date(`${iso}T12:00:00`)
+  const today = new Date()
+  const diff = Math.round((d.setHours(0, 0, 0, 0) - new Date(today).setHours(0, 0, 0, 0)) / 86400000)
+  if (diff === 0) return 'Hoje'
+  if (diff === 1) return 'Amanhã'
+  const dd = new Date(`${iso}T12:00:00`)
+  return `${DIAS[dd.getDay()]} ${dd.getDate()}/${dd.getMonth() + 1}`
+}
+
+function AgendaWeek({ brief }: { brief: Briefing }) {
+  const evs: any[] = brief.agenda_semana ?? brief.agenda ?? []
+  const nowHM = new Date().toTimeString().slice(0, 5)
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const next = evs.find((e) => e.data > todayIso || (e.data === todayIso && (e.dia_todo || (e.inicio ?? '') >= nowHM))) ?? null
+  const rest = evs.filter((e) => e !== next).slice(0, 5)
+  return (
+    <TW icon={CalendarDays} eyebrow="Agenda · Próximos 7 dias" title="Seu período organizado" tag="7 dias" foot="Agenda · leitura atual">
+      {!brief.configurado?.agenda ? (
+        <p className="muted small">Conecte sua agenda em Painel → Conexões.</p>
+      ) : !next ? (
+        <p className="muted small">Nada marcado para os próximos 7 dias.</p>
+      ) : (
+        <div className="ag-grid">
+          <div className="ag-next">
+            <span className="tw-eye">● Próximo</span>
+            <div className="ag-time">
+              <b>{next.dia_todo ? 'Dia' : next.inicio}</b>
+              <span>{next.titulo}</span>
+            </div>
+            <small>
+              {fmtDay(next.data)}
+              {next.local ? ` · ${next.local}` : ''}
+            </small>
+          </div>
+          <ul className="ag-list">
+            {rest.map((e, i) => (
+              <li key={i}>
+                <time>{e.dia_todo ? 'dia' : e.inicio}</time>
+                <span>
+                  {e.titulo}
+                  <small>{fmtDay(e.data)}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </TW>
+  )
+}
+
+function Comms({ brief }: { brief: Briefing }) {
+  const e = brief.emails ?? { atencao: [], relevantes: [], total: 0 }
+  const items: any[] = e.atencao ?? []
+  const rel: any[] = e.relevantes ?? []
+  return (
+    <TW icon={Mail} eyebrow="Comunicações · E-mail" title="Pedem sua atenção" foot="Triagem do briefing · itens verificados">
+      {!brief.configurado?.gmail ? (
+        <p className="muted small">Conecte o Gmail em Painel → Conexões.</p>
+      ) : (
+        <>
+          <div className="cm-count">
+            <b>{items.length}</b>
+            <span>{items.length === 1 ? 'mensagem exige ação' : 'mensagens exigem ação'}</span>
+          </div>
+          {items.length > 0 && <span className="tw-sub">Precisam de ação</span>}
+          <ol className="cm-list">
+            {items.map((m, i) => (
+              <li key={i}>
+                <i>{String(i + 1).padStart(2, '0')}</i>
+                <span>
+                  <b>{m.de}</b>
+                  {m.motivo || m.assunto}
+                </span>
+              </li>
+            ))}
+          </ol>
+          {rel.length > 0 && <span className="tw-sub">Outros relevantes</span>}
+          <ol className="cm-list dim">
+            {rel.map((m, i) => (
+              <li key={i}>
+                <span>
+                  <b>{m.de}</b>
+                  {m.assunto}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+    </TW>
+  )
+}
+
+function Radar({ tema, itens }: { tema: string; itens: any[] }) {
+  const [top, ...rest] = itens
+  return (
+    <TW icon={Newspaper} eyebrow="Radar · Notícias" title={tema} tag="Notícias" foot="Curadoria atual · fontes verificadas">
+      <div className="rd-grid">
+        <a className="rd-top" href={top.url} target="_blank" rel="noreferrer" style={top.imagem ? { backgroundImage: `linear-gradient(180deg, rgb(3 10 26 / 0.15), rgb(3 10 26 / 0.92)), url(${top.imagem})` } : undefined}>
+          <span className="tw-eye">● Destaque</span>
+          <b>{top.titulo}</b>
+          <small>{[top.fonte, top.data].filter(Boolean).join(' · ')}</small>
+        </a>
+        <ol className="rd-list">
+          {rest.slice(0, 2).map((n, i) => (
+            <li key={i}>
+              <i>{String(i + 2).padStart(2, '0')}</i>
+              <a href={n.url} target="_blank" rel="noreferrer">
+                <span className="tw-eye">{n.fonte}</span>
+                {n.titulo}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </TW>
+  )
+}
+
+function useNow() {
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  return now
 }
 
 function Empty({ title, text }: { title: string; text: string }) {

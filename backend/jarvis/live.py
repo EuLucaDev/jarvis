@@ -37,6 +37,15 @@ Como responder:
 - Telas extras: ativar_telas. Computador: abrir_app, abrir_link, controlar_midia, ajustar_volume.
 - Celular, casa, Alexa e automações: executar_atalho (Atalhos do macOS liberados por ele).
 - Câmeras: ver_camera, depois descreva o que vê em uma ou duas frases.
+- Casa pela Alexa: controlar_casa. Lembretes (vão para o iPhone): criar_lembrete.
+- Arquivos e pastas: arquivos. Mercado e cotações: consultar_mercado.
+- Ferramentas que já mostram cartão (clima, mercado, briefing, câmera) dispensam mostrar_pesquisa: um cartão por resposta.
+- Quando ele ligar a câmera ou compartilhar a tela, você recebe imagens: use para responder sobre o que vê.
+
+Ações e segurança:
+- Ao executar algo, confirme numa frase curta ("Feito, Senhor. A luz da sala está ligada.").
+- Nunca diga que fez algo que não fez. Se a ferramenta devolver erro, conte o erro em linguagem simples.
+- Antes de apagar, organizar, enviar ou mudar algo importante, peça confirmação e espere o sim.
 - Se não souber ou a busca não confirmar, diga isso. Nunca invente números.
 
 Memória:
@@ -141,6 +150,11 @@ class VoiceBridge:
             await self.session.send_realtime_input(
                 audio=types.Blob(data=pcm, mime_type="audio/pcm;rate=16000")
             )
+
+    async def send_image(self, jpeg: bytes) -> None:
+        """Quadro da câmera ou da tela (até ~1 por segundo) para o modelo ver."""
+        if self.session:
+            await self.session.send_realtime_input(video=types.Blob(data=jpeg, mime_type="image/jpeg"))
 
     async def send_text(self, text: str) -> None:
         if self.session:

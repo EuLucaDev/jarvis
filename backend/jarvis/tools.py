@@ -177,6 +177,60 @@ DECLARATIONS = [
         parameters={"type": "OBJECT", "properties": {"nome": {"type": S}}, "required": ["nome"]},
     ),
     types.FunctionDeclaration(
+        name="controlar_casa",
+        description="Liga ou desliga um dispositivo da casa pela Alexa (Voice Monkey): luzes, ventilador, ar, tomadas.",
+        parameters={
+            "type": "OBJECT",
+            "properties": {"dispositivo": {"type": S}, "acao": {"type": S, "enum": ["ligar", "desligar"]}},
+            "required": ["dispositivo", "acao"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="criar_lembrete",
+        description="Cria um lembrete no app Lembretes, que aparece no iPhone. Ex.: 'me lembre amanhã às 9h de ligar para o banco'.",
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "texto": {"type": S},
+                "quando": {"type": S, "description": "Data e hora ISO local, ex.: 2026-10-22T09:00. Omitir se não houver horário."},
+            },
+            "required": ["texto"],
+        },
+    ),
+    types.FunctionDeclaration(name="bloquear_tela", description="Apaga e bloqueia a tela do Mac.", parameters={"type": "OBJECT", "properties": {}}),
+    types.FunctionDeclaration(
+        name="ajustar_brilho",
+        description="Ajusta o brilho da tela de 5 a 100.",
+        parameters={"type": "OBJECT", "properties": {"nivel": {"type": N}}, "required": ["nivel"]},
+    ),
+    types.FunctionDeclaration(
+        name="arquivos",
+        description=(
+            "Pastas e arquivos dentro da pasta pessoal. Caminhos curtos: 'Projetos' (na Mesa), 'Downloads', "
+            "'Documentos/Contratos'. Ações: criar_pasta, abrir_pasta, buscar (procura pelo nome e abre), "
+            "organizar (separa por tipo; exige confirmação), compactar (gera .zip), lixeira (manda para a "
+            "Lixeira; exige confirmação). Para organizar e lixeira, chame primeiro sem confirmado, conte o "
+            "plano, e só repita com confirmado=true depois do sim dele."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "acao": {"type": S, "enum": ["criar_pasta", "abrir_pasta", "buscar", "organizar", "compactar", "lixeira"]},
+                "caminho": {"type": S, "description": "Pasta ou nome do arquivo."},
+                "confirmado": {"type": "BOOLEAN"},
+            },
+            "required": ["acao", "caminho"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="consultar_mercado",
+        description="Cotações e gráfico de bolsa, câmbio e cripto. Sem ativos, usa a carteira configurada. Símbolos do Yahoo: PETR4.SA, ^BVSP, BRL=X, BTC-USD.",
+        parameters={
+            "type": "OBJECT",
+            "properties": {"ativos": {"type": "ARRAY", "items": {"type": S}}, "periodo": {"type": S, "enum": ["1d", "5d", "1mo", "6mo", "1y"]}},
+        },
+    ),
+    types.FunctionDeclaration(
         name="fechar_cartoes",
         description="Remove todos os cartões da tela. Use quando pedirem para limpar ou fechar.",
         parameters={"type": "OBJECT", "properties": {}},
@@ -301,6 +355,7 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             data = await fetch_weather(args.get("cidade") or settings.city)
             if "erro" not in data:
                 await hub.show_card("clima", data)
+                data = {**data, "instrucao": "O cartão do clima já está na tela; não crie outro cartão."}
             return data
         if name == "pesquisar_web":
             res = await asyncio.to_thread(_search, args.get("consulta", ""), args.get("tipo", "geral"))
@@ -343,6 +398,38 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 "executar_atalho": lambda: system.run_shortcut(args.get("nome", ""), args.get("entrada")),
             }[name]
             return await asyncio.to_thread(fn)
+        if name in ("controlar_casa", "criar_lembrete", "bloquear_tela", "ajustar_brilho", "arquivos"):
+            from . import system
+
+            if name == "arquivos":
+                acao, cam, ok = args.get("acao"), args.get("caminho", ""), bool(args.get("confirmado"))
+                fn = {
+                    "criar_pasta": lambda: system.create_folder(cam),
+                    "abrir_pasta": lambda: system.open_folder(cam),
+                    "buscar": lambda: system.find_file(cam),
+                    "organizar": lambda: system.organize_folder(cam, ok),
+                    "compactar": lambda: system.zip_folder(cam),
+                    "lixeira": lambda: system.trash_item(cam, ok),
+                }.get(acao)
+                return await asyncio.to_thread(fn) if fn else {"erro": "Ação de arquivos desconhecida."}
+            fn = {
+                "controlar_casa": lambda: system.alexa(args.get("dispositivo", ""), args.get("acao", "ligar")),
+                "criar_lembrete": lambda: system.create_reminder(args.get("texto", ""), args.get("quando")),
+                "bloquear_tela": system.lock_screen,
+                "ajustar_brilho": lambda: system.brightness(args.get("nivel", 70)),
+            }[name]
+            return await asyncio.to_thread(fn)
+        if name == "consultar_mercado":
+            from . import market
+
+            cot = await market.quotes(args.get("ativos") or None, args.get("periodo", "1mo"))
+            if not cot:
+                return {"erro": "Não consegui as cotações agora."}
+            await hub.show_card("mercado", {"titulo": "Mercado agora", "periodo": args.get("periodo", "1mo"), "ativos": cot})
+            return {
+                "cotacoes": [{k: q[k] for k in ("nome", "preco", "moeda", "variacao")} for q in cot],
+                "instrucao": "O cartão do mercado já está na tela. Não chame mostrar_pesquisa; resuma em voz em até 2 frases.",
+            }
         if name == "ver_camera":
             from . import system
 

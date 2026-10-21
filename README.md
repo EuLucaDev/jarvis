@@ -25,7 +25,11 @@ Abra http://localhost:8000 no Chrome, clique no microfone (ou aperte espaço) e 
 - **Telas extras** (`/tela/centro`, `/tela/radar`…): abra em outro monitor em tela cheia; "Jarvis, ativar monitores" desbloqueia todas. A engrenagem monta os widgets.
 - **Painel** (`/admin`): chat por texto, briefing, fontes de dados (Gmail, agendas, radar), memórias, conversas, telas, integrações e sistema.
 - **Computador e casa**: abrir apps e sites, música, volume e Atalhos do macOS liberados no painel (ponte para iPhone, HomeKit e Alexa).
-- **Palavra de ativação**: ligue "Ativar com Jarvis" no HUD (Chrome).
+- **Palavra de ativação**: ícone de ouvido no HUD (Chrome).
+- **Presença**: cadastre seu rosto em Painel → Presença e ligue o ícone de rosto no HUD. Ele reconhece você, desbloqueia as telas e, de manhã, abre o bom dia sozinho.
+- **Visão**: ícones de câmera e de tela no HUD; o Jarvis passa a ver você ou a sua tela durante a conversa.
+- **Alexa**: Painel → Conexões → Alexa (precisa de conta grátis no Voice Monkey).
+- **Mercado**: "como está o mercado?" e Painel → Financeiro.
 
 ## Variáveis
 

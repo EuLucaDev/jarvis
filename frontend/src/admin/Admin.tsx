@@ -3,7 +3,17 @@ import {
   BrainCircuit,
   CalendarDays,
   Cpu,
-  Database,
+  LineChart,
+  ScanFace,
+  Camera,
+  Home,
+  BellRing,
+  Music,
+  Laptop,
+  Smartphone,
+  HeartPulse,
+  NotebookPen,
+  MessageCircle,
   Monitor,
   MessagesSquare,
   Newspaper,
@@ -23,11 +33,12 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api'
+import { loadFace, openCamera, readFace } from '../lib/face'
 import type { ScreenConfig, Telemetry } from '../lib/socket'
 import { useJarvis } from '../hud/useJarvis'
 import './admin.css'
 
-type Page = 'chat' | 'briefing' | 'fontes' | 'memorias' | 'conversas' | 'telas' | 'integracoes' | 'sistema'
+type Page = 'chat' | 'briefing' | 'conexoes' | 'memorias' | 'financeiro' | 'presenca' | 'conversas' | 'telas' | 'sistema'
 
 const NAV: { group: string; items: { id: Page; label: string; desc: string; icon: typeof Bot }[] }[] = [
   {
@@ -40,9 +51,10 @@ const NAV: { group: string; items: { id: Page; label: string; desc: string; icon
   {
     group: 'Dados e automação',
     items: [
-      { id: 'fontes', label: 'Fontes de dados', desc: 'Contas, agendas e radar', icon: Database },
+      { id: 'conexoes', label: 'Conexões', desc: 'E-mail, agenda, casa, mercado', icon: Plug },
       { id: 'memorias', label: 'Memórias', desc: 'O que ele sabe sobre você', icon: BrainCircuit },
-      { id: 'integracoes', label: 'Integrações', desc: 'Atalhos, casa e câmeras', icon: Plug },
+      { id: 'financeiro', label: 'Financeiro', desc: 'Bolsa, câmbio e cripto', icon: LineChart },
+      { id: 'presenca', label: 'Presença', desc: 'Reconhecimento facial', icon: ScanFace },
     ],
   },
   {
@@ -56,7 +68,8 @@ const NAV: { group: string; items: { id: Page; label: string; desc: string; icon
 ]
 
 function currentPage(): Page {
-  const p = location.pathname.split('/')[2] as Page
+  const raw = location.pathname.split('/')[2]
+  const p = (raw === 'fontes' || raw === 'integracoes' ? 'conexoes' : raw) as Page
   return NAV.some((g) => g.items.some((i) => i.id === p)) ? p : 'chat'
 }
 
@@ -120,11 +133,12 @@ export function Admin() {
         <div className="page-body" key={page}>
           {page === 'chat' && <ChatPage />}
           {page === 'briefing' && <BriefingPage />}
-          {page === 'fontes' && <FontesPage />}
+          {page === 'conexoes' && <ConexoesPage />}
+          {page === 'financeiro' && <FinanceiroPage />}
+          {page === 'presenca' && <PresencaPage />}
           {page === 'memorias' && <MemoriasPage />}
           {page === 'conversas' && <ConversasPage />}
           {page === 'telas' && <TelasPage screensLive={j.screens} />}
-          {page === 'integracoes' && <IntegracoesPage />}
           {page === 'sistema' && <SistemaPage t={j.telemetry} />}
         </div>
       </main>
@@ -404,7 +418,7 @@ function Kpi({ icon: Icon, label, value, sub, accent }: { icon: typeof Bot; labe
 
 /* ---------- fontes ---------- */
 
-function FontesPage() {
+function FontesPage({ only }: { only?: 'gmail' | 'agendas' | 'radar' }) {
   const [cfg, setCfg] = useState<Record<string, any> | null>(null)
   const [tests, setTests] = useState<{ fonte: string; ok: boolean; detalhe: string }[] | null>(null)
   const [saving, setSaving] = useState(false)
@@ -432,6 +446,7 @@ function FontesPage() {
 
   return (
     <div className="stack">
+      {(!only || only === 'gmail') && (
       <Panel
         title="Contas de e-mail"
         desc="Gmail por IMAP, só leitura. Crie uma senha de app em myaccount.google.com/apppasswords (precisa da verificação em duas etapas)."
@@ -459,6 +474,8 @@ function FontesPage() {
         ))}
       </Panel>
 
+      )}
+      {(!only || only === 'agendas') && (
       <Panel
         title="Agendas"
         desc="Google Agenda → Configurações da agenda → Endereço secreto em formato iCal. Cole o link que termina em .ics."
@@ -486,6 +503,8 @@ function FontesPage() {
         ))}
       </Panel>
 
+      )}
+      {(!only || only === 'radar') && (
       <Panel title="Radar e contexto" desc="Temas das notícias, fontes preferidas, cidade e ritmo de atualização.">
         <div className="form-grid">
           <label className="field-a span2">
@@ -519,6 +538,7 @@ function FontesPage() {
           </div>
         </div>
       </Panel>
+      )}
 
       {tests && (
         <Panel title="Resultado do teste">
@@ -724,7 +744,7 @@ function TelasPage({ screensLive }: { screensLive: ScreenConfig[] | null }) {
 
 /* ---------- integrações ---------- */
 
-function IntegracoesPage() {
+function IntegracoesPage({ only }: { only?: 'computador' | 'atalhos' | 'cameras' }) {
   const [disp, setDisp] = useState<string[] | null>(null)
   const [atalhos, setAtalhos] = useState<string[]>([])
   const [cams, setCams] = useState<{ id: string; nome: string; url: string }[]>([])
@@ -747,19 +767,22 @@ function IntegracoesPage() {
   }
   return (
     <div className="stack">
+      {(!only || only === 'computador') && (
       <Panel title="Computador" desc="Por voz ele abre apps e sites, controla a música (Spotify ou Música) e ajusta o volume. Não executa comandos livres.">
         <div className="chips">
-          {['Abrir app', 'Abrir site', 'Tocar / pausar', 'Próxima faixa', 'Volume'].map((c) => (
+          {['Abrir app', 'Abrir site', 'Tocar / pausar', 'Próxima faixa', 'Volume', 'Brilho', 'Bloquear tela', 'Criar pasta', 'Achar e abrir arquivo', 'Organizar pasta', 'Compactar', 'Lixeira (com confirmação)', 'Lembretes no iPhone'].map((c) => (
             <em className="tag" key={c}>
               {c}
             </em>
           ))}
         </div>
       </Panel>
+      )}
 
+      {(!only || only === 'atalhos') && (
       <Panel
         title="Atalhos: celular, casa e Alexa"
-        desc="O Jarvis roda Atalhos do macOS que você liberar aqui. Com eles você alcança o iPhone (mensagens, lembretes, localização), a Casa (HomeKit) e a Alexa (pelo app Alexa ou por um serviço como o Voice Monkey). Crie o atalho no app Atalhos com um nome claro, como “Apagar luzes da sala”."
+        desc="O Jarvis roda Atalhos do macOS que você liberar aqui. Com eles você alcança o iPhone (mensagens, localização) e a Casa (HomeKit). Para a Alexa, use a conexão Alexa. Crie o atalho no app Atalhos com um nome claro, como “Apagar luzes da sala”."
       >
         {disp === null ? (
           <p className="muted">Lendo seus atalhos…</p>
@@ -778,7 +801,9 @@ function IntegracoesPage() {
           </ul>
         )}
       </Panel>
+      )}
 
+      {(!only || only === 'cameras') && (
       <Panel
         title="Câmeras"
         desc="Endereço RTSP (rtsp://usuário:senha@ip:554/…) ou de foto HTTP. Ele mostra a imagem num cartão e consegue descrever o que vê. As telas extras podem ter um widget por câmera."
@@ -810,6 +835,7 @@ function IntegracoesPage() {
           </button>
         </div>
       </Panel>
+      )}
       {toastNode}
     </div>
   )
@@ -864,6 +890,407 @@ function SistemaPage({ t }: { t: Telemetry | null }) {
           ))}
         </ul>
       </Panel>
+    </div>
+  )
+}
+
+
+/* ---------- conexões ---------- */
+
+type ConnId = 'gmail' | 'agendas' | 'radar' | 'clima' | 'alexa' | 'atalhos' | 'lembretes' | 'cameras' | 'mercado' | 'computador' | 'musica'
+type Conn = { id: ConnId | string; nome: string; desc: string; cat: string; icon: typeof Bot; soon?: boolean }
+
+const CONNS: Conn[] = [
+  { id: 'gmail', nome: 'Gmail', desc: 'E-mails que pedem ação no briefing', cat: 'Comunicação', icon: Mail },
+  { id: 'agendas', nome: 'Google Agenda', desc: 'Compromissos de hoje e da semana', cat: 'Produtividade', icon: CalendarDays },
+  { id: 'lembretes', nome: 'Lembretes da Apple', desc: 'Lembretes que chegam no iPhone', cat: 'Produtividade', icon: BellRing },
+  { id: 'radar', nome: 'Notícias / radar', desc: 'Temas, fontes e cidade', cat: 'Informação', icon: Newspaper },
+  { id: 'clima', nome: 'Clima', desc: 'Open-Meteo, sem conta', cat: 'Informação', icon: Sun },
+  { id: 'mercado', nome: 'Cotações da bolsa', desc: 'Bolsa, câmbio e cripto', cat: 'Finanças', icon: LineChart },
+  { id: 'alexa', nome: 'Alexa', desc: 'Luzes e aparelhos pelo Voice Monkey', cat: 'Casa e dispositivos', icon: Home },
+  { id: 'atalhos', nome: 'Atalhos da Apple', desc: 'iPhone, HomeKit e automações', cat: 'Casa e dispositivos', icon: Smartphone },
+  { id: 'cameras', nome: 'Câmeras', desc: 'RTSP ou foto HTTP', cat: 'Casa e dispositivos', icon: Camera },
+  { id: 'computador', nome: 'Este Mac', desc: 'Apps, arquivos, volume, brilho', cat: 'Casa e dispositivos', icon: Laptop },
+  { id: 'musica', nome: 'Spotify / Música', desc: 'Tocar, pausar, próxima', cat: 'Casa e dispositivos', icon: Music },
+  { id: 'saude', nome: 'Apple Saúde / WHOOP', desc: 'Sono, treino e recuperação', cat: 'Saúde', icon: HeartPulse, soon: true },
+  { id: 'notion', nome: 'Notion / Obsidian', desc: 'Notas e bancos de dados', cat: 'Produtividade', icon: NotebookPen, soon: true },
+  { id: 'whatsapp', nome: 'WhatsApp / iMessage', desc: 'Mensagens novas e leitura', cat: 'Comunicação', icon: MessageCircle, soon: true },
+]
+const CATS = ['Todas', 'Produtividade', 'Comunicação', 'Informação', 'Finanças', 'Casa e dispositivos', 'Saúde']
+
+function ConexoesPage() {
+  const [cat, setCat] = useState('Todas')
+  const [open, setOpen] = useState<string | null>(null)
+  const [st, setSt] = useState<Record<string, boolean>>({})
+  const load = useCallback(async () => {
+    const [b, alexa, atalhos, cams] = await Promise.all([
+      api('/api/ajustes/briefing'),
+      api('/api/ajustes/alexa'),
+      api<string[]>('/api/ajustes/atalhos'),
+      api<any[]>('/api/ajustes/cameras'),
+    ])
+    setSt({
+      gmail: (b.gmail ?? []).length > 0,
+      agendas: (b.agendas ?? []).length > 0,
+      radar: true,
+      clima: !!b.clima,
+      alexa: !!alexa.token && (alexa.dispositivos ?? []).length > 0,
+      atalhos: atalhos.length > 0,
+      cameras: cams.length > 0,
+      lembretes: true,
+      mercado: true,
+      computador: true,
+      musica: true,
+    })
+  }, [])
+  useEffect(() => {
+    load()
+  }, [load])
+  const list = CONNS.filter((c) => cat === 'Todas' || c.cat === cat)
+  const conn = CONNS.find((c) => c.id === open)
+  return (
+    <div className="stack wide-stack">
+      <p className="lead">O Jarvis lê as suas fontes para entender a sua rotina. Você escolhe o que conectar e controla cada conexão. Tudo fica neste Mac.</p>
+      <div className="seg cats">
+        {CATS.map((c) => (
+          <button key={c} className={cat === c ? 'on' : ''} onClick={() => setCat(c)}>
+            {c}
+          </button>
+        ))}
+      </div>
+      <div className="conn-grid">
+        {list.map((c) => {
+          const on = st[c.id]
+          return (
+            <button key={c.id} className={`conn ${c.soon ? 'soon' : ''}`} onClick={() => !c.soon && setOpen(c.id)} disabled={c.soon}>
+              <span className="conn-ico">
+                <c.icon size={16} strokeWidth={1.6} />
+              </span>
+              <span className="conn-txt">
+                <b>{c.nome}</b>
+                <small className={on ? 'ok' : ''}>{c.soon ? c.desc : on ? 'Conectada · operacional' : c.desc}</small>
+              </span>
+              <em className={on ? 'ok' : ''}>{c.soon ? 'Em breve' : on ? '✓ Conectado' : '+ Adicionar'}</em>
+            </button>
+          )
+        })}
+      </div>
+      {conn && (
+        <aside className="drawer-a" role="dialog" aria-label={conn.nome}>
+          <header>
+            <h2>{conn.nome}</h2>
+            <button
+              className="icon"
+              onClick={() => {
+                setOpen(null)
+                load()
+              }}
+              aria-label="Fechar"
+            >
+              <X size={16} />
+            </button>
+          </header>
+          <div className="drawer-body">
+            {(conn.id === 'gmail' || conn.id === 'agendas' || conn.id === 'radar') && <FontesPage only={conn.id} />}
+            {conn.id === 'clima' && <FontesPage only="radar" />}
+            {(conn.id === 'atalhos' || conn.id === 'cameras' || conn.id === 'computador') && <IntegracoesPage only={conn.id} />}
+            {conn.id === 'alexa' && <AlexaForm />}
+            {conn.id === 'mercado' && <MercadoForm />}
+            {conn.id === 'lembretes' && (
+              <Panel title="Lembretes da Apple" desc="Diga “me lembra amanhã às 9h de ligar para o banco”. O lembrete vai para o app Lembretes e aparece no iPhone pelo iCloud. Na primeira vez, o macOS pede permissão para o Terminal controlar o Lembretes.">
+                <span />
+              </Panel>
+            )}
+            {conn.id === 'musica' && (
+              <Panel title="Spotify / Música" desc="Diga “pausa a música”, “próxima” ou “volta”. Funciona com o app que estiver aberto: Spotify ou Música.">
+                <span />
+              </Panel>
+            )}
+          </div>
+        </aside>
+      )}
+    </div>
+  )
+}
+
+function AlexaForm() {
+  const [cfg, setCfg] = useState<{ token: string; dispositivos: { nome: string; ligar: string; desligar: string }[] } | null>(null)
+  const [toast, toastNode] = useToast()
+  useEffect(() => {
+    api('/api/ajustes/alexa').then(setCfg)
+  }, [])
+  if (!cfg) return <p className="muted">Carregando…</p>
+  const devs = cfg.dispositivos ?? []
+  const upd = (i: number, k: string, v: string) => setCfg({ ...cfg, dispositivos: devs.map((d, j) => (j === i ? { ...d, [k]: v } : d)) })
+  const save = async () => {
+    setCfg(await api('/api/ajustes/alexa', { method: 'PUT', json: { ...cfg, dispositivos: devs.filter((d) => d.nome.trim()) } }))
+    toast('Alexa salva')
+  }
+  return (
+    <div className="stack">
+      <Panel title="Como ligar a Alexa" desc="1. Crie uma conta grátis em voicemonkey.io e ative a skill Voice Monkey no app Alexa. 2. No painel do Voice Monkey, crie um “dispositivo” para cada ação (ex.: luz-sala-on, luz-sala-off) e uma rotina na Alexa para cada um. 3. Cole o token abaixo e cadastre os aparelhos com os IDs.">
+        <label className="field-a">
+          <span>Token do Voice Monkey</span>
+          <input type="password" value={cfg.token} onChange={(e) => setCfg({ ...cfg, token: e.target.value })} placeholder="Cole o token da API" autoComplete="off" />
+        </label>
+      </Panel>
+      <Panel
+        title="Aparelhos"
+        desc="O nome é como você fala (“luz da sala”). Os IDs são os do Voice Monkey."
+        actions={
+          <button className="btn" onClick={() => setCfg({ ...cfg, dispositivos: [...devs, { nome: '', ligar: '', desligar: '' }] })}>
+            <Plus size={14} /> Adicionar aparelho
+          </button>
+        }
+      >
+        {devs.length === 0 && <p className="muted">Nenhum aparelho.</p>}
+        {devs.map((d, i) => (
+          <div className="form-row" key={i}>
+            <label className="field-a narrow">
+              <span>Nome</span>
+              <input value={d.nome} onChange={(e) => upd(i, 'nome', e.target.value)} placeholder="luz da sala" />
+            </label>
+            <label className="field-a narrow">
+              <span>ID para ligar</span>
+              <input value={d.ligar} onChange={(e) => upd(i, 'ligar', e.target.value)} placeholder="luz-sala-on" />
+            </label>
+            <label className="field-a narrow">
+              <span>ID para desligar</span>
+              <input value={d.desligar} onChange={(e) => upd(i, 'desligar', e.target.value)} placeholder="luz-sala-off" />
+            </label>
+            <button className="icon" onClick={() => setCfg({ ...cfg, dispositivos: devs.filter((_, j) => j !== i) })} aria-label="Remover aparelho">
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+        <div className="row end">
+          <button className="btn primary" onClick={save}>
+            Salvar Alexa
+          </button>
+        </div>
+      </Panel>
+      {toastNode}
+    </div>
+  )
+}
+
+function MercadoForm() {
+  const [ativos, setAtivos] = useState<string>('')
+  const [toast, toastNode] = useToast()
+  useEffect(() => {
+    api('/api/ajustes/mercado').then((m) => setAtivos((m.ativos ?? []).join(', ')))
+  }, [])
+  const save = async () => {
+    await api('/api/ajustes/mercado', { method: 'PUT', json: { ativos: ativos.split(',').map((a) => a.trim().toUpperCase()).filter(Boolean) } })
+    toast('Carteira salva')
+  }
+  return (
+    <div className="stack">
+      <Panel title="Carteira acompanhada" desc="Símbolos do Yahoo Finance separados por vírgula. Ações brasileiras terminam em .SA (PETR4.SA), dólar é BRL=X, Ibovespa é ^BVSP, Bitcoin é BTC-USD.">
+        <label className="field-a">
+          <span>Ativos</span>
+          <input value={ativos} onChange={(e) => setAtivos(e.target.value)} />
+        </label>
+        <div className="row end">
+          <button className="btn primary" onClick={save}>
+            Salvar carteira
+          </button>
+        </div>
+      </Panel>
+      {toastNode}
+    </div>
+  )
+}
+
+/* ---------- financeiro ---------- */
+
+const PERIODOS = [
+  { id: '1d', nome: 'Hoje' },
+  { id: '5d', nome: '5 dias' },
+  { id: '1mo', nome: '1 mês' },
+  { id: '6mo', nome: '6 meses' },
+  { id: '1y', nome: '1 ano' },
+]
+
+function FinanceiroPage() {
+  const [periodo, setPeriodo] = useState('1mo')
+  const [dados, setDados] = useState<any[] | null>(null)
+  useEffect(() => {
+    setDados(null)
+    api<any[]>(`/api/mercado?periodo=${periodo}`).then(setDados).catch(() => setDados([]))
+  }, [periodo])
+  return (
+    <div className="stack wide-stack">
+      <div className="row between">
+        <p className="lead">Cotações da sua carteira. Cada número vem do Yahoo Finance; o Jarvis organiza, não inventa.</p>
+        <div className="seg">
+          {PERIODOS.map((p) => (
+            <button key={p.id} className={periodo === p.id ? 'on' : ''} onClick={() => setPeriodo(p.id)}>
+              {p.nome}
+            </button>
+          ))}
+        </div>
+      </div>
+      {dados === null ? (
+        <p className="muted">Buscando cotações…</p>
+      ) : dados.length === 0 ? (
+        <Panel title="Sem cotações agora" desc="O Yahoo Finance não respondeu. Tente de novo em instantes ou revise a carteira em Conexões.">
+          <span />
+        </Panel>
+      ) : (
+        <div className="fin-grid">
+          {dados.map((a) => (
+            <section className="panel-a fin" key={a.simbolo}>
+              <header>
+                <div>
+                  <h2>{a.nome}</h2>
+                  <p>{a.simbolo}</p>
+                </div>
+                <em className={`tag ${(a.variacao ?? 0) >= 0 ? 'pos' : 'neg'}`}>
+                  {a.variacao == null ? '—' : `${a.variacao > 0 ? '+' : ''}${a.variacao.toLocaleString('pt-BR')}% no dia`}
+                </em>
+              </header>
+              <b className="fin-price">
+                {a.preco.toLocaleString('pt-BR', { minimumFractionDigits: a.preco < 100 ? 2 : 0, maximumFractionDigits: a.preco < 100 ? 2 : 0 })}
+                <small> {a.moeda}</small>
+              </b>
+              <LineMini serie={a.serie} />
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LineMini({ serie }: { serie: number[] }) {
+  if (!serie || serie.length < 2) return null
+  const min = Math.min(...serie)
+  const max = Math.max(...serie)
+  const w = 300
+  const h = 90
+  const pts = serie.map((v, i) => [(i / (serie.length - 1)) * w, h - 6 - ((v - min) / (max - min || 1)) * (h - 12)])
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+  const up = serie.at(-1)! >= serie[0]
+  return (
+    <svg className={`line-mini ${up ? 'up' : 'down'}`} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
+      <path d={`${d} L${w},${h} L0,${h} Z`} className="area" />
+      <path d={d} className="stroke" />
+    </svg>
+  )
+}
+
+/* ---------- presença ---------- */
+
+function PresencaPage() {
+  const [info, setInfo] = useState<{ nome: string; amostras: number } | null>(null)
+  const [cfg, setCfg] = useState<{ briefing_auto: boolean } | null>(null)
+  const [cam, setCam] = useState(false)
+  const [status, setStatus] = useState<string>('')
+  const [busy, setBusy] = useState(false)
+  const video = useRef<HTMLVideoElement>(null)
+  const stream = useRef<MediaStream | null>(null)
+  const load = useCallback(() => {
+    api('/api/rosto').then(setInfo)
+    api('/api/ajustes/presenca').then(setCfg)
+  }, [])
+  useEffect(() => {
+    load()
+    return () => stream.current?.getTracks().forEach((t) => t.stop())
+  }, [load])
+
+  const startCam = async () => {
+    try {
+      setStatus('Carregando o modelo de rosto…')
+      await loadFace()
+      stream.current = await openCamera(640)
+      video.current!.srcObject = stream.current
+      await video.current!.play()
+      setCam(true)
+      setStatus('Olhe para a câmera, com o rosto bem iluminado.')
+    } catch {
+      setStatus('Não consegui abrir a câmera. Libere o acesso no navegador.')
+    }
+  }
+
+  const enroll = async () => {
+    if (!video.current) return
+    setBusy(true)
+    const got: number[][] = []
+    for (let i = 0; i < 12 && got.length < 6; i++) {
+      setStatus(`Capturando amostra ${got.length + 1} de 6… mexa a cabeça devagar.`)
+      const f = await readFace(video.current)
+      if (f && f.score > 0.7) got.push(f.descriptor)
+      await new Promise((r) => setTimeout(r, 450))
+    }
+    if (got.length < 3) {
+      setStatus('Não vi seu rosto com clareza. Chegue mais perto da luz e tente de novo.')
+    } else {
+      await api('/api/rosto', { method: 'PUT', json: { descritores: got } })
+      setStatus(`Pronto: ${got.length} amostras salvas. Ligue a Presença no HUD (ícone de rosto).`)
+      load()
+    }
+    setBusy(false)
+  }
+
+  const test = async () => {
+    if (!video.current) return
+    const r = await api<{ descritores: number[][] }>('/api/rosto')
+    const f = await readFace(video.current)
+    if (!f) return setStatus('Nenhum rosto na imagem.')
+    const { distance, MATCH } = await import('../lib/face')
+    const d = distance(f.descriptor, r.descritores)
+    setStatus(d < MATCH ? `Reconhecido (distância ${d.toFixed(2)}).` : `Não reconhecido (distância ${d.toFixed(2)}; precisa ser menor que ${MATCH}).`)
+  }
+
+  return (
+    <div className="stack">
+      <Panel title="Reconhecimento facial" desc="O HUD procura um rosto pela câmera. Se for você, desbloqueia as telas e, de manhã, abre o briefing sozinho. Roda no navegador; só os números do rosto ficam salvos neste Mac.">
+        <div className="face-enroll">
+          <video ref={video} muted playsInline className={cam ? 'on' : ''} />
+          {!cam && <div className="face-ph">Câmera desligada</div>}
+        </div>
+        <p className="muted">{status || (info?.amostras ? `${info.amostras} amostras cadastradas para ${info.nome}.` : 'Nenhum rosto cadastrado ainda.')}</p>
+        <div className="row">
+          {!cam ? (
+            <button className="btn primary" onClick={startCam}>
+              <Camera size={14} /> Ligar câmera
+            </button>
+          ) : (
+            <>
+              <button className="btn primary" onClick={enroll} disabled={busy}>
+                <ScanFace size={14} /> {info?.amostras ? 'Cadastrar de novo' : 'Cadastrar meu rosto'}
+              </button>
+              {!!info?.amostras && (
+                <button className="btn" onClick={test} disabled={busy}>
+                  Testar reconhecimento
+                </button>
+              )}
+            </>
+          )}
+          {!!info?.amostras && (
+            <button
+              className="btn"
+              onClick={async () => {
+                await api('/api/rosto', { method: 'DELETE' })
+                load()
+                setStatus('Rosto apagado.')
+              }}
+            >
+              <Trash2 size={14} /> Apagar rosto
+            </button>
+          )}
+        </div>
+      </Panel>
+      {cfg && (
+        <Panel title="Ao reconhecer você">
+          <Switch
+            on={!!cfg.briefing_auto}
+            onChange={async (v) => setCfg(await api('/api/ajustes/presenca', { method: 'PUT', json: { ...cfg, briefing_auto: v } }))}
+            label="Abrir o briefing de bom dia sozinho (uma vez por dia, entre 5h e 12h)"
+          />
+        </Panel>
+      )}
     </div>
   )
 }

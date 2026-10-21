@@ -33,6 +33,10 @@ export class Mic {
     return this.an ? Math.min(1, rms(this.an, this.buf) * 6) : 0
   }
 
+  analyser() {
+    return this.an ?? null
+  }
+
   stop() {
     this.node?.port.close()
     this.stream?.getTracks().forEach((t) => t.stop())
@@ -101,5 +105,9 @@ export class Player {
 
   level() {
     return Math.min(1, rms(this.an, this.buf) * 4)
+  }
+
+  analyser() {
+    return this.an
   }
 }

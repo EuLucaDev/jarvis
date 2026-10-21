@@ -12,6 +12,7 @@ export type ServerEvent =
   | { type: 'cards.clear' }
   | { type: 'audio.flush' }
   | { type: 'sequence.plan'; palavras: number[] }
+  | { type: 'presenca'; etapa: string }
   | ({ type: 'telemetria' } & Telemetry)
   | { type: 'telas.config'; telas: ScreenConfig[] }
 
@@ -36,7 +37,7 @@ export type VoiceStatus = {
 
 export type Card = {
   id: string
-  kind: 'pesquisa' | 'clima' | 'lista' | 'emails' | 'agenda' | 'noticia' | 'carregando' | 'camera'
+  kind: 'pesquisa' | 'clima' | 'lista' | 'emails' | 'agenda' | 'noticia' | 'carregando' | 'camera' | 'mercado'
   at: string
   data: Record<string, any>
 }
