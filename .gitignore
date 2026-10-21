@@ -9,3 +9,5 @@ __pycache__/
 .DS_Store
 .taste-skill/
 data/
+frontend/public/models/
+frontend/public/mediapipe/

@@ -99,6 +99,13 @@ async def _news(cfg: dict) -> list[dict]:
     ]
 
 
+def _health() -> dict | None:
+    from .sources import health
+
+    data = store.get("saude")
+    return health.summary(data) if data else None
+
+
 def _fallback_script(data: dict) -> dict:
     segs = []
     c = data.get("clima")
@@ -115,7 +122,7 @@ def _fallback_script(data: dict) -> dict:
 
 
 async def _script(data: dict) -> dict:
-    keys = ["clima", "emails", "agenda"] + [f"noticia:{n['tema']}" for n in data["noticias"]]
+    keys = ["clima", "emails", "agenda"] + (["saude"] if data.get("saude") else []) + [f"noticia:{n['tema']}" for n in data["noticias"]]
     schema = {
         "type": "OBJECT",
         "properties": {
@@ -142,13 +149,14 @@ async def _script(data: dict) -> dict:
         "agenda": data["agenda"],
         "noticias": [{"tema": n["tema"], "itens": [{k: i.get(k) for k in ("titulo", "fonte", "trecho")} for i in n["itens"]]} for n in data["noticias"]],
         "configurado": data["configurado"],
+        "saude": data.get("saude"),
     }
     try:
         return await llm.generate_json(
             f"""Você é J.A.R.V.I.S. e vai ler em voz alta o briefing da manhã de {settings.user_name}.
 Hoje é {data['hoje']}. Escreva em português do Brasil, falado, natural, com um toque de humor seco.
 Duração total de 60 a 90 segundos. Números por extenso só quando ficar mais natural.
-Ordem: comece pelo que exige ação (e-mails importantes, compromissos), depois clima, depois notícias.
+Ordem: comece pelo que exige ação (e-mails importantes, compromissos), depois clima, depois saúde (sono e passos de ontem, se houver), depois notícias.
 Um segmento por cartão; cada segmento com 1 a 3 frases. Não cite links. Não invente nada além dos dados.
 Se e-mails ou agenda não estiverem configurados, não crie segmento para eles.
 Feche com uma frase curta de foco para o dia.
@@ -201,6 +209,7 @@ async def build(force: bool = False) -> dict:
         "agenda_semana": semana,
         "noticias": noticias,
         "configurado": {"gmail": bool(cfg.get("gmail")), "agenda": bool(cfg.get("agendas"))},
+        "saude": _health(),
         "erros": erros,
     }
     data["roteiro"] = await _script(data)
@@ -217,6 +226,8 @@ def card_for(key: str, data: dict) -> tuple[str, dict] | None:
         return "emails", {"titulo": "Pedem sua atenção", "total": e["total"], "itens": e["atencao"], "outros": e["outros"], "configurado": data["configurado"]["gmail"]}
     if key == "agenda":
         return "agenda", {"titulo": "Agenda de hoje", "eventos": data["agenda"], "hoje": data["hoje"], "configurado": data["configurado"]["agenda"]}
+    if key == "saude" and data.get("saude"):
+        return "saude", data["saude"]
     if key.startswith("noticia:"):
         tema = key.split(":", 1)[1]
         for n in data["noticias"]:

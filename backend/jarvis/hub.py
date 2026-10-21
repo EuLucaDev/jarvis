@@ -21,6 +21,7 @@ class Hub:
         self._lock = asyncio.Lock()
         # cartões do briefing que entram durante a fala: (palavras antes do cartão, tipo, dados)
         self.pending_sequence: list[tuple[int, str, dict[str, Any]]] = []
+        self.voice: Any = None  # VoiceBridge ao vivo, para avisos falados
 
     async def join(self, ws: WebSocket, info: dict[str, Any]) -> None:
         self.clients[ws] = info

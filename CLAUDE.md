@@ -30,6 +30,8 @@ Abrir `http://localhost:8000` no Chrome (o microfone precisa de permissão do na
 - `frontend/src/lib/wake.ts`: palavra de ativação "Jarvis" pelo reconhecimento de fala do Chrome.
 - `frontend/src/lib/face.ts` + `hud/Presence.tsx`: reconhecimento facial local com face-api (modelos em `frontend/public/models`); descritores salvos em `ajustes.rosto`.
 - `backend/jarvis/market.py`: cotações grátis do Yahoo Finance.
+- `backend/jarvis/alerts.py`: verificação a cada minuto (agenda, e-mails urgentes novos, mercado); avisos no HUD, notificação do Mac e fala; horário de silêncio. Mensagens "[Aviso do sistema…]" entram na sessão de voz para ele anunciar.
+- Modelos de visão (rosto e gestos) ficam fora do git: `npm run modelos` copia/baixa para `frontend/public` (o `instalar.sh` já roda).
 
 ### Segurança das ações
 
@@ -66,7 +68,8 @@ Segue o Jarvis de referência (`docs/referencia-lucas-victor.md`): azul-noite, a
 | 6 | Computador (apps, sites, mídia, volume), Atalhos do macOS como ponte para celular/HomeKit/Alexa, câmeras, palavra de ativação, telemetria | feito; falta o Luca criar/liberar Atalhos e cadastrar câmeras |
 | 7 | Mescla com o Jarvis de referência: HUD em 3 colunas, telas com abas, Conexões em grade, Financeiro (Yahoo Finance), Alexa (Voice Monkey), Lembretes da Apple, arquivos com confirmação, brilho/bloqueio, visão (câmera e tela vão para a Gemini), presença com reconhecimento facial local (face-api) e bom dia automático | feito; reconhecimento facial, câmera e Alexa aguardam teste do Luca |
 | 8 | Iniciar sozinho com o Mac: serviço do servidor, abertura das telas por monitor no login, app Jarvis, painel Monitores | feito |
-| 9 | Ideias seguintes: alertas proativos, saúde (Apple Saúde/WHOOP), Notion/Obsidian, iMessage, gestos pela câmera, acesso remoto via Coolify | |
+| 9 | Alertas proativos (`alerts.py`), iMessage (`sources/imessage.py`, exige Acesso Total ao Disco para o Python do serviço), notas Obsidian/Notion (`sources/notes.py`), Apple Saúde por exportação (`sources/health.py`, página Saúde), gestos pela câmera (MediaPipe, `lib/gestures.ts`), filtro da transcrição sem áudio | feito |
+| 10 | Pendente de decisão: acesso fora de casa (túnel Cloudflare + login); WhatsApp (sem API grátis confiável) | |
 
 ## Convenções
 

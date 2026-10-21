@@ -110,4 +110,8 @@ export class Player {
   analyser() {
     return this.an
   }
+
+  context() {
+    return this.ctx
+  }
 }

@@ -9,7 +9,9 @@ import {
   CloudSun,
   Droplets,
   ExternalLink,
+  HeartPulse,
   LineChart,
+  MessageCircle,
   ListChecks,
   Loader2,
   Mail,
@@ -65,6 +67,8 @@ function labelFor(kind: Card['kind']) {
     carregando: 'Resumo executivo',
     camera: 'Câmera · Ao vivo',
     mercado: 'Mercado · Cotações',
+    mensagens: 'Mensagens · iMessage',
+    saude: 'Saúde · Apple',
   }[kind]
 }
 
@@ -384,6 +388,68 @@ function Mercado({ card, onClose }: { card: Card; onClose?: () => void }) {
   )
 }
 
+function Mensagens({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const msgs: any[] = card.data.mensagens ?? []
+  return (
+    <>
+      <Head card={card} icon={MessageCircle} onClose={onClose} />
+      {msgs.length === 0 ? (
+        <p className="card-ref">Nenhuma mensagem nova.</p>
+      ) : (
+        <ul className="list">
+          {msgs.slice(0, 6).map((m, i) => (
+            <li key={i}>
+              <div>
+                <strong>{m.grupo ? `${m.de} · ${m.grupo}` : m.de}</strong>
+                <span className="muted">{m.texto}</span>
+              </div>
+              <span className="pill">{m.quando}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <footer className="card-foot">
+        <span>{msgs.length} {msgs.length === 1 ? 'mensagem' : 'mensagens'}</span>
+        <span>{card.at}</span>
+      </footer>
+    </>
+  )
+}
+
+const n0 = (v: number | null | undefined, d = 0) => (v == null ? '—' : v.toLocaleString('pt-BR', { maximumFractionDigits: d }))
+
+function Saude({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const d = card.data
+  const t = d.ultimo_treino
+  return (
+    <>
+      <Head card={{ ...card, data: { categoria: 'Saúde · Apple', titulo: d.dia ? `Seu dia ${d.dia.split('-').reverse().slice(0, 2).join('/')}` : 'Saúde' } }} icon={HeartPulse} onClose={onClose} />
+      <ul className="weather-stats health">
+        <li>
+          <b>{n0(d.passos)}</b> passos
+        </li>
+        <li>
+          <b>{n0(d.sono_h, 1)} h</b> de sono
+        </li>
+        <li>
+          <b>{n0(d.fc_repouso)}</b> bpm repouso
+        </li>
+        <li>
+          <b>{n0(d.vfc, 1)} ms</b> VFC
+        </li>
+      </ul>
+      <p className="card-ref">
+        Média de 7 dias: {n0(d.media7_passos)} passos e {n0(d.media7_sono, 1)} h de sono
+        {t ? ` · último treino: ${t.tipo.replace(/([a-z])([A-Z])/g, '$1 $2')}, ${t.min} min` : ''}
+      </p>
+      <footer className="card-foot">
+        <span>Exportado em {d.exportado_em}</span>
+        <span>Não substitui avaliação médica</span>
+      </footer>
+    </>
+  )
+}
+
 export function CardView({ card, onClose }: { card: Card; onClose?: () => void }) {
   return (
     <article className={`card card-${card.kind}`} key={card.id}>
@@ -396,6 +462,8 @@ export function CardView({ card, onClose }: { card: Card; onClose?: () => void }
       {card.kind === 'carregando' && <Carregando card={card} />}
       {card.kind === 'camera' && <CameraCard card={card} onClose={onClose} />}
       {card.kind === 'mercado' && <Mercado card={card} onClose={onClose} />}
+      {card.kind === 'mensagens' && <Mensagens card={card} onClose={onClose} />}
+      {card.kind === 'saude' && <Saude card={card} onClose={onClose} />}
     </article>
   )
 }
@@ -412,7 +480,9 @@ export function CardChip({ card, active, onClick }: { card: Card; active: boolea
           ? 'Câmera'
           : card.kind === 'mercado'
             ? 'Mercado'
-            : (d.categoria ?? labelFor(card.kind))
+            : card.kind === 'mensagens' || card.kind === 'saude'
+              ? labelFor(card.kind)
+              : (d.categoria ?? labelFor(card.kind))
   const title =
     card.kind === 'clima'
       ? d.condicao
@@ -428,7 +498,11 @@ export function CardChip({ card, active, onClick }: { card: Card; active: boolea
               ? d.nome
               : card.kind === 'mercado'
                 ? (d.ativos ?? []).slice(0, 2).map((a: any) => `${a.nome} ${a.variacao > 0 ? '+' : ''}${a.variacao}%`).join(' · ')
-                : d.titulo
+                : card.kind === 'mensagens'
+                  ? `${d.total ?? 0} de ${(d.mensagens ?? []).map((m: any) => m.de).slice(0, 2).join(', ') || '—'}`
+                  : card.kind === 'saude'
+                    ? `${n0(d.passos)} passos · ${n0(d.sono_h, 1)} h sono`
+                    : d.titulo
   const big =
     card.kind === 'clima'
       ? `${num(d.temperatura)}°`

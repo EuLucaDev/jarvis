@@ -13,8 +13,11 @@ export type ServerEvent =
   | { type: 'audio.flush' }
   | { type: 'sequence.plan'; palavras: number[] }
   | { type: 'presenca'; etapa: string }
+  | ({ type: 'alerta' } & Alert)
   | ({ type: 'telemetria' } & Telemetry)
   | { type: 'telas.config'; telas: ScreenConfig[] }
+
+export type Alert = { id: string; titulo: string; texto: string; nivel: string; at: string; silencioso?: boolean }
 
 export type Telemetry = {
   cpu: number
@@ -37,7 +40,7 @@ export type VoiceStatus = {
 
 export type Card = {
   id: string
-  kind: 'pesquisa' | 'clima' | 'lista' | 'emails' | 'agenda' | 'noticia' | 'carregando' | 'camera' | 'mercado'
+  kind: 'pesquisa' | 'clima' | 'lista' | 'emails' | 'agenda' | 'noticia' | 'carregando' | 'camera' | 'mercado' | 'mensagens' | 'saude'
   at: string
   data: Record<string, any>
 }

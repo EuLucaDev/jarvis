@@ -10,6 +10,7 @@ from google.genai import types
 
 from .config import settings
 from .hub import hub
+from . import store
 from .memory import TIPOS, memory
 from .sources import news as news_src
 
@@ -231,6 +232,44 @@ DECLARATIONS = [
         },
     ),
     types.FunctionDeclaration(
+        name="ler_mensagens",
+        description="Lê mensagens recentes do iMessage/SMS do Mac (por padrão só as não lidas) e mostra num cartão. Pode filtrar por contato.",
+        parameters={
+            "type": "OBJECT",
+            "properties": {"nao_lidas": {"type": "BOOLEAN"}, "de": {"type": S, "description": "Nome do contato ou grupo, opcional."}},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="enviar_mensagem",
+        description=(
+            "Envia iMessage pelo app Mensagens. Sempre chame primeiro sem confirmado, leia o destinatário e o texto "
+            "para ele, e só repita com confirmado=true depois do sim."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {"para": {"type": S, "description": "Nome do contato ou número."}, "texto": {"type": S}, "confirmado": {"type": "BOOLEAN"}},
+            "required": ["para", "texto"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="notas",
+        description="Notas do Obsidian (local) e do Notion. Ações: buscar (procura), ler (abre uma nota do Obsidian pelo título), criar (cria ou acrescenta uma nota no Obsidian, na pasta Jarvis).",
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "acao": {"type": S, "enum": ["buscar", "ler", "criar"]},
+                "consulta": {"type": S, "description": "Termo de busca ou título da nota."},
+                "texto": {"type": S, "description": "Conteúdo, para criar."},
+            },
+            "required": ["acao", "consulta"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="consultar_saude",
+        description="Dados do app Saúde do iPhone (passos, sono, frequência em repouso, VFC, treinos) e cartão com o resumo. Os dados são da última exportação.",
+        parameters={"type": "OBJECT", "properties": {}},
+    ),
+    types.FunctionDeclaration(
         name="fechar_cartoes",
         description="Remove todos os cartões da tela. Use quando pedirem para limpar ou fechar.",
         parameters={"type": "OBJECT", "properties": {}},
@@ -430,6 +469,39 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 "cotacoes": [{k: q[k] for k in ("nome", "preco", "moeda", "variacao")} for q in cot],
                 "instrucao": "O cartão do mercado já está na tela. Não chame mostrar_pesquisa; resuma em voz em até 2 frases.",
             }
+        if name in ("ler_mensagens", "enviar_mensagem"):
+            from .sources import imessage
+
+            if name == "ler_mensagens":
+                res = await asyncio.to_thread(imessage.recent, args.get("nao_lidas", True), 15, args.get("de"))
+                if "erro" not in res:
+                    await hub.show_card("mensagens", {"titulo": "Mensagens novas" if args.get("nao_lidas", True) else "Mensagens recentes", **res})
+                    res["instrucao"] = "O cartão já está na tela. Resuma quem escreveu e o essencial; não leia tudo."
+                return res
+            return await asyncio.to_thread(imessage.send, args.get("para", ""), args.get("texto", ""), bool(args.get("confirmado")))
+        if name == "notas":
+            from .sources import notes
+
+            acao, q = args.get("acao"), args.get("consulta", "")
+            if acao == "buscar":
+                res = await asyncio.to_thread(notes.search, q)
+                if res.get("notas"):
+                    await hub.show_card("lista", {"titulo": f"Notas sobre {q}", "categoria": "Notas · Busca", "itens": [
+                        {"titulo": n.get("titulo"), "detalhe": n.get("trecho") or n.get("url") or "", "etiqueta": n.get("fonte")} for n in res["notas"]
+                    ]})
+                return res
+            if acao == "ler":
+                return await asyncio.to_thread(notes.read_obsidian, q)
+            return await asyncio.to_thread(notes.create_obsidian, q, args.get("texto", ""))
+        if name == "consultar_saude":
+            from .sources import health
+
+            data = store.get("saude")
+            if not data:
+                return {"erro": "Sem dados de saúde. Exporte do app Saúde do iPhone e importe em Painel → Saúde."}
+            res = health.summary(data)
+            await hub.show_card("saude", res)
+            return {**res, "instrucao": "O cartão já está na tela; comente o principal em até 2 frases. Não é avaliação médica."}
         if name == "ver_camera":
             from . import system
 

@@ -9,7 +9,7 @@ import logging
 import time
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -54,6 +54,9 @@ async def startup():
     asyncio.create_task(memory.reflect_pending())
     asyncio.create_task(briefing.refresh_loop())
     asyncio.create_task(telemetry_loop())
+    from . import alerts
+
+    asyncio.create_task(alerts.loop())
     log.info("Jarvis no ar em http://localhost:%s", settings.port)
 
 
@@ -136,7 +139,7 @@ async def apresentar_briefing():
 
 # ---------- ajustes ----------
 
-EDITABLE = {"briefing", "telas", "cameras", "atalhos", "alexa", "mercado", "presenca", "monitores"}
+EDITABLE = {"briefing", "telas", "cameras", "atalhos", "alexa", "mercado", "presenca", "monitores", "alertas", "notas"}
 
 
 @app.get("/api/ajustes/{chave}")
@@ -182,6 +185,84 @@ async def testar_fontes():
 @app.get("/api/atalhos/disponiveis")
 async def atalhos_disponiveis():
     return await asyncio.to_thread(system.shortcuts_available)
+
+
+# ---------- saúde, notas, mensagens ----------
+
+
+@app.get("/api/saude")
+async def saude():
+    from .sources import health
+
+    data = store.get("saude") or {}
+    return {**data, "resumo": health.summary(data) if data else {}}
+
+
+@app.post("/api/saude/importar")
+async def importar_saude(arquivo: UploadFile):
+    from .config import ROOT
+    from .sources import health
+
+    dest = ROOT / "data" / "saude" / "exportacao"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("wb") as fh:
+        while chunk := await arquivo.read(1 << 20):
+            fh.write(chunk)
+    try:
+        data = await asyncio.to_thread(health.parse, dest)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Não consegui ler a exportação: {exc}") from exc
+    finally:
+        dest.unlink(missing_ok=True)  # guarda só o resumo
+    store.put("saude", data)
+    return {"ok": True, "resumo": health.summary(data)}
+
+
+@app.get("/api/notas/cofres")
+async def cofres():
+    from .sources import notes
+
+    return {"obsidian": notes.obsidian_vaults()}
+
+
+@app.get("/api/permissoes")
+async def permissoes():
+    import sys
+    from pathlib import Path
+
+    from .sources import imessage
+
+    return {"mensagens": await asyncio.to_thread(imessage.has_access), "python": str(Path(sys.executable).resolve())}
+
+
+@app.post("/api/reiniciar")
+async def reiniciar():
+    """Reinicia o serviço (necessário depois de dar permissões novas ao Python)."""
+    import os
+    import subprocess
+
+    subprocess.Popen(
+        ["/bin/sh", "-c", f"sleep 1; launchctl kickstart -k gui/{os.getuid()}/com.jarvis.servidor"],
+        start_new_session=True,
+    )
+    return {"ok": True}
+
+
+# ---------- alertas ----------
+
+
+@app.get("/api/alertas")
+async def alertas_recentes():
+    from . import alerts
+
+    return alerts.RECENT[::-1]
+
+
+@app.post("/api/alertas/teste")
+async def alerta_teste():
+    from . import alerts
+
+    return await alerts.notify("Teste de alerta", "Assim chega um aviso do Jarvis.", "info")
 
 
 # ---------- monitores ----------
@@ -344,6 +425,7 @@ async def ws_endpoint(ws: WebSocket):
                 if voice and voice is not mine:
                     await voice.stop()
                 mine = voice = mine or VoiceBridge(ws)
+                hub.voice = mine
                 await mine.start()
             elif kind == "voice.stop" and mine:
                 await mine.stop()
@@ -373,6 +455,8 @@ async def ws_endpoint(ws: WebSocket):
             await mine.stop()
             if voice is mine:
                 voice = None
+            if hub.voice is mine:
+                hub.voice = None
 
 
 if settings.frontend_dist.exists():

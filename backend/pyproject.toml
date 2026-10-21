@@ -11,6 +11,7 @@ dependencies = [
     "icalendar>=7.3.0",
     "psutil>=7.2.2",
     "python-dotenv>=1.2.4",
+    "python-multipart>=0.0.32",
     "recurring-ical-events>=3.8.2",
     "uvicorn[standard]>=0.54.0",
 ]

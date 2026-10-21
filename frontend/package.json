@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "modelos": "node scripts/modelos.mjs"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.1.1",
     "@vladmandic/face-api": "^1.7.15",
     "lucide-react": "^1.61.0",
     "react": "^19.3.1",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Player } from '../lib/audio'
-import { JarvisSocket, type Card, type ScreenConfig, type ServerEvent, type Telemetry, type VoiceStatus } from '../lib/socket'
+import { JarvisSocket, type Alert, type Card, type ScreenConfig, type ServerEvent, type Telemetry, type VoiceStatus } from '../lib/socket'
 import { frameJpeg } from '../lib/face'
 import { WakeWord } from '../lib/wake'
 
@@ -26,6 +26,7 @@ export type Vision = 'off' | 'camera' | 'tela'
 export function useJarvis(role = 'hud', query = '') {
   const [log, setLog] = useState<LogLine[]>([])
   const [presence, setPresence] = useState<string | null>(null)
+  const [alerts, setAlerts] = useState<Alert[]>([])
   const [vision, setVision] = useState<Vision>('off')
   const visionStream = useRef<MediaStream | null>(null)
   const visionVideo = useRef<HTMLVideoElement | null>(null)
@@ -124,6 +125,13 @@ export function useJarvis(role = 'hud', query = '') {
       case 'presenca':
         setPresence(e.etapa)
         break
+      case 'alerta': {
+        const { type: _t, ...a } = e
+        setAlerts((l) => [...l.filter((x) => x.id !== a.id), a].slice(-4))
+        if (!a.silencioso && role === 'hud') chime(player.current)
+        setTimeout(() => setAlerts((l) => l.filter((x) => x.id !== a.id)), 14000)
+        break
+      }
       case 'model.text':
         if (L.turnDone) {
           modelBuf.current = ''
@@ -162,7 +170,7 @@ export function useJarvis(role = 'hud', query = '') {
         player.current?.flush()
         break
     }
-  }, [pushLog])
+  }, [pushLog, role])
 
   useEffect(() => {
     player.current = new Player()
@@ -388,6 +396,8 @@ export function useJarvis(role = 'hud', query = '') {
   }, [])
 
   return {
+    alerts,
+    dismissAlert: (id: string) => setAlerts((l) => l.filter((x) => x.id !== id)),
     ask,
     send: (msg: object) => sock.current?.send(msg),
     log,
@@ -423,6 +433,23 @@ export function useJarvis(role = 'hud', query = '') {
     closeCard: (id: string) => sock.current?.send({ type: 'card.close', id }),
     clearCards: () => sock.current?.send({ type: 'cards.clear' }),
   }
+}
+
+/** Dois tons curtos para avisos (sem arquivo de áudio). */
+function chime(p: Player | null) {
+  const ctx = p?.context()
+  if (!ctx) return
+  ;[880, 1320].forEach((f, i) => {
+    const o = ctx.createOscillator()
+    const g = ctx.createGain()
+    o.frequency.value = f
+    g.gain.setValueAtTime(0, ctx.currentTime + i * 0.16)
+    g.gain.linearRampToValueAtTime(0.08, ctx.currentTime + i * 0.16 + 0.02)
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.16 + 0.28)
+    o.connect(g).connect(ctx.destination)
+    o.start(ctx.currentTime + i * 0.16)
+    o.stop(ctx.currentTime + i * 0.16 + 0.3)
+  })
 }
 
 function lastWords(text: string, n: number) {

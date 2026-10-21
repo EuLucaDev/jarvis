@@ -14,7 +14,7 @@ PATHS="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 echo "→ Preparando o Jarvis em $PROJ"
 [ -f "$PROJ/.env" ] || { echo "Falta o arquivo .env (copie de .env.example e cole a GEMINI_API_KEY)."; exit 1; }
-(cd "$PROJ/frontend" && npm install --silent && npm run build --silent)
+(cd "$PROJ/frontend" && npm install --silent && npm run modelos --silent && npm run build --silent)
 "$UV" sync --directory "$PROJ/backend" --quiet
 mkdir -p "$AGENTS" "$LOGS"
 

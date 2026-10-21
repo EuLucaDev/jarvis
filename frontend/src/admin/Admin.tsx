@@ -38,7 +38,7 @@ import type { ScreenConfig, Telemetry } from '../lib/socket'
 import { useJarvis } from '../hud/useJarvis'
 import './admin.css'
 
-type Page = 'chat' | 'briefing' | 'conexoes' | 'memorias' | 'financeiro' | 'presenca' | 'conversas' | 'telas' | 'sistema'
+type Page = 'chat' | 'briefing' | 'conexoes' | 'memorias' | 'financeiro' | 'saude' | 'presenca' | 'conversas' | 'telas' | 'sistema'
 
 const NAV: { group: string; items: { id: Page; label: string; desc: string; icon: typeof Bot }[] }[] = [
   {
@@ -54,6 +54,7 @@ const NAV: { group: string; items: { id: Page; label: string; desc: string; icon
       { id: 'conexoes', label: 'Conexões', desc: 'E-mail, agenda, casa, mercado', icon: Plug },
       { id: 'memorias', label: 'Memórias', desc: 'O que ele sabe sobre você', icon: BrainCircuit },
       { id: 'financeiro', label: 'Financeiro', desc: 'Bolsa, câmbio e cripto', icon: LineChart },
+      { id: 'saude', label: 'Saúde', desc: 'Passos, sono e treinos', icon: HeartPulse },
       { id: 'presenca', label: 'Presença', desc: 'Reconhecimento facial', icon: ScanFace },
     ],
   },
@@ -136,6 +137,7 @@ export function Admin() {
           {page === 'conexoes' && <ConexoesPage />}
           {page === 'financeiro' && <FinanceiroPage />}
           {page === 'presenca' && <PresencaPage />}
+          {page === 'saude' && <SaudePage />}
           {page === 'memorias' && <MemoriasPage />}
           {page === 'conversas' && <ConversasPage />}
           {page === 'telas' && <TelasPage screensLive={j.screens} />}
@@ -913,9 +915,11 @@ const CONNS: Conn[] = [
   { id: 'cameras', nome: 'Câmeras', desc: 'RTSP ou foto HTTP', cat: 'Casa e dispositivos', icon: Camera },
   { id: 'computador', nome: 'Este Mac', desc: 'Apps, arquivos, volume, brilho', cat: 'Casa e dispositivos', icon: Laptop },
   { id: 'musica', nome: 'Spotify / Música', desc: 'Tocar, pausar, próxima', cat: 'Casa e dispositivos', icon: Music },
-  { id: 'saude', nome: 'Apple Saúde / WHOOP', desc: 'Sono, treino e recuperação', cat: 'Saúde', icon: HeartPulse, soon: true },
-  { id: 'notion', nome: 'Notion / Obsidian', desc: 'Notas e bancos de dados', cat: 'Produtividade', icon: NotebookPen, soon: true },
-  { id: 'whatsapp', nome: 'WhatsApp / iMessage', desc: 'Mensagens novas e leitura', cat: 'Comunicação', icon: MessageCircle, soon: true },
+  { id: 'imessage', nome: 'iMessage / SMS', desc: 'Ler e enviar pelo app Mensagens', cat: 'Comunicação', icon: MessageCircle },
+  { id: 'notas', nome: 'Obsidian / Notion', desc: 'Buscar, ler e criar notas', cat: 'Produtividade', icon: NotebookPen },
+  { id: 'alertas', nome: 'Alertas proativos', desc: 'Agenda, e-mails e mercado', cat: 'Produtividade', icon: BellRing },
+  { id: 'saude', nome: 'Apple Saúde', desc: 'Exportação do app Saúde do iPhone', cat: 'Saúde', icon: HeartPulse },
+  { id: 'whatsapp', nome: 'WhatsApp', desc: 'Sem API gratuita confiável', cat: 'Comunicação', icon: MessageCircle, soon: true },
 ]
 const CATS = ['Todas', 'Produtividade', 'Comunicação', 'Informação', 'Finanças', 'Casa e dispositivos', 'Saúde']
 
@@ -924,11 +928,15 @@ function ConexoesPage() {
   const [open, setOpen] = useState<string | null>(null)
   const [st, setSt] = useState<Record<string, boolean>>({})
   const load = useCallback(async () => {
-    const [b, alexa, atalhos, cams] = await Promise.all([
+    const [b, alexa, atalhos, cams, perm, notas, saude, alertas] = await Promise.all([
       api('/api/ajustes/briefing'),
       api('/api/ajustes/alexa'),
       api<string[]>('/api/ajustes/atalhos'),
       api<any[]>('/api/ajustes/cameras'),
+      api('/api/permissoes'),
+      api('/api/notas/cofres'),
+      api('/api/saude'),
+      api('/api/ajustes/alertas'),
     ])
     setSt({
       gmail: (b.gmail ?? []).length > 0,
@@ -939,6 +947,10 @@ function ConexoesPage() {
       atalhos: atalhos.length > 0,
       cameras: cams.length > 0,
       lembretes: true,
+      imessage: !!perm.mensagens,
+      notas: (notas.obsidian ?? []).length > 0,
+      saude: !!saude?.serie,
+      alertas: !!alertas.ativo,
       mercado: true,
       computador: true,
       musica: true,
@@ -996,6 +1008,10 @@ function ConexoesPage() {
             {conn.id === 'clima' && <FontesPage only="radar" />}
             {(conn.id === 'atalhos' || conn.id === 'cameras' || conn.id === 'computador') && <IntegracoesPage only={conn.id} />}
             {conn.id === 'alexa' && <AlexaForm />}
+            {conn.id === 'imessage' && <IMessageForm />}
+            {conn.id === 'notas' && <NotasForm />}
+            {conn.id === 'alertas' && <AlertasForm />}
+            {conn.id === 'saude' && <SaudePage />}
             {conn.id === 'mercado' && <MercadoForm />}
             {conn.id === 'lembretes' && (
               <Panel title="Lembretes da Apple" desc="Diga “me lembra amanhã às 9h de ligar para o banco”. O lembrete vai para o app Lembretes e aparece no iPhone pelo iCloud. Na primeira vez, o macOS pede permissão para o Terminal controlar o Lembretes.">
@@ -1371,5 +1387,233 @@ function MonitoresPanel({ telas }: { telas: ScreenConfig[] }) {
       </div>
       {msg && <p className="muted">{msg}</p>}
     </Panel>
+  )
+}
+
+
+/* ---------- iMessage, notas, alertas ---------- */
+
+function IMessageForm() {
+  const [p, setP] = useState<{ mensagens: boolean; python: string } | null>(null)
+  const load = () => api('/api/permissoes').then(setP)
+  useEffect(() => {
+    load()
+  }, [])
+  if (!p) return <p className="muted">Verificando…</p>
+  return (
+    <div className="stack">
+      <Panel
+        title={p.mensagens ? 'Mensagens conectadas' : 'Falta uma permissão do macOS'}
+        desc={
+          p.mensagens
+            ? 'Diga “tenho mensagens novas?” ou “manda uma mensagem para a Clara dizendo que chego às 19h”. Antes de enviar ele sempre lê e pede o seu sim.'
+            : 'O macOS protege as mensagens. Abra Ajustes do Sistema → Privacidade e Segurança → Acesso Total ao Disco, clique em +, aperte Cmd+Shift+G, cole o caminho abaixo e ative. Depois reinicie o Jarvis (botão abaixo).'
+        }
+      >
+        {!p.mensagens && <code className="path">{p.python}</code>}
+        <div className="row">
+          {!p.mensagens && (
+            <a className="btn" href="x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles">
+              Abrir Acesso Total ao Disco
+            </a>
+          )}
+          <button className="btn" onClick={() => api('/api/reiniciar', { method: 'POST' }).catch(() => {}).then(() => setTimeout(load, 6000))}>
+            Reiniciar o Jarvis
+          </button>
+          <button className="btn primary" onClick={load}>
+            Verificar de novo
+          </button>
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
+function NotasForm() {
+  const [cfg, setCfg] = useState<{ obsidian: string; notion_token: string } | null>(null)
+  const [cofres, setCofres] = useState<string[]>([])
+  const [toast, toastNode] = useToast()
+  useEffect(() => {
+    api('/api/ajustes/notas').then(setCfg)
+    api('/api/notas/cofres').then((r) => setCofres(r.obsidian ?? []))
+  }, [])
+  if (!cfg) return <p className="muted">Carregando…</p>
+  const save = async () => {
+    setCfg(await api('/api/ajustes/notas', { method: 'PUT', json: cfg }))
+    toast('Notas salvas')
+  }
+  return (
+    <div className="stack">
+      <Panel title="Obsidian" desc="Ele busca e lê as notas do seu cofre e cria notas novas na pasta Jarvis. Em branco, usa o primeiro cofre encontrado.">
+        <label className="field-a">
+          <span>Pasta do cofre</span>
+          <input value={cfg.obsidian} onChange={(e) => setCfg({ ...cfg, obsidian: e.target.value })} placeholder={cofres[0] ?? '/Users/…/Meu cofre'} />
+          {cofres.length > 0 && <small>Encontrado: {cofres.join(' · ')}</small>}
+        </label>
+      </Panel>
+      <Panel title="Notion" desc="Crie uma integração interna grátis em notion.so/my-integrations, copie o token e compartilhe com ela as páginas que o Jarvis pode ler (menu ••• → Conexões).">
+        <label className="field-a">
+          <span>Token da integração</span>
+          <input type="password" value={cfg.notion_token} onChange={(e) => setCfg({ ...cfg, notion_token: e.target.value })} placeholder="ntn_…" autoComplete="off" />
+        </label>
+      </Panel>
+      <div className="row end">
+        <button className="btn primary" onClick={save}>
+          Salvar notas
+        </button>
+      </div>
+      {toastNode}
+    </div>
+  )
+}
+
+function AlertasForm() {
+  const [cfg, setCfg] = useState<Record<string, any> | null>(null)
+  const [toast, toastNode] = useToast()
+  useEffect(() => {
+    api('/api/ajustes/alertas').then(setCfg)
+  }, [])
+  if (!cfg) return <p className="muted">Carregando…</p>
+  const set = (k: string, v: unknown) => setCfg({ ...cfg, [k]: v })
+  const save = async () => {
+    setCfg(await api('/api/ajustes/alertas', { method: 'PUT', json: cfg }))
+    toast('Alertas salvos')
+  }
+  return (
+    <div className="stack">
+      <Panel title="O que avisar" desc="Ele confere a cada minuto. O aviso aparece no HUD, vira notificação do Mac e, com a voz ligada, ele fala.">
+        <div className="form-grid">
+          <div className="span2">
+            <Switch on={!!cfg.ativo} onChange={(v) => set('ativo', v)} label="Alertas ligados" />
+          </div>
+          <label className="field-a">
+            <span>Avisar compromisso com antecedência de (min)</span>
+            <input inputMode="numeric" value={cfg.agenda_min} onChange={(e) => set('agenda_min', Number(e.target.value.replace(/\D/g, '')) || 10)} />
+          </label>
+          <label className="field-a">
+            <span>Mercado: avisar variação a partir de (%)</span>
+            <input inputMode="decimal" value={cfg.mercado_pct} onChange={(e) => set('mercado_pct', Number(e.target.value.replace(',', '.')) || 0)} />
+            <small>0 desliga os avisos de mercado.</small>
+          </label>
+          <label className="field-a">
+            <span>Silêncio a partir de</span>
+            <input value={cfg.silencio?.[0] ?? '22:00'} onChange={(e) => set('silencio', [e.target.value, cfg.silencio?.[1] ?? '07:00'])} />
+          </label>
+          <label className="field-a">
+            <span>Até</span>
+            <input value={cfg.silencio?.[1] ?? '07:00'} onChange={(e) => set('silencio', [cfg.silencio?.[0] ?? '22:00', e.target.value])} />
+          </label>
+          <div className="span2 row">
+            <Switch on={!!cfg.emails} onChange={(v) => set('emails', v)} label="E-mail urgente novo" />
+            <Switch on={!!cfg.falar} onChange={(v) => set('falar', v)} label="Falar o aviso" />
+            <Switch on={!!cfg.notificacao_mac} onChange={(v) => set('notificacao_mac', v)} label="Notificação do Mac" />
+          </div>
+        </div>
+      </Panel>
+      <div className="row end">
+        <button className="btn" onClick={() => api('/api/alertas/teste', { method: 'POST' }).then(() => toast('Aviso de teste enviado ao HUD'))}>
+          Enviar aviso de teste
+        </button>
+        <button className="btn primary" onClick={save}>
+          Salvar alertas
+        </button>
+      </div>
+      {toastNode}
+    </div>
+  )
+}
+
+/* ---------- saúde ---------- */
+
+function SaudePage() {
+  const [d, setD] = useState<Record<string, any> | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const load = () => api('/api/saude').then(setD)
+  useEffect(() => {
+    load()
+  }, [])
+  const upload = async (file: File) => {
+    setBusy(true)
+    setMsg(`Lendo ${(file.size / 1e6).toFixed(0)} MB… pode levar um minuto.`)
+    const fd = new FormData()
+    fd.append('arquivo', file)
+    try {
+      const r = await fetch('/api/saude/importar', { method: 'POST', body: fd })
+      if (!r.ok) throw new Error((await r.json()).detail)
+      setMsg('Importado.')
+      load()
+    } catch (e) {
+      setMsg(`Não deu certo: ${e instanceof Error ? e.message : e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const r = d?.resumo ?? {}
+  const serie: any[] = (d?.serie ?? []).slice(-30)
+  return (
+    <div className="stack wide-stack">
+      {d?.serie && (
+        <div className="kpis">
+          <Kpi icon={HeartPulse} label="Passos" value={r.passos ? Math.round(r.passos).toLocaleString('pt-BR') : '—'} sub={`média 7 dias: ${r.media7_passos ? Math.round(r.media7_passos).toLocaleString('pt-BR') : '—'}`} accent />
+          <Kpi icon={HeartPulse} label="Sono" value={r.sono_h ? `${String(r.sono_h).replace('.', ',')} h` : '—'} sub={`média 7 dias: ${r.media7_sono ? String(r.media7_sono).replace('.', ',') + ' h' : '—'}`} />
+          <Kpi icon={HeartPulse} label="FC em repouso" value={r.fc_repouso ? `${Math.round(r.fc_repouso)} bpm` : '—'} sub="janela noturna" />
+          <Kpi icon={HeartPulse} label="VFC" value={r.vfc ? `${String(r.vfc).replace('.', ',')} ms` : '—'} sub="SDNN" />
+        </div>
+      )}
+      {d?.serie && (
+        <div className="fin-grid">
+          <Bars title="Passos por dia" serie={serie} k="passos" />
+          <Bars title="Sono por noite (h)" serie={serie} k="sono_h" />
+          <Bars title="FC em repouso" serie={serie} k="fc_repouso" />
+        </div>
+      )}
+      {(d?.treinos?.length ?? 0) > 0 && (
+        <Panel title="Treinos recentes">
+          <ul className="rows">
+            {(d?.treinos ?? []).slice(0, 8).map((t: any, i: number) => (
+              <li key={i}>
+                <time>{t.data.slice(5).split('-').reverse().join('/')}</time>
+                <span>
+                  <b>{t.tipo.replace(/([a-z])([A-Z])/g, '$1 $2')}</b>
+                  <small>
+                    {t.min} min{t.kcal ? ` · ${t.kcal} kcal` : ''}
+                  </small>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+      <Panel
+        title={d?.serie ? `Dados de ${d.atualizado}` : 'Importar do app Saúde'}
+        desc="No iPhone: app Saúde → sua foto no canto → Exportar Todos os Dados de Saúde. Mande o arquivo para o Mac (AirDrop) e escolha abaixo. Só o resumo dos últimos 60 dias fica guardado, neste Mac. Repita quando quiser atualizar."
+      >
+        <label className="btn primary upload">
+          {busy ? 'Importando…' : 'Escolher exportação (.zip)'}
+          <input type="file" accept=".zip,.xml" disabled={busy} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+        </label>
+        {msg && <p className="muted">{msg}</p>}
+        <p className="muted small">Os números vêm do seu app Saúde; o Jarvis organiza, não estima. Não substitui avaliação médica.</p>
+      </Panel>
+    </div>
+  )
+}
+
+function Bars({ title, serie, k }: { title: string; serie: any[]; k: string }) {
+  const vals = serie.map((r) => r[k] as number | null)
+  const max = Math.max(...vals.map((v) => v ?? 0), 1)
+  return (
+    <section className="panel-a">
+      <header>
+        <h2>{title}</h2>
+      </header>
+      <div className="bars30" aria-label={title}>
+        {vals.map((v, i) => (
+          <span key={i} title={`${serie[i].data}: ${v ?? '—'}`} style={{ height: v ? `${Math.max(4, (v / max) * 100)}%` : '2px' }} className={v ? '' : 'none'} />
+        ))}
+      </div>
+      <small className="muted">Últimos 30 dias</small>
+    </section>
   )
 }

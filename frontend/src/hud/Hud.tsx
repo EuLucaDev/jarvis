@@ -7,6 +7,8 @@ import {
   Cloud,
   Ear,
   EarOff,
+  Bell,
+  Hand,
   Headphones,
   LayoutDashboard,
   Mic,
@@ -16,8 +18,9 @@ import {
   ScanFace,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
+import { startGestures, type GestureAction } from '../lib/gestures'
 import { CardChip, CardView } from './Cards'
 import { Orb } from './Orb'
 import { Channel, PANELS, Services, SignalIn, Spectrum, VoiceRead, Weather, type PanelId } from './Panels'
@@ -65,6 +68,8 @@ export function Hud() {
     }
   })
   const [presenceError, setPresenceError] = useState<string | null>(null)
+  const [gestures, setGestures] = useState(false)
+  const [gestureToast, setGestureToast] = useState<string | null>(null)
 
   const voiceOn = j.status.voice === 'live' || j.status.voice === 'connecting'
   const focus = j.cards.find((c) => c.id === j.focusId) ?? null
@@ -102,6 +107,42 @@ export function Hud() {
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
   }, [voiceOn, j])
+
+  // Gestos: a ação usa a versão mais recente do estado pelo ref
+  const gestureRef = useRef<(a: GestureAction) => void>(() => {})
+  gestureRef.current = (a: GestureAction) => {
+    if (a === 'ouvir') {
+      if (voiceOn) j.stopVoice()
+      else j.startVoice()
+    } else if (a === 'fechar') j.clearCards()
+    else if (a === 'proximo' && j.cards.length) {
+      const i = j.cards.findIndex((c) => c.id === j.focusId)
+      j.setFocusId(j.cards[(i + 1) % j.cards.length].id)
+    } else if (a === 'sim') j.ask('Sim')
+    else if (a === 'nao') j.ask('Não')
+  }
+  useEffect(() => {
+    if (!gestures) return
+    let stop: (() => void) | null = null
+    let cancelled = false
+    startGestures(
+      (a, label) => {
+        gestureRef.current(a)
+        setGestureToast(label)
+        setTimeout(() => setGestureToast(null), 1800)
+      },
+      (m) => setPresenceError(m),
+    )
+      .then((s) => {
+        if (cancelled) s()
+        else stop = s
+      })
+      .catch(() => setPresenceError('Não consegui carregar o reconhecimento de gestos.'))
+    return () => {
+      cancelled = true
+      stop?.()
+    }
+  }, [gestures])
 
   const { send, ask } = j
   const onPresenceStep = useCallback((etapa: string) => send({ type: 'presenca', etapa }), [send])
@@ -248,6 +289,7 @@ export function Hud() {
         <div className="bottom-r">
           <IconToggle on={j.vision === 'camera'} onClick={() => (j.vision === 'camera' ? j.stopVision() : j.startVision('camera'))} label="Câmera: o Jarvis vê você" icon={j.vision === 'camera' ? Camera : CameraOff} />
           <IconToggle on={j.vision === 'tela'} onClick={() => (j.vision === 'tela' ? j.stopVision() : j.startVision('tela'))} label="Compartilhar a tela com o Jarvis" icon={MonitorUp} />
+          <IconToggle on={gestures} onClick={() => setGestures((v) => !v)} label="Gestos: mão aberta liga a voz, punho fecha cartões, dois dedos passa, polegar sim/não" icon={Hand} />
           <IconToggle on={presenceOn} onClick={() => setPresenceOn((v) => !v)} label="Presença: reconhece seu rosto e abre o dia" icon={ScanFace} />
           <IconToggle on={j.wake} onClick={j.toggleWake} label='Ativar dizendo "Jarvis"' icon={j.wake ? Ear : EarOff} />
           <IconToggle on={j.bargeIn} onClick={j.toggleBarge} label="Interromper falando (use com fone)" icon={Headphones} />
@@ -256,6 +298,22 @@ export function Hud() {
           </span>
         </div>
       </footer>
+
+      {(j.alerts.length > 0 || gestureToast) && (
+        <div className="alerts" aria-live="assertive">
+          {gestureToast && <div className="alert gesture">{gestureToast}</div>}
+          {j.alerts.map((a) => (
+            <button key={a.id} className={`alert lv-${a.nivel}`} onClick={() => j.dismissAlert(a.id)}>
+              <Bell size={14} />
+              <span>
+                <b>{a.titulo}</b>
+                {a.texto}
+              </span>
+              <time>{a.at}</time>
+            </button>
+          ))}
+        </div>
+      )}
 
       {showNote && (
         <p className="hud-note" role={error ? 'alert' : undefined}>

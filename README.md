@@ -8,7 +8,7 @@ Precisa de Node 22+, [uv](https://docs.astral.sh/uv/) e uma chave da Gemini API 
 
 ```bash
 cp .env.example .env        # cole a chave em GEMINI_API_KEY
-cd frontend && npm install && npm run build && cd ..
+cd frontend && npm install && npm run modelos && npm run build && cd ..
 uv run --directory backend uvicorn jarvis.app:app --port 8000
 ```
 
@@ -40,6 +40,11 @@ Depois de mudar o código: `cd frontend && npm run build` e `launchctl kickstart
 - **Visão**: ícones de câmera e de tela no HUD; o Jarvis passa a ver você ou a sua tela durante a conversa.
 - **Alexa**: Painel → Conexões → Alexa (precisa de conta grátis no Voice Monkey).
 - **Mercado**: "como está o mercado?" e Painel → Financeiro.
+- **Alertas**: avisos de compromisso, e-mail urgente e mercado (Conexões → Alertas proativos).
+- **iMessage**: "tenho mensagens novas?", "manda para a Clara…" (sempre confirma). Precisa de Acesso Total ao Disco; o painel mostra o caminho.
+- **Notas**: Obsidian e Notion ("procura nas minhas notas…", "anota que…").
+- **Saúde**: exporte do app Saúde do iPhone e importe em Painel → Saúde.
+- **Gestos**: ícone de mão no HUD — mão aberta liga a voz, punho fecha cartões, dois dedos passa o cartão, polegar sim/não.
 
 ## Variáveis
 

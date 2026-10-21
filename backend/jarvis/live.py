@@ -40,6 +40,9 @@ Como responder:
 - Casa pela Alexa: controlar_casa. Lembretes (vão para o iPhone): criar_lembrete.
 - Arquivos e pastas: arquivos. Mercado e cotações: consultar_mercado.
 - Ferramentas que já mostram cartão (clima, mercado, briefing, câmera) dispensam mostrar_pesquisa: um cartão por resposta.
+- Mensagens do iPhone (iMessage): ler_mensagens; para enviar, enviar_mensagem com confirmação.
+- Notas (Obsidian e Notion): notas. Saúde (passos, sono, treinos): consultar_saude.
+- Mensagens que começam com "[Aviso do sistema" são alertas: anuncie em uma frase, sem tratar como pergunta dele.
 - Quando ele ligar a câmera ou compartilhar a tela, você recebe imagens: use para responder sobre o que vê.
 
 Ações e segurança:
@@ -90,6 +93,7 @@ class VoiceBridge:
         self.user_buf = ""
         self.model_buf = ""
         self.awaiting_tool_reply = False  # depois de uma ferramenta vem um turno vazio; não é o fim
+        self.last_audio_at = 0.0  # transcrição sem áudio recente é ruído (ex.: "jugar" sem microfone)
         self.plan: list[tuple[int, str, dict]] = []  # cartões do briefing, liberados pelo HUD
         self.plan_shown: set[int] = set()
         self.plan_t0 = 0.0
@@ -147,6 +151,7 @@ class VoiceBridge:
 
     async def send_audio(self, pcm: bytes) -> None:
         if self.session:
+            self.last_audio_at = time.time()
             await self.session.send_realtime_input(
                 audio=types.Blob(data=pcm, mime_type="audio/pcm;rate=16000")
             )
@@ -207,7 +212,8 @@ class VoiceBridge:
                 if sc.interrupted:
                     await self.ws.send_json({"type": "audio.flush"})
                     await hub.broadcast({"type": "turn", "phase": "interrupted"})
-                if sc.input_transcription and sc.input_transcription.text:
+                heard = time.time() - self.last_audio_at < 5
+                if sc.input_transcription and sc.input_transcription.text and heard:
                     await hub.broadcast({"type": "user.text", "text": sc.input_transcription.text})
                     self.user_buf += sc.input_transcription.text
                 if sc.output_transcription and sc.output_transcription.text:

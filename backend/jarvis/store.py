@@ -33,9 +33,12 @@ DEFAULTS: dict[str, Any] = {
     "presenca": {"briefing_auto": True, "ultimo_briefing": ""},
     # mapa: nome do monitor -> "hud" | id de tela | "nada"; vazio = HUD no principal, telas nos outros
     "monitores": {"mapa": {}, "abrir_no_login": True, "tela_cheia": True},
+    "alertas": {"ativo": True, "agenda_min": 10, "emails": True, "mercado_pct": 3.0, "falar": True,
+                "notificacao_mac": True, "silencio": ["22:00", "07:00"]},
+    "notas": {"obsidian": "", "notion_token": ""},
 }
 
-SECRET_FIELDS = {"senha_app", "token"}
+SECRET_FIELDS = {"senha_app", "token", "notion_token"}
 
 
 def _db() -> sqlite3.Connection:
