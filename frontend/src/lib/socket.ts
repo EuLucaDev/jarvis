@@ -11,16 +11,32 @@ export type ServerEvent =
   | { type: 'card.close'; id: string }
   | { type: 'cards.clear' }
   | { type: 'audio.flush' }
+  | { type: 'sequence.plan'; palavras: number[] }
+  | ({ type: 'telemetria' } & Telemetry)
+  | { type: 'telas.config'; telas: ScreenConfig[] }
+
+export type Telemetry = {
+  cpu: number
+  ram: number
+  disco: number
+  rede_kbps: { down: number; up: number }
+  bateria: number | null
+  carregando: boolean | null
+  uptime_h: number
+}
+
+export type ScreenConfig = { id: string; nome: string; widgets: string[] }
 
 export type VoiceStatus = {
   voice: 'off' | 'connecting' | 'live' | 'error' | 'demo'
+  telas?: 'ativas' | 'bloqueadas'
   model?: string
   error?: string | null
 }
 
 export type Card = {
   id: string
-  kind: 'pesquisa' | 'clima' | 'lista'
+  kind: 'pesquisa' | 'clima' | 'lista' | 'emails' | 'agenda' | 'noticia' | 'carregando' | 'camera'
   at: string
   data: Record<string, any>
 }

@@ -33,6 +33,10 @@ Como responder:
 - Para fatos atuais, chame pesquisar_web antes de responder.
 - Clima: chame consultar_clima. Passos, opções ou recomendações: chame mostrar_lista.
 - Para limpar a tela, chame fechar_cartoes.
+- "Bom dia" ou pedido de resumo do dia: chame briefing_bom_dia e leia o roteiro inteiro.
+- Telas extras: ativar_telas. Computador: abrir_app, abrir_link, controlar_midia, ajustar_volume.
+- Celular, casa, Alexa e automações: executar_atalho (Atalhos do macOS liberados por ele).
+- Câmeras: ver_camera, depois descreva o que vê em uma ou duas frases.
 - Se não souber ou a busca não confirmar, diga isso. Nunca invente números.
 
 Memória:
@@ -77,6 +81,9 @@ class VoiceBridge:
         self.user_buf = ""
         self.model_buf = ""
         self.awaiting_tool_reply = False  # depois de uma ferramenta vem um turno vazio; não é o fim
+        self.plan: list[tuple[int, str, dict]] = []  # cartões do briefing, liberados pelo HUD
+        self.plan_shown: set[int] = set()
+        self.plan_t0 = 0.0
 
     @property
     def running(self) -> bool:
@@ -106,6 +113,21 @@ class VoiceBridge:
             asyncio.create_task(memory.reflect(self.sid))  # aprende com a conversa que acabou
             self.sid = None
         await hub.set_status(voice="off", error=None)
+
+    async def show_planned(self, index: int) -> None:
+        if 0 <= index < len(self.plan) and index not in self.plan_shown:
+            self.plan_shown.add(index)
+            _, kind, data = self.plan[index]
+            await hub.show_card(kind, data)
+
+    async def _finish_plan(self, plan: list) -> None:
+        """Rede de segurança: se o HUD não pediu algum cartão (aba escondida), mostra depois da fala."""
+        elapsed = asyncio.get_running_loop().time() - self.plan_t0
+        await asyncio.sleep(max(0.0, plan[-1][0] / 2.2 - elapsed) + 4)
+        if self.plan is plan:
+            for i in range(len(plan)):
+                await self.show_planned(i)
+            self.plan = []
 
     def _flush_turn(self) -> None:
         if self.sid and self.user_buf.strip():
@@ -185,6 +207,8 @@ class VoiceBridge:
                 if sc.turn_complete and self.awaiting_tool_reply:
                     continue
                 if sc.turn_complete:
+                    if self.plan:
+                        asyncio.create_task(self._finish_plan(self.plan))
                     self._flush_turn()
                     await hub.broadcast({"type": "turn", "phase": "complete"})
 
@@ -193,8 +217,17 @@ class VoiceBridge:
         for fc in call.function_calls or []:
             await hub.broadcast({"type": "tool", "name": fc.name, "phase": "start"})
             result = await tools.run(fc.name, dict(fc.args or {}))
+            image = result.pop("_imagem", None)
+            if image:  # câmera: o modelo também vê a imagem
+                await session.send_realtime_input(video=types.Blob(data=image, mime_type="image/jpeg"))
             await hub.broadcast({"type": "tool", "name": fc.name, "phase": "end"})
             responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
+        if hub.pending_sequence:
+            # O HUD conta as palavras exibidas na legenda e pede cada cartão na hora certa.
+            self.plan, hub.pending_sequence = hub.pending_sequence, []
+            self.plan_shown = set()
+            self.plan_t0 = asyncio.get_running_loop().time()
+            await self.ws.send_json({"type": "sequence.plan", "palavras": [w for w, _, _ in self.plan]})
         if responses:
             self.awaiting_tool_reply = True
             await session.send_tool_response(function_responses=responses)

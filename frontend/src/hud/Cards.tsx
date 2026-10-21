@@ -1,4 +1,6 @@
 import {
+  CalendarDays,
+  Camera,
   Cloud,
   CloudDrizzle,
   CloudFog,
@@ -8,6 +10,9 @@ import {
   Droplets,
   ExternalLink,
   ListChecks,
+  Loader2,
+  Mail,
+  Newspaper,
   Search,
   Sun,
   Umbrella,
@@ -49,7 +54,16 @@ function Head({ card, icon: Icon, onClose }: { card: Card; icon: typeof Search; 
 }
 
 function labelFor(kind: Card['kind']) {
-  return { pesquisa: 'Pesquisa', clima: 'Clima · Agora', lista: 'Lista' }[kind]
+  return {
+    pesquisa: 'Pesquisa',
+    clima: 'Clima · Agora',
+    lista: 'Lista',
+    emails: 'E-mails · Prioridade',
+    agenda: 'Agenda',
+    noticia: 'Notícias',
+    carregando: 'Resumo executivo',
+    camera: 'Câmera · Ao vivo',
+  }[kind]
 }
 
 function Pesquisa({ card, onClose }: { card: Card; onClose?: () => void }) {
@@ -187,12 +201,153 @@ function Lista({ card, onClose }: { card: Card; onClose?: () => void }) {
   )
 }
 
+function Emails({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const d = card.data
+  const itens: any[] = d.itens ?? []
+  return (
+    <>
+      <Head card={card} icon={Mail} onClose={onClose} />
+      {!d.configurado ? (
+        <p className="card-ref">Gmail ainda não configurado. Adicione a conta no painel, em Fontes de dados.</p>
+      ) : (
+        <p className="card-ref">
+          {d.total} não lidos nas últimas 24 h · {itens.length} pedem atenção
+        </p>
+      )}
+      {itens.length > 0 && (
+        <ul className="list mail">
+          {itens.map((m, i) => (
+            <li key={i}>
+              <div>
+                <strong>{m.assunto}</strong>
+                <span className="muted">
+                  {m.de} · {m.motivo}
+                </span>
+              </div>
+              {m.acao && <span className="pill">{m.acao}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <footer className="card-foot">
+        <span>{d.outros ? `${d.outros} sem urgência` : 'Caixa sob controle'}</span>
+        <span>{card.at}</span>
+      </footer>
+    </>
+  )
+}
+
+function Agenda({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const d = card.data
+  const evs: any[] = d.eventos ?? []
+  return (
+    <>
+      <Head card={{ ...card, data: { ...d, categoria: `Agenda · ${d.hoje ?? 'Hoje'}` } }} icon={CalendarDays} onClose={onClose} />
+      {!d.configurado ? (
+        <p className="card-ref">Agenda ainda não configurada. Cole o link iCal no painel, em Fontes de dados.</p>
+      ) : evs.length === 0 ? (
+        <div className="free">
+          <span className="free-big">Livre</span>
+          <span className="muted">Nenhum compromisso hoje.</span>
+        </div>
+      ) : (
+        <ol className="timeline">
+          {evs.map((e, i) => (
+            <li key={i}>
+              <time>{e.dia_todo ? 'Dia todo' : e.inicio}</time>
+              <div>
+                <strong>{e.titulo}</strong>
+                {(e.local || e.fim) && <span className="muted">{[e.fim && `até ${e.fim}`, e.local].filter(Boolean).join(' · ')}</span>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      <footer className="card-foot">
+        <span>{evs.length ? `${evs.length} compromissos` : 'Dia livre'}</span>
+        <span>{card.at}</span>
+      </footer>
+    </>
+  )
+}
+
+function Noticia({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const d = card.data
+  const [top, ...rest]: any[] = d.itens ?? []
+  if (!top) return null
+  return (
+    <>
+      <Head card={{ ...card, data: { categoria: `Notícias · ${d.tema}`, titulo: top.titulo } }} icon={Newspaper} onClose={onClose} />
+      {top.imagem && <img className="news-img" src={top.imagem} alt="" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />}
+      {top.trecho && <p className="news-lead">{top.trecho}</p>}
+      {rest.length > 0 && (
+        <ul className="list">
+          {rest.slice(0, 3).map((n, i) => (
+            <li key={i}>
+              <div>
+                <strong>{n.titulo}</strong>
+                <span className="muted">{[n.fonte, n.data].filter(Boolean).join(' · ')}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <footer className="card-foot">
+        <span>{top.fonte ?? 'Fonte'}</span>
+        {top.url ? (
+          <a href={top.url} target="_blank" rel="noreferrer">
+            Abrir matéria <ExternalLink size={10} />
+          </a>
+        ) : (
+          <span>{card.at}</span>
+        )}
+      </footer>
+    </>
+  )
+}
+
+function Carregando({ card }: { card: Card }) {
+  const etapas: string[] = card.data.etapas ?? []
+  return (
+    <>
+      <Head card={card} icon={Loader2} />
+      <p className="loading-title">{card.data.titulo}…</p>
+      <div className="loading-steps">
+        {etapas.map((e, i) => (
+          <span key={e} style={{ animationDelay: `${i * 0.35}s` }}>
+            {e}
+          </span>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function CameraCard({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const d = card.data
+  return (
+    <>
+      <Head card={{ ...card, data: { categoria: 'Câmera · Ao vivo', titulo: d.nome } }} icon={Camera} onClose={onClose} />
+      <img className="news-img" src={`/api/cameras/${d.id}/foto?t=${d.ts}`} alt={`Imagem da câmera ${d.nome}`} />
+      <footer className="card-foot">
+        <span>{d.nome}</span>
+        <span>Capturado às {card.at}</span>
+      </footer>
+    </>
+  )
+}
+
 export function CardView({ card, onClose }: { card: Card; onClose?: () => void }) {
   return (
     <article className={`card card-${card.kind}`} key={card.id}>
       {card.kind === 'pesquisa' && <Pesquisa card={card} onClose={onClose} />}
       {card.kind === 'clima' && <Clima card={card} onClose={onClose} />}
       {card.kind === 'lista' && <Lista card={card} onClose={onClose} />}
+      {card.kind === 'emails' && <Emails card={card} onClose={onClose} />}
+      {card.kind === 'agenda' && <Agenda card={card} onClose={onClose} />}
+      {card.kind === 'noticia' && <Noticia card={card} onClose={onClose} />}
+      {card.kind === 'carregando' && <Carregando card={card} />}
+      {card.kind === 'camera' && <CameraCard card={card} onClose={onClose} />}
     </article>
   )
 }
@@ -200,6 +355,28 @@ export function CardView({ card, onClose }: { card: Card; onClose?: () => void }
 // Versão compacta para a faixa de cartões anteriores.
 export function CardChip({ card, active, onClick }: { card: Card; active: boolean; onClick: () => void }) {
   const d = card.data
+  const cat =
+    card.kind === 'clima'
+      ? d.cidade
+      : card.kind === 'noticia'
+        ? `Notícias · ${d.tema}`
+        : card.kind === 'camera'
+          ? 'Câmera'
+          : (d.categoria ?? labelFor(card.kind))
+  const title =
+    card.kind === 'clima'
+      ? d.condicao
+      : card.kind === 'noticia'
+        ? d.itens?.[0]?.titulo
+        : card.kind === 'agenda'
+          ? d.eventos?.length
+            ? `${d.eventos[0].inicio ?? 'Dia todo'} · ${d.eventos[0].titulo}`
+            : 'Dia livre'
+          : card.kind === 'emails'
+            ? `${d.itens?.length ?? 0} pedem atenção`
+            : card.kind === 'camera'
+              ? d.nome
+              : d.titulo
   const big =
     card.kind === 'clima'
       ? `${num(d.temperatura)}°`
@@ -208,8 +385,11 @@ export function CardChip({ card, active, onClick }: { card: Card; active: boolea
         : ''
   return (
     <button className={`chip ${active ? 'is-active' : ''}`} onClick={onClick}>
-      <span className="chip-cat">{card.kind === 'clima' ? d.cidade : (d.categoria ?? labelFor(card.kind))}</span>
-      <span className="chip-title">{card.kind === 'clima' ? d.condicao : d.titulo}</span>
+      {card.kind === 'noticia' && d.itens?.[0]?.imagem && (
+        <img className="chip-img" src={d.itens[0].imagem} alt="" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
+      )}
+      <span className="chip-cat">{cat}</span>
+      <span className="chip-title">{title}</span>
       {big && <span className="chip-big">{big}</span>}
     </button>
   )

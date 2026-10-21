@@ -18,6 +18,15 @@ Abra http://localhost:8000 no Chrome, clique no microfone (ou aperte espaço) e 
 - Sem chave, o botão "Ver demonstração" mostra os estados e os cartões.
 - Sem microfone, dá para conversar pelo campo de texto e ouvir a resposta.
 
+## O que tem
+
+- **HUD** (`/`): esfera de voz, legenda, cartões de pesquisa, clima, listas, e-mails, agenda, notícias e câmeras.
+- **Bom dia**: diga "bom dia" e ele lê o resumo do dia enquanto os cartões entram em sequência.
+- **Telas extras** (`/tela/centro`, `/tela/radar`…): abra em outro monitor em tela cheia; "Jarvis, ativar monitores" desbloqueia todas. A engrenagem monta os widgets.
+- **Painel** (`/admin`): chat por texto, briefing, fontes de dados (Gmail, agendas, radar), memórias, conversas, telas, integrações e sistema.
+- **Computador e casa**: abrir apps e sites, música, volume e Atalhos do macOS liberados no painel (ponte para iPhone, HomeKit e Alexa).
+- **Palavra de ativação**: ligue "Ativar com Jarvis" no HUD (Chrome).
+
 ## Variáveis
 
 Veja `.env.example`: `GEMINI_API_KEY`, `GEMINI_LIVE_MODEL`, `GEMINI_TEXT_MODEL`, `JARVIS_SEARCH`, `JARVIS_VOICE`, `JARVIS_CITY`, `JARVIS_USER_NAME`, `PORT`.

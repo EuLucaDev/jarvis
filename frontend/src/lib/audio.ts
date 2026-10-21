@@ -86,6 +86,19 @@ export class Player {
     return this.ctx.currentTime < this.next
   }
 
+  // Relógio do áudio e até onde já há fala agendada (para casar texto com voz).
+  now() {
+    return this.ctx.currentTime
+  }
+  queuedUntil() {
+    return Math.max(this.next, this.ctx.currentTime)
+  }
+
+  // Segundos de fala ainda na fila (para a legenda andar junto com a voz).
+  remaining() {
+    return Math.max(0, this.next - this.ctx.currentTime)
+  }
+
   level() {
     return Math.min(1, rms(this.an, this.buf) * 4)
   }

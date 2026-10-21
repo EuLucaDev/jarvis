@@ -10,15 +10,17 @@ from fastapi import WebSocket
 
 log = logging.getLogger("jarvis.hub")
 
-MAX_CARDS = 8
+MAX_CARDS = 10
 
 
 class Hub:
     def __init__(self) -> None:
         self.clients: dict[WebSocket, dict[str, Any]] = {}
         self.cards: list[dict[str, Any]] = []
-        self.status: dict[str, Any] = {"voice": "off"}
+        self.status: dict[str, Any] = {"voice": "off", "telas": "bloqueadas"}
         self._lock = asyncio.Lock()
+        # cartões do briefing que entram durante a fala: (palavras antes do cartão, tipo, dados)
+        self.pending_sequence: list[tuple[int, str, dict[str, Any]]] = []
 
     async def join(self, ws: WebSocket, info: dict[str, Any]) -> None:
         self.clients[ws] = info
@@ -36,6 +38,22 @@ class Hub:
                 dead.append(ws)
         for ws in dead:
             self.leave(ws)
+
+    def count(self, role: str) -> int:
+        return sum(1 for info in self.clients.values() if info.get("role") == role)
+
+    async def set_screens(self, estado: str) -> None:
+        await self.set_status(telas=estado)
+
+    async def play_sequence(self, wps: float = 3.0) -> None:
+        """Sem HUD para marcar o ritmo (chat, painel): solta os cartões por tempo estimado."""
+        fila, self.pending_sequence = self.pending_sequence, []
+        start = asyncio.get_running_loop().time()
+        for words, kind, data in fila:
+            wait = words / wps - (asyncio.get_running_loop().time() - start)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            await self.show_card(kind, data)
 
     async def set_status(self, **fields: Any) -> None:
         self.status = {**self.status, **fields}

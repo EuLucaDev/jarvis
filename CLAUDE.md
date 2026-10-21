@@ -18,7 +18,18 @@ Abrir `http://localhost:8000` no Chrome (o microfone precisa de permissão do na
 - `backend/jarvis/tools.py`: ferramentas chamadas pelo modelo. Cada uma projeta um cartão pelo `hub`.
 - `backend/jarvis/hub.py`: estado compartilhado por todas as telas (status, cartões).
 - `backend/jarvis/memory.py`: memória de longo prazo (ver abaixo).
-- `frontend/src/hud/`: HUD (esfera em canvas, legenda, cartões, controles). `useJarvis.ts` decide a fase (espera/ouvindo/pensando/falando) a cada quadro.
+- `backend/jarvis/briefing.py` + `sources/` (gmail IMAP, agenda iCal, notícias): monta o "bom dia" e o roteiro falado em segmentos; cada segmento tem um cartão. Fica pré-montado em segundo plano (`refresh_loop`).
+- `backend/jarvis/system.py`: telemetria (psutil), controle do computador por lista fechada (abrir app/link, mídia, volume, Atalhos liberados) e câmeras (RTSP via ffmpeg ou foto HTTP).
+- `backend/jarvis/store.py`: ajustes editáveis pelo painel (tabela `ajustes` no mesmo SQLite). Senhas de app nunca voltam ao navegador.
+- `backend/jarvis/chat.py`: chat por texto do painel com as mesmas ferramentas.
+- `frontend/src/hud/`: HUD (esfera em canvas, legenda, cartões, controles). `useJarvis.ts` decide a fase (espera/ouvindo/pensando/falando) a cada quadro, solta a legenda no relógio do áudio e pede os cartões do briefing pela contagem de palavras faladas (`sequence.plan` → `sequence.show`).
+- `frontend/src/tela/`: telas extras `/tela/<id>` (bloqueio compartilhado, widgets, Personalizar tela).
+- `frontend/src/admin/`: painel `/admin/<página>` no estilo WorkFlow.
+- `frontend/src/lib/wake.ts`: palavra de ativação "Jarvis" pelo reconhecimento de fala do Chrome.
+
+### Sincronia fala × legenda × cartões
+
+A Gemini gera texto e áudio mais rápido que a reprodução. Cada pedaço de transcrição é marcado com o instante do áudio já agendado quando chegou e só aparece quando o relógio do `AudioContext` passa por ele. No briefing, o backend manda ao HUD os deslocamentos em palavras de cada cartão; o HUD pede o cartão quando a legenda chega lá. Rede de segurança no backend mostra o que faltar depois da fala.
 
 ### Limites do plano gratuito da Gemini (testado em 21/10/2026)
 
@@ -41,10 +52,11 @@ Linguagem do vídeo (azul-noite, esfera de fitas luminosas, rótulos de estado e
 | 1 | Esfera e voz (Gemini Live, 4 estados, legenda) | feito |
 | 2 | Cartões dinâmicos (pesquisa, clima, lista) + pesquisa grátis | feito |
 | 2b | Memória de longo prazo que aprende | feito |
-| 3 | Briefing "bom dia": Gmail (IMAP + senha de app), Google Agenda (iCal), notícias por tema com imagem, clima; roteiro falado com deixas de cartão | próximo |
-| 4 | Painel admin (`/admin`): chat, briefing, fontes de dados, memórias, logs, configurações | |
-| 5 | Telas extras (`/tela/:id`): bloqueio/desbloqueio por voz, editor de widgets, sincronização | |
-| 6 | Integrações pedidas pelo Luca: controle do computador (atalhos, apps, AppleScript), celular, Alexa, câmeras; palavra de ativação "Jarvis"; telemetria do Mac | |
+| 3 | Briefing "bom dia": Gmail (IMAP + senha de app), Google Agenda (iCal), notícias por tema com imagem, clima; roteiro falado com cartões sincronizados | feito (Gmail/Agenda aguardam credenciais do Luca para teste real) |
+| 4 | Painel admin (`/admin`): chat, briefing, fontes de dados, memórias, conversas, telas, integrações, sistema/logs | feito |
+| 5 | Telas extras (`/tela/:id`): bloqueio/desbloqueio por voz ("ativar monitores"), widgets, Personalizar tela, sincronização | feito |
+| 6 | Computador (apps, sites, mídia, volume), Atalhos do macOS como ponte para celular/HomeKit/Alexa, câmeras, palavra de ativação, telemetria | feito; falta o Luca criar/liberar Atalhos e cadastrar câmeras |
+| 7 | Ideias seguintes: reconhecimento facial real no desbloqueio, Alexa nativa (skill própria), notificações push no celular, acesso remoto via Coolify | |
 
 ## Convenções
 

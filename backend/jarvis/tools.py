@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -10,6 +11,7 @@ from google.genai import types
 from .config import settings
 from .hub import hub
 from .memory import TIPOS, memory
+from .sources import news as news_src
 
 log = logging.getLogger("jarvis.tools")
 
@@ -124,6 +126,57 @@ DECLARATIONS = [
         parameters={"type": "OBJECT", "properties": {"descricao": {"type": S}}, "required": ["descricao"]},
     ),
     types.FunctionDeclaration(
+        name="briefing_bom_dia",
+        description=(
+            "Monta e apresenta o briefing da manhã: e-mails que pedem atenção, agenda, clima e notícias "
+            "por tema. Use quando ele disser bom dia ou pedir o resumo do dia. Depois, leia o roteiro "
+            "devolvido do começo ao fim, com naturalidade; os cartões aparecem sozinhos."
+        ),
+        parameters={"type": "OBJECT", "properties": {"atualizar": {"type": "BOOLEAN", "description": "true para buscar tudo de novo."}}},
+    ),
+    types.FunctionDeclaration(
+        name="ativar_telas",
+        description="Desbloqueia (ativar) ou bloqueia as telas adicionais. Ex.: 'ativar monitores', 'bloquear telas'.",
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["ativar", "bloquear"]}}, "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
+        name="abrir_app",
+        description="Abre um aplicativo do Mac pelo nome.",
+        parameters={"type": "OBJECT", "properties": {"nome": {"type": S}}, "required": ["nome"]},
+    ),
+    types.FunctionDeclaration(
+        name="abrir_link",
+        description="Abre um site no navegador padrão do Mac.",
+        parameters={"type": "OBJECT", "properties": {"url": {"type": S}}, "required": ["url"]},
+    ),
+    types.FunctionDeclaration(
+        name="controlar_midia",
+        description="Controla a música no Spotify ou no app Música.",
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["tocar_pausar", "proxima", "anterior"]}}, "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
+        name="ajustar_volume",
+        description="Ajusta o volume do Mac de 0 a 100.",
+        parameters={"type": "OBJECT", "properties": {"nivel": {"type": N}}, "required": ["nivel"]},
+    ),
+    types.FunctionDeclaration(
+        name="executar_atalho",
+        description=(
+            "Roda um Atalho do macOS liberado pelo usuário. É assim que você alcança o celular, a casa "
+            "(HomeKit), a Alexa e outros serviços. Se não souber o nome exato, tente o mais parecido."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {"nome": {"type": S}, "entrada": {"type": S, "description": "Texto opcional passado ao atalho."}},
+            "required": ["nome"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="ver_camera",
+        description="Mostra a imagem atual de uma câmera cadastrada e deixa você vê-la para descrever o que há nela.",
+        parameters={"type": "OBJECT", "properties": {"nome": {"type": S}}, "required": ["nome"]},
+    ),
+    types.FunctionDeclaration(
         name="fechar_cartoes",
         description="Remove todos os cartões da tela. Use quando pedirem para limpar ou fechar.",
         parameters={"type": "OBJECT", "properties": {}},
@@ -153,38 +206,12 @@ else:
     TOOLS = [types.Tool(function_declarations=[SEARCH_DECL, *DECLARATIONS])]
 
 
-def _google_news(consulta: str) -> list[dict[str, Any]]:
-    """Google Notícias por RSS: grátis, sem chave, ordenado por relevância nos últimos 7 dias."""
-    import email.utils
-    import xml.etree.ElementTree as ET
-
-    r = httpx.get(
-        "https://news.google.com/rss/search",
-        params={"q": f"{consulta} when:7d", "hl": "pt-BR", "gl": "BR", "ceid": "BR:pt-419"},
-        timeout=10,
-        follow_redirects=True,
-    )
-    out = []
-    for item in ET.fromstring(r.text).findall("./channel/item")[:8]:
-        title = item.findtext("title") or ""
-        source = item.findtext("source") or ""
-        if source and title.endswith(f" - {source}"):
-            title = title[: -len(source) - 3]
-        date = item.findtext("pubDate")
-        try:
-            date = email.utils.parsedate_to_datetime(date).strftime("%d/%m/%Y %H:%M") if date else None
-        except (TypeError, ValueError):
-            pass
-        out.append({"titulo": title, "fonte": source, "data": date, "url": item.findtext("link")})
-    return out
-
-
 def _search(consulta: str, tipo: str) -> list[dict[str, Any]]:
     from ddgs import DDGS
 
     if tipo == "noticias":
         try:
-            res = _google_news(consulta)
+            res = news_src.google_news(consulta)
             if res:
                 return res
         except Exception as exc:  # noqa: BLE001
@@ -197,6 +224,29 @@ def _search(consulta: str, tipo: str) -> list[dict[str, Any]]:
         ]
     rows = DDGS().text(consulta, region="br-pt", max_results=6)
     return [{"titulo": r.get("title"), "trecho": r.get("body"), "url": r.get("href")} for r in rows]
+
+
+# Códigos WMO do Open-Meteo -> (texto, ícone usado no frontend)
+WMO = {
+    0: ("Céu limpo", "sun"),
+    1: ("Predomínio de sol", "sun"),
+    2: ("Parcialmente nublado", "cloud-sun"),
+    3: ("Nublado", "cloud"),
+    45: ("Neblina", "fog"),
+    48: ("Neblina", "fog"),
+    51: ("Garoa fraca", "drizzle"),
+    53: ("Garoa", "drizzle"),
+    55: ("Garoa forte", "drizzle"),
+    61: ("Chuva fraca", "rain"),
+    63: ("Chuva", "rain"),
+    65: ("Chuva forte", "rain"),
+    80: ("Pancadas de chuva", "rain"),
+    81: ("Pancadas de chuva", "rain"),
+    82: ("Pancadas fortes", "rain"),
+    95: ("Trovoadas", "storm"),
+    96: ("Trovoadas com granizo", "storm"),
+    99: ("Trovoadas com granizo", "storm"),
+}
 
 
 async def fetch_weather(city: str) -> dict[str, Any]:
@@ -263,6 +313,45 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "esquecer":
             gone = await memory.forget(args.get("descricao", ""))
             return {"apagadas": gone} if gone else {"erro": "Não encontrei nada parecido na memória."}
+        if name == "briefing_bom_dia":
+            from . import briefing
+
+            loader = await hub.show_card("carregando", {"titulo": "Montando suas prioridades", "etapas": ["E-mails", "Agenda", "Clima", "Notícias"]})
+            data = await briefing.build(force=bool(args.get("atualizar")))
+            await hub.close_card(loader["id"])
+            await hub.clear_cards()
+            texto, fila = briefing.sequence(data)
+            hub.pending_sequence = fila
+            avisos = []
+            if not data["configurado"]["gmail"]:
+                avisos.append("Gmail ainda não configurado no painel.")
+            if not data["configurado"]["agenda"]:
+                avisos.append("Agenda ainda não configurada no painel.")
+            return {"roteiro": texto, "avisos": avisos, "instrucao": "Leia o roteiro inteiro em voz, sem resumir nem pular."}
+        if name == "ativar_telas":
+            estado = "ativas" if args.get("acao") == "ativar" else "bloqueadas"
+            await hub.set_screens(estado)
+            return {"ok": True, "telas": estado, "conectadas": hub.count("tela")}
+        if name in ("abrir_app", "abrir_link", "controlar_midia", "ajustar_volume", "executar_atalho"):
+            from . import system
+
+            fn = {
+                "abrir_app": lambda: system.open_app(args.get("nome", "")),
+                "abrir_link": lambda: system.open_link(args.get("url", "")),
+                "controlar_midia": lambda: system.media(args.get("acao", "")),
+                "ajustar_volume": lambda: system.volume(args.get("nivel", 50)),
+                "executar_atalho": lambda: system.run_shortcut(args.get("nome", ""), args.get("entrada")),
+            }[name]
+            return await asyncio.to_thread(fn)
+        if name == "ver_camera":
+            from . import system
+
+            cam = system.find_camera(args.get("nome", ""))
+            if not cam:
+                return {"erro": "Câmera não cadastrada.", "cameras": [c.get("nome") for c in system.cameras()]}
+            jpeg = await system.snapshot(cam)
+            await hub.show_card("camera", {"id": cam["id"], "nome": cam["nome"], "ts": int(time.time())})
+            return {"ok": True, "camera": cam["nome"], "_imagem": jpeg}
         if name == "fechar_cartoes":
             await hub.clear_cards()
             return {"ok": True}

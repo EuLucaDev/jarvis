@@ -1,4 +1,4 @@
-import { Mic, MicOff, Play, SendHorizontal, Volume2, VolumeX } from 'lucide-react'
+import { Ear, EarOff, LayoutDashboard, Mic, MicOff, Play, SendHorizontal, Volume2, VolumeX } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { CardChip, CardView } from './Cards'
 import { Orb } from './Orb'
@@ -54,7 +54,7 @@ export function Hud() {
     setText('')
   }
 
-  const error = j.micError ?? (j.status.voice === 'error' ? j.status.error : null)
+  const error = j.micError ?? j.wakeError ?? (j.status.voice === 'error' ? j.status.error : null)
   const showNote = !j.caption && j.phase !== 'falando' && (error || (hasKey === false && j.status.voice !== 'demo'))
 
   return (
@@ -68,6 +68,9 @@ export function Hud() {
         <span className="hud-sep" />
         <span>{voiceOn ? `Voz · ${j.status.model ?? ''}` : j.status.voice === 'demo' ? 'Demonstração' : 'Voz desligada'}</span>
         <span className="hud-spacer" />
+        <a className="hud-link" href="/admin">
+          <LayoutDashboard size={13} /> Painel
+        </a>
         <Clock />
       </header>
 
@@ -127,6 +130,10 @@ export function Hud() {
         </button>
 
         <div className="side">
+          <button className={`ghost ${j.wake ? 'is-on' : ''}`} onClick={j.toggleWake} title="Diga 'Jarvis' para abrir a conversa">
+            {j.wake ? <Ear size={14} /> : <EarOff size={14} />}
+            {j.wake ? 'Ativar com "Jarvis": sim' : 'Ativar com "Jarvis": não'}
+          </button>
           <button className="ghost" onClick={j.toggleBarge} title="Com fone de ouvido você pode interromper o Jarvis falando">
             {j.bargeIn ? <Volume2 size={14} /> : <VolumeX size={14} />}
             {j.bargeIn ? 'Interromper falando: sim' : 'Interromper falando: não'}

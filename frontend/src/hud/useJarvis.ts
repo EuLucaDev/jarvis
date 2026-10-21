@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Player } from '../lib/audio'
-import { JarvisSocket, type Card, type ServerEvent, type VoiceStatus } from '../lib/socket'
+import { JarvisSocket, type Card, type ScreenConfig, type ServerEvent, type Telemetry, type VoiceStatus } from '../lib/socket'
+import { WakeWord } from '../lib/wake'
 
 export type Phase = 'espera' | 'ouvindo' | 'pensando' | 'falando'
 
@@ -15,9 +16,21 @@ export type Live = {
 }
 
 const BARGE_KEY = 'jarvis.bargeIn'
+const WAKE_KEY = 'jarvis.wake'
+const IDLE_MS = 45000 // com a palavra de ativação ligada, a sessão volta a dormir após esse silêncio
 
-export function useJarvis(role = 'hud') {
+export function useJarvis(role = 'hud', query = '') {
   const [status, setStatus] = useState<VoiceStatus>({ voice: 'off' })
+  const [telemetry, setTelemetry] = useState<Telemetry | null>(null)
+  const [screens, setScreens] = useState<ScreenConfig[] | null>(null)
+  const [wake, setWake] = useState(() => {
+    try {
+      return localStorage.getItem(WAKE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const [wakeError, setWakeError] = useState<string | null>(null)
   const [online, setOnline] = useState(false)
   const [cards, setCards] = useState<Card[]>([])
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -42,6 +55,15 @@ export function useJarvis(role = 'hud') {
   const bargeRef = useRef(bargeIn)
   bargeRef.current = bargeIn
   const modelBuf = useRef('')
+  // pedaços da fala ainda não mostrados, com o instante do áudio em que devem aparecer
+  const pending = useRef<{ t: string; at: number }[]>([])
+  const plan = useRef<{ offsets: number[]; next: number; spoken: number }>({ offsets: [], next: 0, spoken: 0 })
+  const lastAudioAt = useRef(0)
+  const lastActive = useRef(0)
+  const wakeRef = useRef(wake)
+  wakeRef.current = wake
+  const stopRef = useRef<() => void>(() => {})
+  const wakeWord = useRef<WakeWord | null>(null)
   const quietAt = useRef(0)
 
   const onEvent = useCallback((e: ServerEvent) => {
@@ -54,7 +76,13 @@ export function useJarvis(role = 'hud') {
         setFocusId(e.cards.at(-1)?.id ?? null)
         break
       case 'status':
-        setStatus({ voice: e.voice, model: e.model, error: e.error })
+        setStatus({ voice: e.voice, model: e.model, error: e.error, telas: e.telas })
+        break
+      case 'telemetria':
+        setTelemetry(e)
+        break
+      case 'telas.config':
+        setScreens(e.telas)
         break
       case 'user.text':
         if (L.turnDone || L.lastModel > L.lastUser) {
@@ -66,11 +94,19 @@ export function useJarvis(role = 'hud') {
         setUserLine((s) => (e.typed ? e.text : s + e.text).slice(-160))
         break
       case 'model.text':
-        if (L.turnDone) modelBuf.current = ''
+        if (L.turnDone) {
+          modelBuf.current = ''
+          pending.current = []
+        }
         L.turnDone = false
         L.lastModel = now
-        modelBuf.current += e.text
-        setCaption(lastWords(modelBuf.current, 8))
+        {
+          const at = player.current?.queuedUntil() ?? 0
+          pending.current.push(...e.text.split(/(?<=\s)/).map((t) => ({ t, at })))
+        }
+        break
+      case 'sequence.plan':
+        plan.current = { offsets: e.palavras, next: 0, spoken: 0 }
         break
       case 'turn':
         L.turnDone = true
@@ -99,11 +135,12 @@ export function useJarvis(role = 'hud') {
 
   useEffect(() => {
     player.current = new Player()
-    const s = new JarvisSocket(role, {
+    const s = new JarvisSocket(role + query, {
       onEvent,
       onOpen: setOnline,
       onAudio: (pcm) => {
         live.current.lastModel = performance.now()
+        lastAudioAt.current = performance.now()
         player.current?.enqueue(pcm)
       },
     })
@@ -112,7 +149,7 @@ export function useJarvis(role = 'hud') {
       s.close()
       mic.current?.stop()
     }
-  }, [role, onEvent])
+  }, [role, query, onEvent])
 
   // Relógio da fase: decide a cada quadro o que a esfera está fazendo.
   useEffect(() => {
@@ -141,6 +178,37 @@ export function useJarvis(role = 'hud') {
               : 0.04
       L.level += (raw - L.level) * (raw > L.level ? 0.35 : 0.08)
       if (speaking) quietAt.current = now
+
+      // Legenda no ritmo da voz: cada pedaço aparece quando o áudio chega ao ponto em que ele veio.
+      if (pending.current.length) {
+        const p = player.current
+        const audioRecent = now - lastAudioAt.current < 1500
+        let n = 0
+        if (!audioRecent && now - L.lastModel > 250) n = pending.current.length // sem áudio: direto
+        else if (p) {
+          const clock = p.now()
+          while (n < pending.current.length && pending.current[n].at <= clock + 0.08) n++
+        }
+        if (n > 0) {
+          const chunk = pending.current.splice(0, n).map((x) => x.t).join('')
+          modelBuf.current += chunk
+          setCaption(lastWords(modelBuf.current, 8))
+          // briefing: pede o próximo cartão quando a fala chega no trecho dele
+          const pl = plan.current
+          if (pl.next < pl.offsets.length) {
+            pl.spoken += chunk.trim().split(/\s+/).filter(Boolean).length
+            while (pl.next < pl.offsets.length && pl.spoken >= pl.offsets[pl.next]) {
+              sock.current?.send({ type: 'sequence.show', index: pl.next })
+              pl.next++
+            }
+          }
+        }
+      }
+      if (next !== 'ouvindo' || L.level > 0.12) lastActive.current = now
+      if (wakeRef.current && mic.current && next === 'ouvindo' && now - lastActive.current > IDLE_MS) {
+        lastActive.current = now
+        stopRef.current()
+      }
       if (L.phase !== next) {
         L.phase = next
         setPhase(next)
@@ -170,6 +238,8 @@ export function useJarvis(role = 'hud') {
         sock.current?.sendAudio(pcm)
       })
       mic.current = m
+      lastActive.current = performance.now()
+      wakeWord.current?.pause()
       sock.current?.send({ type: 'voice.start' })
     } catch (err) {
       // Sem microfone a conversa continua por texto, com a resposta em voz.
@@ -184,6 +254,34 @@ export function useJarvis(role = 'hud') {
     mic.current?.stop()
     mic.current = null
     sock.current?.send({ type: 'voice.stop' })
+    if (wakeRef.current) setTimeout(() => wakeWord.current?.resume(), 400)
+  }, [])
+  stopRef.current = stopVoice
+
+  // Palavra de ativação: o navegador escuta "Jarvis" e só então abre a sessão de voz.
+  useEffect(() => {
+    if (!wake || role !== 'hud') return
+    const w = new WakeWord(() => {
+      if (!mic.current) startVoice()
+    }, setWakeError)
+    wakeWord.current = w
+    if (!mic.current) w.resume()
+    return () => {
+      w.stop()
+      wakeWord.current = null
+    }
+  }, [wake, role, startVoice])
+
+  const toggleWake = useCallback(() => {
+    setWakeError(null)
+    setWake((v) => {
+      try {
+        localStorage.setItem(WAKE_KEY, v ? '0' : '1')
+      } catch {
+        /* só nesta aba */
+      }
+      return !v
+    })
   }, [])
 
   const toggleBarge = useCallback(() => {
@@ -199,6 +297,12 @@ export function useJarvis(role = 'hud') {
 
   return {
     status,
+    telemetry,
+    screens,
+    wake,
+    wakeError,
+    toggleWake,
+    setScreensState: (estado: 'ativas' | 'bloqueadas') => sock.current?.send({ type: 'telas', estado }),
     online,
     cards,
     focusId,
