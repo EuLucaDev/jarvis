@@ -136,7 +136,7 @@ async def apresentar_briefing():
 
 # ---------- ajustes ----------
 
-EDITABLE = {"briefing", "telas", "cameras", "atalhos", "alexa", "mercado", "presenca"}
+EDITABLE = {"briefing", "telas", "cameras", "atalhos", "alexa", "mercado", "presenca", "monitores"}
 
 
 @app.get("/api/ajustes/{chave}")
@@ -182,6 +182,34 @@ async def testar_fontes():
 @app.get("/api/atalhos/disponiveis")
 async def atalhos_disponiveis():
     return await asyncio.to_thread(system.shortcuts_available)
+
+
+# ---------- monitores ----------
+
+
+@app.get("/api/monitores")
+async def monitores():
+    from . import launcher
+
+    return {"plano": await asyncio.to_thread(launcher.plan), "ajustes": store.get("monitores")}
+
+
+@app.post("/api/monitores/abrir")
+async def abrir_monitores(body: dict = Body(default={})):
+    from . import launcher
+
+    try:
+        return {"abertas": await asyncio.to_thread(launcher.open_all, body.get("tela_cheia"))}
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/monitores/fechar")
+async def fechar_monitores():
+    from . import launcher
+
+    await asyncio.to_thread(launcher.close_all)
+    return {"ok": True}
 
 
 # ---------- mercado ----------

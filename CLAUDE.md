@@ -4,6 +4,8 @@ Assistente de voz pessoal do Luca, rodando no Mac (`localhost:8000`). Recriaçã
 
 ## Como rodar
 
+Instalado como serviço (`scripts/instalar.sh`): `com.jarvis.servidor` (KeepAlive) e `com.jarvis.telas` (no login abre o HUD e as telas via `jarvis/launcher.py`, um perfil de Chrome por monitor em `~/Library/Application Support/Jarvis`, `--kiosk`; o perfil do HUD tem `--use-fake-ui-for-media-stream` e autoplay liberado). Para aplicar mudanças: `npm run build` no frontend e `launchctl kickstart -k gui/$(id -u)/com.jarvis.servidor`. Não rode outro uvicorn na porta 8000 enquanto o serviço estiver ativo.
+
 ```bash
 cd frontend && npm install && npm run build      # gera frontend/dist
 uv run --directory backend uvicorn jarvis.app:app --port 8000
@@ -63,7 +65,8 @@ Segue o Jarvis de referência (`docs/referencia-lucas-victor.md`): azul-noite, a
 | 5 | Telas extras (`/tela/:id`): bloqueio/desbloqueio por voz ("ativar monitores"), widgets, Personalizar tela, sincronização | feito |
 | 6 | Computador (apps, sites, mídia, volume), Atalhos do macOS como ponte para celular/HomeKit/Alexa, câmeras, palavra de ativação, telemetria | feito; falta o Luca criar/liberar Atalhos e cadastrar câmeras |
 | 7 | Mescla com o Jarvis de referência: HUD em 3 colunas, telas com abas, Conexões em grade, Financeiro (Yahoo Finance), Alexa (Voice Monkey), Lembretes da Apple, arquivos com confirmação, brilho/bloqueio, visão (câmera e tela vão para a Gemini), presença com reconhecimento facial local (face-api) e bom dia automático | feito; reconhecimento facial, câmera e Alexa aguardam teste do Luca |
-| 8 | Ideias seguintes: saúde (Apple Saúde/WHOOP), Notion/Obsidian, WhatsApp/iMessage, gestos pela câmera, acesso remoto via Coolify, iniciar sozinho com o Mac | |
+| 8 | Iniciar sozinho com o Mac: serviço do servidor, abertura das telas por monitor no login, app Jarvis, painel Monitores | feito |
+| 9 | Ideias seguintes: alertas proativos, saúde (Apple Saúde/WHOOP), Notion/Obsidian, iMessage, gestos pela câmera, acesso remoto via Coolify | |
 
 ## Convenções
 

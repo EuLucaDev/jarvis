@@ -33,7 +33,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api'
-import { loadFace, openCamera, readFace } from '../lib/face'
+import { distance, loadFace, MATCH, openCamera, readFace } from '../lib/face'
 import type { ScreenConfig, Telemetry } from '../lib/socket'
 import { useJarvis } from '../hud/useJarvis'
 import './admin.css'
@@ -713,6 +713,7 @@ function TelasPage({ screensLive }: { screensLive: ScreenConfig[] | null }) {
           </button>
         </form>
       </Panel>
+      <MonitoresPanel telas={telas} />
       <div className="cards-grid">
         {telas.map((t) => (
           <section className="panel-a screen-card" key={t.id}>
@@ -1238,7 +1239,6 @@ function PresencaPage() {
     const r = await api<{ descritores: number[][] }>('/api/rosto')
     const f = await readFace(video.current)
     if (!f) return setStatus('Nenhum rosto na imagem.')
-    const { distance, MATCH } = await import('../lib/face')
     const d = distance(f.descriptor, r.descritores)
     setStatus(d < MATCH ? `Reconhecido (distância ${d.toFixed(2)}).` : `Não reconhecido (distância ${d.toFixed(2)}; precisa ser menor que ${MATCH}).`)
   }
@@ -1292,5 +1292,84 @@ function PresencaPage() {
         </Panel>
       )}
     </div>
+  )
+}
+
+
+/* ---------- monitores ---------- */
+
+type Monitor = { nome: string; principal: boolean; w: number; h: number; tela: string }
+
+function MonitoresPanel({ telas }: { telas: ScreenConfig[] }) {
+  const [plano, setPlano] = useState<Monitor[] | null>(null)
+  const [cfg, setCfg] = useState<{ mapa: Record<string, string>; abrir_no_login: boolean; tela_cheia: boolean } | null>(null)
+  const [msg, setMsg] = useState('')
+  const load = useCallback(() => {
+    api('/api/monitores').then((r) => {
+      setPlano(r.plano)
+      setCfg(r.ajustes)
+    })
+  }, [])
+  useEffect(() => {
+    load()
+  }, [load])
+  if (!plano || !cfg) return null
+  const save = async (next: typeof cfg) => {
+    setCfg(await api('/api/ajustes/monitores', { method: 'PUT', json: next }))
+    load()
+  }
+  const opcoes = [{ id: 'hud', nome: 'HUD' }, ...telas.map((t) => ({ id: t.id, nome: t.nome })), { id: 'nada', nome: 'Nada' }]
+  const abrir = async () => {
+    setMsg('Abrindo…')
+    try {
+      const r = await api<{ abertas: { monitor: string; tela: string }[] }>('/api/monitores/abrir', { method: 'POST' })
+      setMsg(`Aberto em ${r.abertas.length} monitor(es). Para sair da tela cheia, Cmd+Q na janela.`)
+    } catch (e) {
+      setMsg(String(e))
+    }
+  }
+  return (
+    <Panel
+      title="Monitores"
+      desc="O que abre em cada monitor quando o Mac liga (ou ao clicar em Abrir telas). Cada tela vai em tela cheia no monitor certo."
+      actions={
+        <div className="row">
+          <button className="btn" onClick={() => api('/api/monitores/fechar', { method: 'POST' }).then(() => setMsg('Telas fechadas.'))}>
+            Fechar telas
+          </button>
+          <button className="btn primary" onClick={abrir}>
+            Abrir telas agora
+          </button>
+        </div>
+      }
+    >
+      <ul className="rows">
+        {plano.map((m) => (
+          <li key={m.nome}>
+            <span>
+              <b>
+                {m.nome}
+                {m.principal ? ' · principal' : ''}
+              </b>
+              <small>
+                {m.w}×{m.h} {m.h > m.w ? '· em pé' : ''}
+              </small>
+            </span>
+            <div className="seg">
+              {opcoes.map((o) => (
+                <button key={o.id} className={m.tela === o.id ? 'on' : ''} onClick={() => save({ ...cfg, mapa: { ...cfg.mapa, [m.nome]: o.id } })}>
+                  {o.nome}
+                </button>
+              ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="row">
+        <Switch on={cfg.abrir_no_login} onChange={(v) => save({ ...cfg, abrir_no_login: v })} label="Abrir sozinho quando eu entrar no Mac" />
+        <Switch on={cfg.tela_cheia} onChange={(v) => save({ ...cfg, tela_cheia: v })} label="Tela cheia" />
+      </div>
+      {msg && <p className="muted">{msg}</p>}
+    </Panel>
   )
 }

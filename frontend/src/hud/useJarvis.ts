@@ -34,7 +34,10 @@ export function useJarvis(role = 'hud', query = '') {
   const [screens, setScreens] = useState<ScreenConfig[] | null>(null)
   const [wake, setWake] = useState(() => {
     try {
-      return localStorage.getItem(WAKE_KEY) === '1'
+      const saved = localStorage.getItem(WAKE_KEY)
+      // aberto pelo lançador no login: sem preferência salva, já começa escutando "Jarvis"
+      if (saved === null && role === 'hud' && new URLSearchParams(location.search).has('inicio')) return true
+      return saved === '1'
     } catch {
       return false
     }

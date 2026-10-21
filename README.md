@@ -18,6 +18,16 @@ Abra http://localhost:8000 no Chrome, clique no microfone (ou aperte espaço) e 
 - Sem chave, o botão "Ver demonstração" mostra os estados e os cartões.
 - Sem microfone, dá para conversar pelo campo de texto e ouvir a resposta.
 
+## Ligar sozinho com o Mac
+
+```bash
+bash scripts/instalar.sh
+```
+
+Cria dois serviços de login (o servidor, que volta sozinho se cair, e a abertura das telas) e o app **Jarvis** em `~/Applications`, que reabre as telas com um clique. No login, o HUD abre em tela cheia no monitor principal e as telas extras nos outros; troque em Painel → Telas → Monitores. Sair da tela cheia: Cmd+Q na janela. Logs em `~/Library/Logs/Jarvis`. Para remover: `bash scripts/desinstalar.sh`.
+
+Depois de mudar o código: `cd frontend && npm run build` e `launchctl kickstart -k gui/$(id -u)/com.jarvis.servidor`.
+
 ## O que tem
 
 - **HUD** (`/`): esfera de voz, legenda, cartões de pesquisa, clima, listas, e-mails, agenda, notícias e câmeras.

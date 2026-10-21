@@ -31,6 +31,8 @@ DEFAULTS: dict[str, Any] = {
     "mercado": {"ativos": ["^BVSP", "BRL=X", "BTC-USD", "PETR4.SA", "VALE3.SA"]},
     "rosto": {"descritores": [], "nome": "Luca"},  # reconhecimento facial local
     "presenca": {"briefing_auto": True, "ultimo_briefing": ""},
+    # mapa: nome do monitor -> "hud" | id de tela | "nada"; vazio = HUD no principal, telas nos outros
+    "monitores": {"mapa": {}, "abrir_no_login": True, "tela_cheia": True},
 }
 
 SECRET_FIELDS = {"senha_app", "token"}
