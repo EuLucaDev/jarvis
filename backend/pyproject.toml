@@ -1,0 +1,13 @@
+[project]
+name = "jarvis-backend"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "ddgs>=9.16.0",
+    "fastapi>=0.156.8",
+    "google-genai>=2.32.0",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.2.4",
+    "uvicorn[standard]>=0.54.0",
+]
