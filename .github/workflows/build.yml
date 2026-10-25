@@ -113,9 +113,10 @@ jobs:
               fi
               codesign --verify --deep "$B/macos/Jarvis.app"
               codesign -dvv "$B/macos/Jarvis.app" 2>&1 | grep -E "Authority|Signature" || true
-              ditto -c -k --keepParent "$B/macos/Jarvis.app" out/Jarvis-mac.zip ;;
+              # instalador de verdade: Continuar → Instalar, coloca em Aplicativos e abre a configuração
+              scripts/pacote-mac.sh "$B/macos/Jarvis.app" "$(cat VERSION)" "out/Instalar Jarvis.pkg" ;;
             windows)
-              cp $B/nsis/*-setup.exe out/Jarvis-Instalador-Windows.exe ;;
+              cp $B/nsis/*-setup.exe "out/Instalar Jarvis.exe" ;;
             linux)
               cp $B/appimage/*.AppImage out/Jarvis-Linux.AppImage
               cp $B/deb/*.deb out/Jarvis-Linux.deb ;;
@@ -141,8 +142,8 @@ jobs:
           V=$(cat VERSION)
           D="Jarvis-$V"
           mkdir -p "$D/Mac" "$D/Windows" "$D/Linux"
-          ditto -x -k art/jarvis-mac/Jarvis-mac.zip "$D/Mac/"
-          cp art/jarvis-windows/Jarvis-Instalador-Windows.exe "$D/Windows/"
+          cp "art/jarvis-mac/Instalar Jarvis.pkg" "$D/Mac/"
+          cp "art/jarvis-windows/Instalar Jarvis.exe" "$D/Windows/"
           cp art/jarvis-linux/Jarvis-Linux.AppImage art/jarvis-linux/Jarvis-Linux.deb "$D/Linux/"
           chmod +x "$D/Linux/Jarvis-Linux.AppImage"
           cp docs/LEIA-ME.txt "$D/LEIA-ME.txt"

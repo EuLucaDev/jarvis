@@ -1,22 +1,26 @@
-J.A.R.V.I.S. 2.1 — como instalar
+J.A.R.V.I.S. — como instalar
 ================================
 
 Este pacote tem o Jarvis para os três sistemas. Use só a pasta do seu.
 
 MAC (Apple Silicon: M1, M2, M3, M4…)
-  1. Na pasta Mac, clique com o botão direito no Jarvis → Abrir → Abrir.
-     (o app não tem assinatura paga da Apple; esse passo é só uma vez)
-  2. Ele se copia sozinho para a pasta Aplicativos e reabre de lá (é dali que ele liga com o Mac).
-  3. A configuração inicial abre sozinha: cole a chave da Gemini, seu nome e sua cidade.
-  4. Quando o macOS perguntar, permita para o "Jarvis": Microfone, Câmera, Acessibilidade e
+  1. Abra a pasta Mac e dê dois cliques em "Instalar Jarvis.pkg".
+  2. Se o Mac disser que não pode verificar o desenvolvedor (o Jarvis não tem assinatura paga da
+     Apple): clique em OK, abra Ajustes do Sistema → Privacidade e Segurança, desça até o aviso do
+     "Instalar Jarvis.pkg" e clique em "Abrir Mesmo Assim". É só na primeira vez.
+  3. No instalador: Continuar → Instalar → senha do Mac. Ele coloca o Jarvis em Aplicativos e abre.
+  4. A configuração inicial aparece: cole a chave da Gemini, seu nome e sua cidade.
+  5. Quando o macOS perguntar, permita para o "Jarvis": Microfone, Câmera, Acessibilidade e
      Gravação de Tela. Depois de ligar a Acessibilidade, saia do Jarvis (ícone na barra de menus →
-     Sair) e abra de novo.
+     Sair) e abra de novo pelo Launchpad ou por Aplicativos.
+  Desinstalar: ícone → Sair do Jarvis e arraste o Jarvis de Aplicativos para o Lixo.
 
 WINDOWS (10 ou 11, 64 bits)
-  1. Abra a pasta Windows e execute "Jarvis-Instalador-Windows.exe".
+  1. Abra a pasta Windows e dê dois cliques em "Instalar Jarvis.exe".
   2. Se aparecer "O Windows protegeu o computador": Mais informações → Executar assim mesmo.
      (o app não tem certificado pago; o aviso é só no instalador)
-  3. A configuração inicial abre sozinha.
+  3. Siga o instalador; no fim o Jarvis abre com a configuração inicial.
+  Desinstalar: Configurações → Aplicativos → Jarvis → Desinstalar.
 
 LINUX (Ubuntu, Debian, Mint… sessão X11)
   - Ubuntu/Debian: sudo apt install ./Jarvis-Linux.deb

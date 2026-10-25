@@ -1,0 +1,7 @@
+#!/bin/sh
+# Abre o Jarvis já instalado, como a pessoa que está usando o Mac (o instalador roda como administrador).
+USUARIO=$(stat -f%Su /dev/console)
+if [ -n "$USUARIO" ] && [ "$USUARIO" != "root" ]; then
+  launchctl asuser "$(id -u "$USUARIO")" sudo -u "$USUARIO" /usr/bin/open -a /Applications/Jarvis.app
+fi
+exit 0

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Atualizando: fecha o Jarvis que estiver aberto (e o núcleo dele) antes de trocar o app.
+pkill -x jarvis 2>/dev/null
+pkill -f "Jarvis.app/Contents/Resources/core/jarvis-core" 2>/dev/null
+sleep 1
+exit 0

@@ -37,8 +37,8 @@ Três partes, um processo de cada lado da permissão:
 ## Compilar e entregar
 
 Tudo pela compilação automática (`.github/workflows/build.yml`): tag `v*` ou "Run workflow". Para cada sistema: modelos (`scripts/modelos.sh`), interface, núcleo (PyInstaller + `--verificar`), teste do núcleo, Tauri. A etapa final junta `Jarvis-<versão>.zip` (Mac/, Windows/, Linux/, `LEIA-ME.txt`) e publica como versão no repositório `EuLucaDev/jarvis` (privado).
-- Mac: assinado com o certificado próprio "Jarvis Local" (segredos `MAC_CERT_P12`/`MAC_CERT_PASS`), para as permissões não caírem a cada versão. Sem conta da Apple: primeira abertura com botão direito → Abrir.
-- Windows: instalador NSIS (aviso do SmartScreen: "Executar assim mesmo").
+- Mac: app assinado com o certificado próprio "Jarvis Local" (segredos `MAC_CERT_P12`/`MAC_CERT_PASS`), para as permissões não caírem a cada versão, e entregue como instalador `Instalar Jarvis.pkg` (`scripts/pacote-mac.sh` + `packaging/mac/`: boas-vindas, fecha a versão aberta, instala em /Applications sem realocar, abre ao terminar). O .pkg não é assinado (sem conta da Apple): primeira vez por Ajustes → Privacidade e Segurança → "Abrir Mesmo Assim". App instalado pelo .pkg não fica em quarentena.
+- Windows: instalador NSIS `Instalar Jarvis.exe` (aviso do SmartScreen: "Executar assim mesmo").
 - Linux: AppImage e .deb (depende de libportaudio2, wmctrl, xdotool, xclip).
 - Versão em `VERSION` (e em `app/src-tauri/tauri.conf.json` e `Cargo.toml`).
 

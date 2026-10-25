@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>Jarvis</title>
+  <background file="logo.png" alignment="bottomleft" scaling="none" mime-type="image/png"/>
+  <welcome file="boas-vindas.html" mime-type="text/html"/>
+  <conclusion file="conclusao.html" mime-type="text/html"/>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
+  <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
+  <choices-outline>
+    <line choice="jarvis"/>
+  </choices-outline>
+  <choice id="jarvis" title="Jarvis" visible="false">
+    <pkg-ref id="com.lpc.jarvis"/>
+  </choice>
+  <pkg-ref id="com.lpc.jarvis" version="0" onConclusion="none">jarvis-app.pkg</pkg-ref>
+</installer-gui-script>
