@@ -30,6 +30,7 @@ import {
   Check,
   ScrollText,
   Sparkles,
+  Workflow,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api'
@@ -38,7 +39,7 @@ import type { ScreenConfig, Telemetry } from '../lib/socket'
 import { useJarvis } from '../hud/useJarvis'
 import './admin.css'
 
-type Page = 'chat' | 'briefing' | 'conexoes' | 'memorias' | 'financeiro' | 'saude' | 'presenca' | 'conversas' | 'telas' | 'sistema'
+type Page = 'chat' | 'briefing' | 'conexoes' | 'operacoes' | 'memorias' | 'financeiro' | 'saude' | 'presenca' | 'conversas' | 'telas' | 'sistema'
 
 const NAV: { group: string; items: { id: Page; label: string; desc: string; icon: typeof Bot }[] }[] = [
   {
@@ -52,6 +53,7 @@ const NAV: { group: string; items: { id: Page; label: string; desc: string; icon
     group: 'Dados e automação',
     items: [
       { id: 'conexoes', label: 'Conexões', desc: 'E-mail, agenda, casa, mercado', icon: Plug },
+      { id: 'operacoes', label: 'Operações', desc: 'Protocolos e tarefas para outras IAs', icon: Workflow },
       { id: 'memorias', label: 'Memórias', desc: 'O que ele sabe sobre você', icon: BrainCircuit },
       { id: 'financeiro', label: 'Financeiro', desc: 'Bolsa, câmbio e cripto', icon: LineChart },
       { id: 'saude', label: 'Saúde', desc: 'Passos, sono e treinos', icon: HeartPulse },
@@ -61,7 +63,7 @@ const NAV: { group: string; items: { id: Page; label: string; desc: string; icon
   {
     group: 'Sistema',
     items: [
-      { id: 'telas', label: 'Telas', desc: 'Monitores extras e widgets', icon: Monitor },
+      { id: 'telas', label: 'Telas', desc: 'Segundo monitor (opcional)', icon: Monitor },
       { id: 'conversas', label: 'Conversas', desc: 'Histórico e aprendizado', icon: ScrollText },
       { id: 'sistema', label: 'Sistema', desc: 'Modelos, saúde e logs', icon: Cpu },
     ],
@@ -135,6 +137,7 @@ export function Admin() {
           {page === 'chat' && <ChatPage />}
           {page === 'briefing' && <BriefingPage />}
           {page === 'conexoes' && <ConexoesPage />}
+          {page === 'operacoes' && <OperacoesPage tasks={j.tasks} />}
           {page === 'financeiro' && <FinanceiroPage />}
           {page === 'presenca' && <PresencaPage />}
           {page === 'saude' && <SaudePage />}
@@ -704,7 +707,7 @@ function TelasPage({ screensLive }: { screensLive: ScreenConfig[] | null }) {
   }
   return (
     <div className="stack">
-      <Panel title="Como usar" desc="Abra o link de cada tela num navegador em tela cheia no monitor extra. Diga “Jarvis, ativar monitores” para desbloquear todas juntas. Os widgets se montam pela engrenagem dentro da própria tela.">
+      <Panel title="Como usar" desc="Com uma tela só, você não precisa disto: os mesmos widgets abrem no próprio HUD pelo botão Painéis (ou “Jarvis, mostra a agenda”). Se tiver um segundo monitor, escolha abaixo qual tela vai nele; sem escolha, só o HUD abre e a tela do notebook fica livre.">
         <form className="form-row" onSubmit={add}>
           <label className="field-a">
             <span>Nova tela</span>
@@ -1311,6 +1314,258 @@ function PresencaPage() {
   )
 }
 
+
+/* ---------- operações: protocolos e tarefas ---------- */
+
+type Passo = { tipo: string; valor: string }
+type Protocolo = { id: string; nome: string; frases: string[]; fala: string; passos: Passo[] }
+
+const AGENTES = [
+  { id: 'chatgpt', nome: 'ChatGPT', desc: 'Pergunta e resposta, pela sua assinatura (Codex)' },
+  { id: 'claude', nome: 'Claude Code', desc: 'Cria arquivos e usa seus MCPs (ElevenLabs, Drive…)' },
+  { id: 'codex', nome: 'Codex', desc: 'Cria arquivos e código com o ChatGPT' },
+]
+
+function OperacoesPage({ tasks }: { tasks: { id: string; agente: string; titulo: string; estado: string; resumo?: string; pasta?: string; inicio: string }[] }) {
+  const [lista, setLista] = useState<Protocolo[] | null>(null)
+  const [tipos, setTipos] = useState<Record<string, string>>({})
+  const [info, setInfo] = useState<{ disponiveis: Record<string, boolean>; pasta: string } | null>(null)
+  const [nova, setNova] = useState({ agente: 'chatgpt', titulo: '', tarefa: '' })
+  const [toast, toastNode] = useToast()
+  useEffect(() => {
+    api('/api/ajustes/protocolos').then(setLista)
+    api('/api/protocolos/tipos').then(setTipos)
+    api('/api/tarefas').then(setInfo)
+  }, [])
+  if (!lista) return <p className="muted">Carregando…</p>
+  const edit = (i: number, p: Partial<Protocolo>) => setLista(lista.map((x, k) => (k === i ? { ...x, ...p } : x)))
+  const save = async () => {
+    setLista(await api('/api/ajustes/protocolos', { method: 'PUT', json: lista }))
+    toast('Protocolos salvos')
+  }
+  const enviar = async (e: FormEvent) => {
+    e.preventDefault()
+    const r = await api<{ erro?: string }>('/api/tarefas', { method: 'POST', json: nova })
+    toast(r.erro ?? 'Tarefa enviada; o Jarvis avisa quando terminar')
+    if (!r.erro) setNova({ ...nova, titulo: '', tarefa: '' })
+  }
+  return (
+    <div className="stack">
+      <Panel title="Protocolos" desc="Rotinas com nome. Diga “Jarvis, modo foco” ou “Jarvis, protocolo encerrar o dia”. Os passos rodam em ordem.">
+        <div className="stack">
+          {lista.map((p, i) => (
+            <section className="panel-a proto" key={p.id}>
+              <div className="form-grid">
+                <label className="field-a">
+                  <span>Nome</span>
+                  <input value={p.nome} onChange={(e) => edit(i, { nome: e.target.value })} />
+                </label>
+                <label className="field-a">
+                  <span>Outras frases que ativam (separe por vírgula)</span>
+                  <input value={p.frases.join(', ')} onChange={(e) => edit(i, { frases: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} />
+                </label>
+                <label className="field-a span2">
+                  <span>O que ele diz ao terminar (opcional)</span>
+                  <input value={p.fala} onChange={(e) => edit(i, { fala: e.target.value })} />
+                </label>
+              </div>
+              <ol className="steps">
+                {p.passos.map((st, k) => (
+                  <li key={k}>
+                    <select value={st.tipo} onChange={(e) => edit(i, { passos: p.passos.map((x, n) => (n === k ? { ...x, tipo: e.target.value } : x)) })}>
+                      {Object.entries(tipos).map(([id, nome]) => (
+                        <option key={id} value={id}>
+                          {nome}
+                        </option>
+                      ))}
+                    </select>
+                    <input value={st.valor} disabled={st.tipo === 'limpar'} onChange={(e) => edit(i, { passos: p.passos.map((x, n) => (n === k ? { ...x, valor: e.target.value } : x)) })} />
+                    <button className="icon" onClick={() => edit(i, { passos: p.passos.filter((_, n) => n !== k) })} aria-label="Remover passo">
+                      <X size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              <div className="row">
+                <button className="btn" onClick={() => edit(i, { passos: [...p.passos, { tipo: 'app', valor: '' }] })}>
+                  <Plus size={14} /> Passo
+                </button>
+                <button className="btn" onClick={() => api('/api/protocolos/executar', { method: 'POST', json: { nome: p.nome } }).then((r) => toast(r.erro ?? `Executado: ${r.feitos.length} passos`))}>
+                  <Play size={14} /> Testar
+                </button>
+                <button className="btn" onClick={() => setLista(lista.filter((_, k) => k !== i))}>
+                  <Trash2 size={14} /> Remover
+                </button>
+              </div>
+            </section>
+          ))}
+          <div className="row end">
+            <button className="btn" onClick={() => setLista([...lista, { id: Math.random().toString(36).slice(2, 8), nome: 'Novo protocolo', frases: [], fala: '', passos: [] }])}>
+              <Plus size={14} /> Novo protocolo
+            </button>
+            <button className="btn primary" onClick={save}>
+              Salvar protocolos
+            </button>
+          </div>
+        </div>
+      </Panel>
+
+      <ControleMac />
+      <TrabalhoJunto />
+
+      <Panel title="Tarefas para outras IAs" desc={`Por voz: “Jarvis, pede pro Claude criar…”, “pergunta pro ChatGPT…”. Rodam em segundo plano com as suas assinaturas; os arquivos ficam em ${info?.pasta ?? '~/Jarvis/Tarefas'}.`}>
+        <form className="stack" onSubmit={enviar}>
+          <div className="seg">
+            {AGENTES.map((a) => (
+              <button type="button" key={a.id} className={nova.agente === a.id ? 'on' : ''} disabled={info ? !info.disponiveis[a.id] : false} onClick={() => setNova({ ...nova, agente: a.id })} title={a.desc}>
+                {a.nome}
+              </button>
+            ))}
+          </div>
+          <small className="muted">{AGENTES.find((a) => a.id === nova.agente)?.desc}</small>
+          <label className="field-a">
+            <span>Título</span>
+            <input value={nova.titulo} onChange={(e) => setNova({ ...nova, titulo: e.target.value })} placeholder="Ex.: Locução do vídeo da Nova Foods" />
+          </label>
+          <label className="field-a">
+            <span>Pedido</span>
+            <textarea rows={4} value={nova.tarefa} onChange={(e) => setNova({ ...nova, tarefa: e.target.value })} placeholder="Descreva o que ele deve fazer, com todos os detalhes." />
+          </label>
+          <div className="row end">
+            <button className="btn primary" disabled={!nova.tarefa.trim()}>
+              <Send size={14} /> Enviar tarefa
+            </button>
+          </div>
+        </form>
+        <ul className="rows">
+          {tasks.map((t) => (
+            <li key={t.id}>
+              <span>
+                <b>{t.titulo}</b>
+                <small>
+                  {AGENTES.find((a) => a.id === t.agente)?.nome ?? t.agente} · {t.inicio} · {t.estado}
+                  {t.resumo ? ` · ${t.resumo}` : ''}
+                </small>
+              </span>
+              {t.estado === 'rodando' && (
+                <button className="btn" onClick={() => api(`/api/tarefas/${t.id}/cancelar`, { method: 'POST' })}>
+                  Cancelar
+                </button>
+              )}
+            </li>
+          ))}
+          {tasks.length === 0 && <li className="muted">Nenhuma tarefa nesta sessão.</li>}
+        </ul>
+      </Panel>
+      {toastNode}
+    </div>
+  )
+}
+
+function TrabalhoJunto() {
+  const [at, setAt] = useState<Record<string, any> | null>(null)
+  const [amb, setAmb] = useState<Record<string, any> | null>(null)
+  const [dsp, setDsp] = useState<Record<string, any> | null>(null)
+  const [toast, toastNode] = useToast()
+  useEffect(() => {
+    api('/api/despertar').then(setDsp)
+    api('/api/ajustes/atividade').then(setAt)
+    api('/api/ajustes/ambiente').then(setAmb)
+  }, [])
+  if (!at || !amb) return null
+  const saveAt = async (v: Record<string, any>) => setAt(await api('/api/ajustes/atividade', { method: 'PUT', json: v }))
+  const fases: [string, string][] = [['espera', 'Em espera'], ['ouvindo', 'Ouvindo'], ['pensando', 'Pensando'], ['falando', 'Falando']]
+  return (
+    <Panel title="Trabalhando junto" desc="Memória do que você fez no Mac (para “onde eu parei?”), sugestões discretas no HUD e luz ambiente que acompanha o Jarvis.">
+      {dsp && (
+        <div className="stack">
+          <div className="row">
+            <Switch on={!!dsp.palavra} onChange={async (v) => setDsp({ ...dsp, ...(await api('/api/ajustes/despertar', { method: 'PUT', json: { ...dsp, palavra: v } })) })} label="Acordar dizendo “Jarvis”" />
+            <Switch on={!!dsp.palmas} onChange={async (v) => setDsp({ ...dsp, ...(await api('/api/ajustes/despertar', { method: 'PUT', json: { ...dsp, palmas: v } })) })} label="Acordar com duas palmas" />
+            <Switch on={!!dsp.bom_dia} onChange={async (v) => setDsp({ ...dsp, ...(await api('/api/ajustes/despertar', { method: 'PUT', json: { ...dsp, bom_dia: v } })) })} label="Primeira chamada da manhã abre com o bom dia" />
+          </div>
+          <small className="muted">
+            {dsp.ativo ? 'Ouvido em segundo plano ligado (reconhecimento no próprio Mac).' : dsp.erro ? `Ouvido desligado: ${dsp.erro}.` : 'O ouvido em segundo plano funciona no app Jarvis instalado.'}
+          </small>
+        </div>
+      )}
+      <div className="row">
+        <Switch on={!!at.registrar} onChange={(v) => saveAt({ ...at, registrar: v })} label="Lembrar apps e janelas (7 dias, só neste Mac)" />
+        <Switch on={!!at.sugestoes} onChange={(v) => saveAt({ ...at, sugestoes: v })} label="Sugestões no canto do HUD" />
+      </div>
+      <div className="form-grid">
+        <div className="span2">
+          <Switch on={!!amb.ativo} onChange={(v) => setAmb({ ...amb, ativo: v })} label="Luz ambiente pela Alexa (Voice Monkey)" />
+        </div>
+        {fases.map(([id, nome]) => (
+          <label className="field-a" key={id}>
+            <span>{nome} → dispositivo da Alexa</span>
+            <input value={amb[id] ?? ''} placeholder="Ex.: luz azul" onChange={(e) => setAmb({ ...amb, [id]: e.target.value })} />
+          </label>
+        ))}
+      </div>
+      <div className="row end">
+        <button
+          className="btn primary"
+          onClick={async () => {
+            setAmb(await api('/api/ajustes/ambiente', { method: 'PUT', json: amb }))
+            toast('Luz ambiente salva')
+          }}
+        >
+          Salvar luz ambiente
+        </button>
+      </div>
+      <small className="muted">Os nomes são os dispositivos cadastrados em Conexões → Alexa (cada um com a rotina “ligar” no Voice Monkey).</small>
+      {toastNode}
+    </Panel>
+  )
+}
+
+function ControleMac() {
+  const [perm, setPerm] = useState<boolean | null>(null)
+  const [msg, setMsg] = useState('')
+  const load = useCallback(() => api('/api/permissoes').then((p) => setPerm(!!p.acessibilidade)), [])
+  useEffect(() => {
+    load()
+  }, [load])
+  return (
+    <Panel
+      title="Controle do Mac"
+      desc="Para o Jarvis digitar, usar atalhos e para a sua mão virar o mouse (modo mouse), o macOS precisa liberar a Acessibilidade para o Python do serviço."
+      actions={
+        <div className="row">
+          {!perm && (
+            <button
+              className="btn primary"
+              onClick={async () => {
+                await api('/api/permissoes/acessibilidade', { method: 'POST' })
+                setMsg('Na tela que abriu, ligue o “Python” e depois clique em Reiniciar serviço.')
+              }}
+            >
+              Liberar acesso
+            </button>
+          )}
+          <button
+            className="btn"
+            onClick={async () => {
+              await api('/api/reiniciar', { method: 'POST' })
+              setMsg('Reiniciando…')
+              setTimeout(load, 6000)
+            }}
+          >
+            Reiniciar serviço
+          </button>
+        </div>
+      }
+    >
+      <p className={perm ? 'ok-line' : 'muted'}>
+        {perm === null ? 'Conferindo…' : perm ? 'Liberado: ele pode digitar, usar atalhos e mover o mouse.' : 'Ainda não liberado.'}
+      </p>
+      <p className="muted small">Por voz: “Jarvis, abre o Notas e escreve…”, “abre uma aba com…”, “aperta cmd+s”, “liga o modo mouse”.</p>
+      {msg && <p className="muted">{msg}</p>}
+    </Panel>
+  )
+}
 
 /* ---------- monitores ---------- */
 

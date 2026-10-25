@@ -1,0 +1,320 @@
+/* camada sobre a tela: fundo totalmente transparente, nada recebe clique além da esfera mini */
+html:has(.overlay),
+body:has(.overlay) {
+  background: transparent !important;
+  overflow: hidden;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: transparent;
+}
+
+.ov-orb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 112px;
+  height: 112px;
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 50%;
+  will-change: transform, width, height, opacity;
+}
+.ov-orb.gone {
+  visibility: hidden;
+}
+.ov-orb .orb {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 18px rgb(63 211 232 / 0.55));
+}
+.ov-orb.mini::before {
+  /* disco escuro atrás da esfera mini: legível sobre qualquer fundo */
+  content: '';
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(3 10 26 / 0.85), rgb(3 10 26 / 0.35) 70%, transparent);
+}
+.ov-orb.hover .orb {
+  filter: drop-shadow(0 0 28px rgb(63 211 232 / 0.95));
+}
+
+.ov-bars {
+  position: absolute;
+  left: 50%;
+  bottom: -14px;
+  display: flex;
+  gap: 3px;
+  height: 18px;
+  align-items: center;
+  transform: translateX(-50%);
+}
+.ov-bars i {
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: #5fd4ff;
+  box-shadow: 0 0 6px #5fd4ff;
+  transform: scaleY(0.15);
+}
+
+.ov-label {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  margin-left: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transform: translateY(-50%);
+  background: rgb(3 10 26 / 0.88);
+  box-shadow:
+    inset 0 0 0 1px rgb(95 212 255 / 0.7),
+    0 0 24px -4px rgb(63 211 232 / 0.6);
+  color: #e8f4ff;
+  font: 500 12.5px/1.2 'Manrope', system-ui, sans-serif;
+  animation: ov-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.ov-label b {
+  margin-right: 4px;
+  color: #5fd4ff;
+  font: 600 10px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+/* área que ele está olhando/alterando: cantos que se abrem e uma varredura */
+.ov-area {
+  position: absolute;
+  border-radius: 8px;
+  background: rgb(63 211 232 / 0.05);
+  box-shadow: 0 0 0 1px rgb(95 212 255 / 0.35);
+  animation: ov-area-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  overflow: hidden;
+}
+.ov-area .c {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #5fd4ff;
+  filter: drop-shadow(0 0 6px #5fd4ff);
+}
+.ov-area .tl {
+  top: 0;
+  left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 8px 0 0 0;
+}
+.ov-area .tr {
+  top: 0;
+  right: 0;
+  border-left: 0;
+  border-bottom: 0;
+  border-radius: 0 8px 0 0;
+}
+.ov-area .bl {
+  bottom: 0;
+  left: 0;
+  border-right: 0;
+  border-top: 0;
+  border-radius: 0 0 0 8px;
+}
+.ov-area .br {
+  bottom: 0;
+  right: 0;
+  border-left: 0;
+  border-top: 0;
+  border-radius: 0 0 8px 0;
+}
+.ov-area .scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(180deg, transparent, rgb(95 212 255 / 0.18), transparent);
+  animation: ov-scan 1.6s ease-in-out infinite;
+}
+.ov-area.modo-agir {
+  background: rgb(124 242 154 / 0.05);
+}
+.ov-area.modo-agir .c {
+  border-color: #7cf29a;
+  filter: drop-shadow(0 0 6px #7cf29a);
+}
+@keyframes ov-area-in {
+  from {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+@keyframes ov-scan {
+  from {
+    top: -40%;
+  }
+  to {
+    top: 100%;
+  }
+}
+@keyframes ov-in {
+  from {
+    opacity: 0;
+    transform: translate(-8px, -50%);
+  }
+}
+
+/* janela que a mão mira (borda fina) ou segura (borda viva, como cartão levantado) */
+.ov-win {
+  position: absolute;
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 1.5px rgb(95 212 255 / 0.55),
+    0 0 26px -6px rgb(63 211 232 / 0.45);
+  transition:
+    left 0.08s linear,
+    top 0.08s linear,
+    width 0.1s linear,
+    height 0.1s linear,
+    box-shadow 0.25s;
+  animation: ov-in-win 0.25s ease-out both;
+}
+.ov-win.st-pegou,
+.ov-win.st-ajuste {
+  background: rgb(63 211 232 / 0.05);
+  box-shadow:
+    inset 0 0 0 2.5px #5fd4ff,
+    0 0 0 1px rgb(95 212 255 / 0.4),
+    0 0 60px -6px rgb(63 211 232 / 0.75),
+    0 30px 80px -30px rgb(0 0 0 / 0.6);
+}
+.ov-win.st-ajuste {
+  box-shadow:
+    inset 0 0 0 2.5px #7cf29a,
+    0 0 60px -6px rgb(124 242 154 / 0.6);
+}
+.ov-win.st-solta {
+  animation: ov-out-win 0.6s ease-out both;
+}
+.ov-win.st-cancelou {
+  box-shadow: inset 0 0 0 2px #f2715f;
+  animation: ov-out-win 0.6s ease-out both;
+}
+.ov-win .c {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 3px solid #5fd4ff;
+  filter: drop-shadow(0 0 6px #5fd4ff);
+}
+.ov-win.st-mira .c {
+  border-width: 2px;
+  opacity: 0.7;
+}
+.ov-win.st-ajuste .c {
+  border-color: #7cf29a;
+  filter: drop-shadow(0 0 6px #7cf29a);
+}
+.ov-win .tl { top: -2px; left: -2px; border-right: 0; border-bottom: 0; border-radius: 12px 0 0 0; }
+.ov-win .tr { top: -2px; right: -2px; border-left: 0; border-bottom: 0; border-radius: 0 12px 0 0; }
+.ov-win .bl { bottom: -2px; left: -2px; border-right: 0; border-top: 0; border-radius: 0 0 0 12px; }
+.ov-win .br { bottom: -2px; right: -2px; border-left: 0; border-top: 0; border-radius: 0 0 12px 0; }
+.ov-win-tag {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  max-width: 80%;
+  padding: 5px 12px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgb(3 10 26 / 0.86);
+  box-shadow: inset 0 0 0 1px rgb(95 212 255 / 0.6);
+  color: #e8f4ff;
+  font: 500 11.5px/1.2 'Manrope', system-ui, sans-serif;
+}
+@keyframes ov-in-win {
+  from {
+    opacity: 0;
+    transform: scale(1.015);
+  }
+}
+@keyframes ov-out-win {
+  to {
+    opacity: 0;
+    transform: scale(0.99);
+  }
+}
+
+/* cursor da mão por cima de tudo */
+.ov-hand {
+  position: absolute;
+  top: -16px;
+  left: -16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(95 212 255 / 0.35), transparent 70%);
+  box-shadow:
+    inset 0 0 0 2px #5fd4ff,
+    0 0 22px rgb(63 211 232 / 0.85);
+  transition:
+    width 0.12s,
+    height 0.12s,
+    top 0.12s,
+    left 0.12s;
+}
+.ov-hand.pinch {
+  top: -11px;
+  left: -11px;
+  width: 22px;
+  height: 22px;
+  background: #5fd4ff;
+  box-shadow:
+    0 0 0 4px rgb(95 212 255 / 0.25),
+    0 0 30px rgb(63 211 232 / 1);
+}
+.ov-hand span {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: rgb(3 10 26 / 0.86);
+  box-shadow: inset 0 0 0 1px rgb(95 212 255 / 0.6);
+  color: #e8f4ff;
+  font: 500 11px/1.2 'Manrope', system-ui, sans-serif;
+}
+.ov-ring {
+  --p: 0;
+  position: absolute;
+  top: -36px;
+  left: -36px;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: conic-gradient(#5fd4ff calc(var(--p) * 360deg), rgb(95 212 255 / 0.12) 0);
+  -webkit-mask: radial-gradient(circle, transparent 29px, #000 30px);
+  mask: radial-gradient(circle, transparent 29px, #000 30px);
+  filter: drop-shadow(0 0 8px rgb(63 211 232 / 0.8));
+}
+.ov-ring.fixar {
+  background: conic-gradient(#7cf29a calc(var(--p) * 360deg), rgb(124 242 154 / 0.12) 0);
+}
+.ov-ring span {
+  position: absolute;
+  top: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #e8f4ff;
+  font: 500 9.5px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}

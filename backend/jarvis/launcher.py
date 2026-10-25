@@ -58,16 +58,18 @@ def displays() -> list[dict[str, Any]]:
 
 
 def plan() -> list[dict[str, Any]]:
-    """Qual tela vai em qual monitor. Padrão: HUD no principal, telas extras nos outros, em ordem."""
+    """Qual tela vai em qual monitor. Padrão: só o HUD, no principal. Os outros monitores (inclusive a
+    tela do notebook) ficam livres até o Luca escolher uma tela extra para eles no painel."""
     cfg = store.get("monitores") or {}
     mapa: dict[str, str] = cfg.get("mapa") or {}
-    telas = [t["id"] for t in store.get("telas") or []]
+    # com o app Jarvis instalado (avisou nos últimos 14 dias), o HUD é dele; aqui só as telas extras
+    app = (store.get("app") or {}).get("ultimo", 0)
+    tem_app = time.time() - app < 14 * 86400
     out = []
-    extras = iter(telas)
     for d in displays():
-        alvo = mapa.get(d["nome"])
-        if not alvo:
-            alvo = "hud" if d["principal"] else next(extras, "nada")
+        alvo = mapa.get(d["nome"]) or ("hud" if d["principal"] else "nada")
+        if alvo == "hud" and tem_app:
+            alvo = "nada"
         out.append({**d, "tela": alvo})
     return out
 
@@ -95,7 +97,11 @@ def open_all(tela_cheia: bool | None = None) -> list[dict[str, Any]]:
     close_all()
     time.sleep(0.8)
     opened = []
-    for d in plan():
+    plano = plan()
+    # com um monitor só, tela cheia travaria o Mac inteiro no Jarvis: abre como janela normal
+    if len(plano) < 2:
+        full = False
+    for d in plano:
         if d["tela"] == "nada":
             continue
         profile = PROFILES / f"chrome-{d['tela']}"
@@ -112,6 +118,8 @@ def open_all(tela_cheia: bool | None = None) -> list[dict[str, Any]]:
         ]
         if d["tela"] == "hud":
             args.append("--use-fake-ui-for-media-stream")  # microfone e câmera sem pergunta, só neste perfil
+            # gestos e voz seguem funcionando com o HUD atrás de outra janela (modo mouse, trabalhar junto)
+            args += ["--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling"]
         if full:
             args.append("--kiosk")
         subprocess.Popen(["open", "-na", CHROME, "--args", *args])

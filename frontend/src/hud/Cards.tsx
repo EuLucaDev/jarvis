@@ -1,5 +1,11 @@
 import {
   CalendarDays,
+  CheckCircle2,
+  Circle,
+  CircleDashed,
+  CircleSlash,
+  Workflow,
+  XCircle,
   Camera,
   Cloud,
   CloudDrizzle,
@@ -23,6 +29,7 @@ import {
   X,
 } from 'lucide-react'
 import type { Card } from '../lib/socket'
+import type { CSSProperties } from 'react'
 
 const num = (v: unknown, d = 1) =>
   typeof v === 'number' ? v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—'
@@ -69,6 +76,7 @@ function labelFor(kind: Card['kind']) {
     mercado: 'Mercado · Cotações',
     mensagens: 'Mensagens · iMessage',
     saude: 'Saúde · Apple',
+    plano: 'Trabalhando junto',
   }[kind]
 }
 
@@ -205,6 +213,57 @@ function Lista({ card, onClose }: { card: Card; onClose?: () => void }) {
       </footer>
     </>
   )
+}
+
+const PASSO_ICONE = { pendente: Circle, fazendo: CircleDashed, feito: CheckCircle2, pulado: CircleSlash, erro: XCircle } as const
+
+/** Plano de uma tarefa no Mac: cada passo é marcado enquanto o Jarvis trabalha. */
+function Plano({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const passos: { texto: string; estado: keyof typeof PASSO_ICONE }[] = card.data.passos ?? []
+  const feitos = passos.filter((p) => p.estado === 'feito').length
+  return (
+    <>
+      <Head card={card} icon={Workflow} onClose={onClose} />
+      <div className="plan-bar" aria-hidden="true">
+        <span style={{ width: `${passos.length ? (feitos / passos.length) * 100 : 0}%` }} />
+      </div>
+      <ol className="plan">
+        {passos.map((p, i) => {
+          const Icon = PASSO_ICONE[p.estado] ?? Circle
+          return (
+            <li key={i} className={`st-${p.estado}`}>
+              <Icon size={15} className={p.estado === 'fazendo' ? 'spin-slow' : ''} />
+              <span>
+                <i>{String(i + 1).padStart(2, '0')}</i> {p.texto}
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+      <footer className="card-foot">
+        <span>
+          {feitos} de {passos.length} passos · Esc para parar
+        </span>
+        <span>{card.at}</span>
+      </footer>
+    </>
+  )
+}
+
+/** Texto simples de um cartão, para copiar e colar em outro app. */
+export function cardText(card: Card) {
+  const d = card.data
+  const linhas: string[] = []
+  const titulo = d.titulo ?? d.cidade
+  if (titulo) linhas.push(String(titulo))
+  if (d.resumo) linhas.push('', d.resumo)
+  if (card.kind === 'clima') linhas.push(`${d.temperatura}° · ${d.condicao} · mín ${d.minima}° máx ${d.maxima}° · chuva ${d.chuva}%`)
+  for (const p of d.pontos ?? []) linhas.push(`• ${p}`)
+  for (const it of d.itens ?? []) linhas.push(`• ${[it.rotulo ?? it.titulo, it.valor_texto ?? it.detalhe].filter(Boolean).join(' — ')}`)
+  for (const a of d.ativos ?? []) linhas.push(`• ${a.nome}: ${a.preco} (${a.variacao > 0 ? '+' : ''}${a.variacao}%)`)
+  for (const p of d.passos ?? []) linhas.push(`• ${p.texto}`)
+  for (const f of d.fontes ?? []) if (f.url) linhas.push(`${f.titulo}: ${f.url}`)
+  return linhas.join('\n').trim()
 }
 
 function Emails({ card, onClose }: { card: Card; onClose?: () => void }) {
@@ -358,8 +417,11 @@ function Spark({ serie, up }: { serie: number[]; up: boolean }) {
 const money = (v: number, cur?: string) =>
   v.toLocaleString('pt-BR', { minimumFractionDigits: v < 100 ? 2 : 0, maximumFractionDigits: v < 100 ? 2 : 0 }) + (cur && cur !== 'BRL' ? ` ${cur}` : '')
 
-function Mercado({ card, onClose }: { card: Card; onClose?: () => void }) {
+const PERIODOS: [string, string][] = [['1d', '1D'], ['5d', '5D'], ['1mo', '1M'], ['6mo', '6M'], ['1y', '1A']]
+
+function Mercado({ card, onClose, onPeriod, preview }: { card: Card; onClose?: () => void; onPeriod?: (p: string) => void; preview?: string | null }) {
   const ativos: any[] = card.data.ativos ?? []
+  const atual = preview ?? card.data.periodo ?? '1mo'
   return (
     <>
       <Head card={card} icon={LineChart} onClose={onClose} />
@@ -382,7 +444,17 @@ function Mercado({ card, onClose }: { card: Card; onClose?: () => void }) {
       </ul>
       <footer className="card-foot">
         <span>Yahoo Finance · variação do dia</span>
-        <span>{card.at}</span>
+        {onPeriod ? (
+          <span className="periods" role="radiogroup" aria-label="Período do gráfico">
+            {PERIODOS.map(([id, rot]) => (
+              <button key={id} role="radio" aria-checked={atual === id} className={atual === id ? 'on' : ''} onClick={() => onPeriod(id)}>
+                {rot}
+              </button>
+            ))}
+          </span>
+        ) : (
+          <span>{card.at}</span>
+        )}
       </footer>
     </>
   )
@@ -450,7 +522,7 @@ function Saude({ card, onClose }: { card: Card; onClose?: () => void }) {
   )
 }
 
-export function CardView({ card, onClose }: { card: Card; onClose?: () => void }) {
+export function CardView({ card, onClose, onPeriod, preview }: { card: Card; onClose?: () => void; onPeriod?: (p: string) => void; preview?: string | null }) {
   return (
     <article className={`card card-${card.kind}`} key={card.id}>
       {card.kind === 'pesquisa' && <Pesquisa card={card} onClose={onClose} />}
@@ -461,15 +533,16 @@ export function CardView({ card, onClose }: { card: Card; onClose?: () => void }
       {card.kind === 'noticia' && <Noticia card={card} onClose={onClose} />}
       {card.kind === 'carregando' && <Carregando card={card} />}
       {card.kind === 'camera' && <CameraCard card={card} onClose={onClose} />}
-      {card.kind === 'mercado' && <Mercado card={card} onClose={onClose} />}
+      {card.kind === 'mercado' && <Mercado card={card} onClose={onClose} onPeriod={onPeriod} preview={preview} />}
       {card.kind === 'mensagens' && <Mensagens card={card} onClose={onClose} />}
       {card.kind === 'saude' && <Saude card={card} onClose={onClose} />}
+      {card.kind === 'plano' && <Plano card={card} onClose={onClose} />}
     </article>
   )
 }
 
 // Versão compacta para a faixa de cartões anteriores.
-export function CardChip({ card, active, onClick }: { card: Card; active: boolean; onClick: () => void }) {
+export function CardChip({ card, active, onClick, style }: { card: Card; active: boolean; onClick: () => void; style?: CSSProperties }) {
   const d = card.data
   const cat =
     card.kind === 'clima'
@@ -510,7 +583,7 @@ export function CardChip({ card, active, onClick }: { card: Card; active: boolea
         ? d.itens[0].valor_texto ?? ''
         : ''
   return (
-    <button className={`chip ${active ? 'is-active' : ''}`} onClick={onClick}>
+    <button className={`chip ${active ? 'is-active' : ''} ${style ? 'is-dragging' : ''}`} onClick={onClick} data-id={card.id} style={style}>
       {card.kind === 'noticia' && d.itens?.[0]?.imagem && (
         <img className="chip-img" src={d.itens[0].imagem} alt="" referrerPolicy="no-referrer" onError={(e) => (e.currentTarget.style.display = 'none')} />
       )}

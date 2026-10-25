@@ -49,6 +49,10 @@ async def notify(titulo: str, texto: str, nivel: str = "info", falar: bool = Tru
     cfg = _cfg()
     alert = {"id": uuid.uuid4().hex[:8], "titulo": titulo, "texto": texto, "nivel": nivel, "at": time.strftime("%H:%M")}
     RECENT[:] = (RECENT + [alert])[-20:]
+    # modo foco a dois: o que não é urgente espera o fim do foco e vira um resumo só
+    if hub.focus_until and time.time() < hub.focus_until and nivel != "alta" and titulo != "Fim do foco":
+        hub.focus_queue.append(alert)
+        return alert
     quiet = _quiet(cfg)
     await hub.broadcast({"type": "alerta", **alert, "silencioso": quiet})
     if quiet:

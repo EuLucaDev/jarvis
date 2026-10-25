@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Player } from '../lib/audio'
-import { JarvisSocket, type Alert, type Card, type ScreenConfig, type ServerEvent, type Telemetry, type VoiceStatus } from '../lib/socket'
+import { JarvisSocket, type Task, type Alert, type Card, type ScreenConfig, type ServerEvent, type Telemetry, type VoiceStatus } from '../lib/socket'
 import { frameJpeg } from '../lib/face'
+import { play } from '../lib/sfx'
 import { WakeWord } from '../lib/wake'
 
 export type Phase = 'espera' | 'ouvindo' | 'pensando' | 'falando'
@@ -21,6 +22,36 @@ const WAKE_KEY = 'jarvis.wake'
 const IDLE_MS = 45000 // com a palavra de ativação ligada, a sessão volta a dormir após esse silêncio
 
 export type LogLine = { quem: 'voce' | 'jarvis'; texto: string }
+
+// Frase de etapa mostrada enquanto uma ferramenta trabalha ("Lendo o radar de notícias…").
+const STEP: Record<string, string> = {
+  pesquisar_web: 'Pesquisando na web',
+  mostrar_pesquisa: 'Montando o cartão',
+  consultar_clima: 'Consultando o clima',
+  briefing_bom_dia: 'Mostrando suas prioridades',
+  buscar_memorias: 'Consultando a memória',
+  lembrar: 'Anotando',
+  consultar_mercado: 'Lendo o mercado',
+  ler_mensagens: 'Lendo suas mensagens',
+  enviar_mensagem: 'Preparando a mensagem',
+  notas: 'Procurando nas notas',
+  consultar_saude: 'Lendo seus dados de saúde',
+  ver_camera: 'Abrindo a câmera',
+  executar_atalho: 'Executando o atalho',
+  executar_protocolo: 'Executando o protocolo',
+  delegar_tarefa: 'Passando a tarefa adiante',
+  consultar_tarefas: 'Conferindo as tarefas',
+  abrir_painel: 'Abrindo o painel',
+  arquivos: 'Mexendo nos arquivos',
+  contexto_atual: 'Olhando o que você está fazendo',
+  substituir_selecao: 'Trocando o texto',
+  clicar: 'Clicando',
+  digitar: 'Escrevendo',
+  teclas: 'Usando o teclado',
+  navegador: 'Mexendo no navegador',
+  mostrar_plano: 'Montando o plano',
+  onde_parei: 'Lembrando onde você parou',
+}
 export type Vision = 'off' | 'camera' | 'tela'
 
 export function useJarvis(role = 'hud', query = '') {
@@ -51,6 +82,15 @@ export function useJarvis(role = 'hud', query = '') {
   const [userLine, setUserLine] = useState('')
   const [phase, setPhase] = useState<Phase>('espera')
   const [micError, setMicError] = useState<string | null>(null)
+  const [step, setStep] = useState<string | null>(null)
+  const [panel, setPanel] = useState<string | null>(null)
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [suggestions, setSuggestions] = useState<{ id: string; texto: string; pedido: string }[]>([])
+  const [focusUntil, setFocusUntil] = useState(0)
+  const [stoppedAt, setStoppedAt] = useState(0)
+  const [update, setUpdate] = useState<{ etapa: string; pct: number; erro?: string; reiniciar?: boolean; app_muda?: boolean } | null>(null)
+  const [wakeCall, setWakeCall] = useState<{ n: number; comando: string; bomDia: boolean; origem: string } | null>(null)
+  const [mouseMode, setMouseMode] = useState<{ on: boolean; n: number } | null>(null)
   const [bargeIn, setBargeIn] = useState(() => {
     try {
       return localStorage.getItem(BARGE_KEY) === '1'
@@ -79,6 +119,9 @@ export function useJarvis(role = 'hud', query = '') {
   const wakeWord = useRef<WakeWord | null>(null)
   const quietAt = useRef(0)
   const pendingAsk = useRef<string | null>(null) // texto que espera a voz ficar ao vivo
+  const pendingFrame = useRef<string | null>(null) // imagem (quadro) que vai junto com o texto
+  const sound = role === 'hud' // só o HUD toca efeitos (várias janelas no mesmo Mac soariam juntas)
+  const sfx = useCallback((k: Parameters<typeof play>[0], pan = 0) => sound && play(k, pan), [sound])
 
   const pushLog = useCallback((quem: LogLine['quem'], texto: string, novo: boolean) => {
     setLog((l) => {
@@ -95,11 +138,19 @@ export function useJarvis(role = 'hud', query = '') {
       case 'sync':
         setCards(e.cards)
         setStatus(e.status)
+        if (e.tarefas) setTasks(e.tarefas)
         setFocusId(e.cards.at(-1)?.id ?? null)
         break
       case 'status':
-        setStatus({ voice: e.voice, model: e.model, error: e.error, telas: e.telas })
+        setStatus((prev) => {
+          if (e.voice === 'live' && prev.voice !== 'live') sfx('listen')
+          if (e.voice === 'error' && prev.voice !== 'error') sfx('error')
+          if (e.telas === 'ativas' && prev.telas !== 'ativas') sfx('unlock')
+          return { voice: e.voice, model: e.model, error: e.error, telas: e.telas }
+        })
         if (e.voice === 'live' && pendingAsk.current) {
+          if (pendingFrame.current) sock.current?.send({ type: 'video.frame', jpeg: pendingFrame.current })
+          pendingFrame.current = null
           sock.current?.send({ type: 'text', text: pendingAsk.current })
           pendingAsk.current = null
         }
@@ -128,11 +179,12 @@ export function useJarvis(role = 'hud', query = '') {
       case 'alerta': {
         const { type: _t, ...a } = e
         setAlerts((l) => [...l.filter((x) => x.id !== a.id), a].slice(-4))
-        if (!a.silencioso && role === 'hud') chime(player.current)
+        if (!a.silencioso) sfx('alert', 0.6)
         setTimeout(() => setAlerts((l) => l.filter((x) => x.id !== a.id)), 14000)
         break
       }
       case 'model.text':
+        setStep(null)
         if (L.turnDone) {
           modelBuf.current = ''
           pending.current = []
@@ -146,31 +198,78 @@ export function useJarvis(role = 'hud', query = '') {
         break
       case 'sequence.plan':
         plan.current = { offsets: e.palavras, next: 0, spoken: 0 }
+        sfx('start')
         break
       case 'turn':
         L.turnDone = true
+        setStep(null)
         if (e.phase === 'interrupted') player.current?.flush()
         break
       case 'tool':
         L.tool = e.phase === 'start'
+        if (e.phase === 'start') {
+          setStep(STEP[e.name] ?? 'Trabalhando nisso')
+          sfx('step')
+        }
         break
       case 'card':
         setCards((c) => [...c.filter((x) => x.id !== e.card.id), e.card].slice(-8))
         setFocusId(e.card.id)
+        if (e.card.kind !== 'carregando') sfx('card')
+        break
+      case 'card.update':
+        setCards((c) => c.map((x) => (x.id === e.card.id ? e.card : x)))
         break
       case 'card.close':
         setCards((c) => c.filter((x) => x.id !== e.id))
         setFocusId((f) => (f === e.id ? null : f))
         break
       case 'cards.clear':
-        setCards([])
+        setCards((c) => {
+          if (c.length) sfx('close')
+          return []
+        })
         setFocusId(null)
+        break
+      case 'painel':
+        setPanel(e.visao || null)
+        break
+      case 'sugestao':
+        setSuggestions((l) => [{ id: e.id, texto: e.texto, pedido: e.pedido }, ...l].slice(0, 3))
+        sfx('step', 0.7)
+        break
+      case 'parado':
+        setStoppedAt(Date.now())
+        setStep(null)
+        sfx('close')
+        break
+      case 'foco':
+        setFocusUntil(e.ate ? e.ate * 1000 : 0)
+        break
+      case 'janela': {
+        // app Jarvis instalado: minimiza (vira a esfera do canto) ou volta
+        const bridge = (window as unknown as { jarvisApp?: { minimize: () => void; showHud: () => void; hide: () => void } }).jarvisApp
+        if (role === 'hud') e.acao === 'minimizar' ? bridge?.minimize() : e.acao === 'esconder' ? bridge?.hide() : bridge?.showHud()
+        break
+      }
+      case 'despertar':
+        setWakeCall((w) => ({ n: (w?.n ?? 0) + 1, comando: e.comando, bomDia: e.bom_dia, origem: e.origem }))
+        break
+      case 'atualizacao':
+        setUpdate({ etapa: e.etapa, pct: e.pct, erro: e.erro, reiniciar: e.reiniciar, app_muda: e.app_muda })
+        break
+      case 'modo_mouse':
+        setMouseMode((m) => ({ on: e.ligado, n: (m?.n ?? 0) + 1 })) // conta: o mesmo pedido duas vezes também vale
+        break
+      case 'tarefa':
+        setTasks((l) => [e.tarefa, ...l.filter((x) => x.id !== e.tarefa.id)].slice(0, 12))
+        if (e.tarefa.estado !== 'rodando') sfx(e.tarefa.estado === 'feito' ? 'alert' : 'error')
         break
       case 'audio.flush':
         player.current?.flush()
         break
     }
-  }, [pushLog, role])
+  }, [pushLog, sfx, role])
 
   useEffect(() => {
     player.current = new Player()
@@ -193,6 +292,8 @@ export function useJarvis(role = 'hud', query = '') {
   // Relógio da fase: decide a cada quadro o que a esfera está fazendo.
   useEffect(() => {
     let raf = 0
+    let frame = 0
+    const live_ch = role === 'hud' && 'BroadcastChannel' in window ? new BroadcastChannel('jarvis-live') : null
     const tick = () => {
       const L = live.current
       const now = performance.now()
@@ -215,7 +316,9 @@ export function useJarvis(role = 'hud', query = '') {
             : next === 'pensando'
               ? 0.18
               : 0.04
-      L.level += (raw - L.level) * (raw > L.level ? 0.35 : 0.08)
+      // um valor inválido do áudio contaminaria o nível para sempre
+      if (Number.isFinite(raw)) L.level += (raw - L.level) * (raw > L.level ? 0.35 : 0.08)
+      if (!Number.isFinite(L.level)) L.level = 0
       if (speaking) quietAt.current = now
 
       // Legenda no ritmo da voz: cada pedaço aparece quando o áudio chega ao ponto em que ele veio.
@@ -253,11 +356,16 @@ export function useJarvis(role = 'hud', query = '') {
         L.phase = next
         setPhase(next)
       }
+      // a esfera mini do app (outra janela) acompanha a voz por este canal
+      if (live_ch && (frame = (frame + 1) % 2) === 0) live_ch.postMessage({ level: L.level, phase: L.phase })
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [pushLog])
+    return () => {
+      cancelAnimationFrame(raf)
+      live_ch?.close()
+    }
+  }, [pushLog, role])
 
   // Visão: câmera ou tela vão para a Gemini a 1 quadro por segundo, enquanto a voz está ao vivo.
   useEffect(() => {
@@ -341,17 +449,25 @@ export function useJarvis(role = 'hud', query = '') {
 
   // Palavra de ativação: o navegador escuta "Jarvis" e só então abre a sessão de voz.
   useEffect(() => {
-    if (!wake || role !== 'hud') return
-    const w = new WakeWord(() => {
-      if (!mic.current) startVoice()
-    }, setWakeError)
+    // no app instalado quem escuta "Jarvis" é o ouvido do macOS (servidor); o do Chrome não existe lá
+    if (!wake || role !== 'hud' || (window as unknown as { jarvisApp?: unknown }).jarvisApp) return
+    const w = new WakeWord(
+      (cmd) => {
+        if (mic.current) return
+        // "Jarvis, bom dia" de uma vez: o resto da frase vira o pedido
+        if (cmd) askRef.current(cmd)
+        else startVoice()
+      },
+      setWakeError,
+      () => sfx('ack'),
+    )
     wakeWord.current = w
     if (!mic.current) w.resume()
     return () => {
       w.stop()
       wakeWord.current = null
     }
-  }, [wake, role, startVoice])
+  }, [wake, role, startVoice, sfx])
 
   const toggleWake = useCallback(() => {
     setWakeError(null)
@@ -376,18 +492,22 @@ export function useJarvis(role = 'hud', query = '') {
     })
   }, [])
 
-  /** Pergunta por texto; se a voz estiver desligada, liga e envia assim que conectar. */
+  /** Pergunta por texto (com uma imagem opcional); se a voz estiver desligada, liga e envia ao conectar. */
   const ask = useCallback(
-    async (text: string) => {
+    async (text: string, jpeg?: string) => {
       if (statusRef.current.voice === 'live') {
+        if (jpeg) sock.current?.send({ type: 'video.frame', jpeg })
         sock.current?.send({ type: 'text', text })
         return
       }
       pendingAsk.current = text
+      pendingFrame.current = jpeg ?? null
       await startVoice()
     },
     [startVoice],
   )
+  const askRef = useRef(ask)
+  askRef.current = ask
 
   /** Analisador do que está soando agora: a voz do Jarvis falando, senão o microfone. */
   const scope = useCallback(() => {
@@ -425,6 +545,17 @@ export function useJarvis(role = 'hud', query = '') {
     phase,
     live,
     micError,
+    step,
+    panel,
+    setPanel,
+    tasks,
+    mouseMode,
+    wakeCall,
+    update,
+    suggestions,
+    dismissSuggestion: (id: string) => setSuggestions((l) => l.filter((x) => x.id !== id)),
+    focusUntil,
+    stoppedAt,
     bargeIn,
     toggleBarge,
     startVoice,
@@ -433,23 +564,6 @@ export function useJarvis(role = 'hud', query = '') {
     closeCard: (id: string) => sock.current?.send({ type: 'card.close', id }),
     clearCards: () => sock.current?.send({ type: 'cards.clear' }),
   }
-}
-
-/** Dois tons curtos para avisos (sem arquivo de áudio). */
-function chime(p: Player | null) {
-  const ctx = p?.context()
-  if (!ctx) return
-  ;[880, 1320].forEach((f, i) => {
-    const o = ctx.createOscillator()
-    const g = ctx.createGain()
-    o.frequency.value = f
-    g.gain.setValueAtTime(0, ctx.currentTime + i * 0.16)
-    g.gain.linearRampToValueAtTime(0.08, ctx.currentTime + i * 0.16 + 0.02)
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.16 + 0.28)
-    o.connect(g).connect(ctx.destination)
-    o.start(ctx.currentTime + i * 0.16)
-    o.stop(ctx.currentTime + i * 0.16 + 0.3)
-  })
 }
 
 function lastWords(text: string, n: number) {

@@ -4,7 +4,8 @@ function rms(an: AnalyserNode, buf: Float32Array<ArrayBuffer>) {
   an.getFloatTimeDomainData(buf)
   let s = 0
   for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i]
-  return Math.sqrt(s / buf.length)
+  const r = Math.sqrt(s / buf.length)
+  return Number.isFinite(r) ? r : 0
 }
 
 export class Mic {

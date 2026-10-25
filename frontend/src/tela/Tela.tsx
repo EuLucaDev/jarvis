@@ -20,15 +20,70 @@ const BASE_WIDGETS: { id: string; nome: string; desc: string }[] = [
 ]
 
 type Briefing = Record<string, any>
+type J = ReturnType<typeof useJarvis>
+
+/** Dados que os widgets usam (briefing, câmeras, transcrição); serve à tela extra e ao HUD. */
+export function useWidgetData(j: J) {
+  const [brief, setBrief] = useState<Briefing>({})
+  const [cams, setCams] = useState<{ id: string; nome: string }[]>([])
+  const [lines, setLines] = useState<{ quem: string; texto: string }[]>([])
+  const [refreshing, setRefreshing] = useState(false)
+  useEffect(() => {
+    api('/api/ajustes/cameras').then(setCams).catch(() => {})
+    const load = () => api<Briefing>('/api/briefing').then(setBrief).catch(() => {})
+    load()
+    const t = setInterval(load, 120000)
+    return () => clearInterval(t)
+  }, [])
+  useEffect(() => {
+    if (j.userLine) setLines((l) => upsert(l, 'Você', j.userLine))
+  }, [j.userLine])
+  useEffect(() => {
+    if (j.caption) setLines((l) => upsert(l, 'Jarvis', j.caption, true))
+  }, [j.caption])
+  const refresh = async () => {
+    setRefreshing(true)
+    try {
+      setBrief(await api('/api/briefing/gerar', { method: 'POST' }))
+    } finally {
+      setRefreshing(false)
+    }
+  }
+  const temas: string[] = (brief.noticias ?? []).map((n: any) => n.tema)
+  return { brief, cams, lines, refresh, refreshing, temas }
+}
+export type WidgetData = ReturnType<typeof useWidgetData>
+
+/** Visões prontas (abas). A primeira é a própria tela, quando houver. */
+export function standardViews(temas: string[]) {
+  return [
+    { id: 'agenda', nome: 'Agenda tática', widgets: ['agenda', 'relogio', 'clima'] },
+    { id: 'comunicacoes', nome: 'Comunicações', widgets: ['emails', 'transcricao'] },
+    { id: 'radar', nome: 'Radar de notícias', widgets: temas.map((t) => `noticias:${t}`) },
+    { id: 'nucleo', nome: 'Núcleo do sistema', widgets: ['sistema', 'sessao', 'transcricao'] },
+  ]
+}
+
+export function WidgetGrid({ j, widgets, data }: { j: J; widgets: string[]; data: WidgetData }) {
+  const card = j.cards.find((c) => c.id === j.focusId) ?? j.cards.at(-1)
+  return (
+    <>
+      {widgets.map((w, i) => (
+        <div className={`widget w-${w.split(':')[0]}`} key={w} style={{ animationDelay: `${i * 90}ms` }}>
+          <Widget id={w} j={j} brief={data.brief} card={card} lines={data.lines} cams={data.cams} />
+        </div>
+      ))}
+    </>
+  )
+}
 
 export function Tela({ id }: { id: string }) {
   const j = useJarvis('tela', `&tela=${encodeURIComponent(id)}`)
+  const data = useWidgetData(j)
+  const { brief, cams, refresh, refreshing } = data
   const [all, setAll] = useState<ScreenConfig[] | null>(null)
-  const [brief, setBrief] = useState<Briefing>({})
-  const [cams, setCams] = useState<{ id: string; nome: string }[]>([])
   const [editing, setEditing] = useState(false)
   const [phase, setPhase] = useState<'locked' | 'unlocking' | 'open'>('locked')
-  const [lines, setLines] = useState<{ quem: string; texto: string }[]>([])
   const [view, setView] = useState<string>(() => {
     try {
       return localStorage.getItem(`jarvis.tela.${id}`) || 'propria'
@@ -36,7 +91,6 @@ export function Tela({ id }: { id: string }) {
       return 'propria'
     }
   })
-  const [refreshing, setRefreshing] = useState(false)
   const now = useNow()
   const prev = useRef(j.status.telas)
   useEffect(() => {
@@ -49,11 +103,6 @@ export function Tela({ id }: { id: string }) {
 
   useEffect(() => {
     api<ScreenConfig[]>('/api/ajustes/telas').then(setAll)
-    api('/api/ajustes/cameras').then(setCams).catch(() => {})
-    const load = () => api<Briefing>('/api/briefing').then(setBrief).catch(() => {})
-    load()
-    const t = setInterval(load, 120000)
-    return () => clearInterval(t)
   }, [])
   useEffect(() => {
     if (j.screens) setAll(j.screens)
@@ -71,14 +120,6 @@ export function Tela({ id }: { id: string }) {
     if (now === 'bloqueadas') setPhase('locked')
     prev.current = now
   }, [j.status.telas])
-
-  // Transcrição: junta os pedaços por quem falou.
-  useEffect(() => {
-    if (j.userLine) setLines((l) => upsert(l, 'Você', j.userLine))
-  }, [j.userLine])
-  useEffect(() => {
-    if (j.caption) setLines((l) => upsert(l, 'Jarvis', j.caption, true))
-  }, [j.caption])
 
   const screen = all?.find((s) => s.id === id)
   const catalog = useMemo(() => {
@@ -112,28 +153,12 @@ export function Tela({ id }: { id: string }) {
     await api('/api/ajustes/telas', { method: 'PUT', json: list })
   }
 
-  const temas: string[] = (brief.noticias ?? []).map((n: any) => n.tema)
-  const views = [
-    { id: 'propria', nome: screen?.nome ?? 'Esta tela', widgets: screen?.widgets ?? [] },
-    { id: 'agenda', nome: 'Agenda tática', widgets: ['agenda', 'relogio', 'clima'] },
-    { id: 'comunicacoes', nome: 'Comunicações', widgets: ['emails', 'transcricao'] },
-    { id: 'radar', nome: 'Radar de notícias', widgets: temas.map((t) => `noticias:${t}`) },
-    { id: 'nucleo', nome: 'Núcleo do sistema', widgets: ['sistema', 'sessao', 'orbe', 'transcricao'] },
-  ]
+  const views = [{ id: 'propria', nome: screen?.nome ?? 'Esta tela', widgets: screen?.widgets ?? [] }, ...standardViews(data.temas)]
   // sem aba repetida quando a tela já tem o nome de uma visão pronta
   const own = views[0].nome.toLowerCase()
   for (let i = views.length - 1; i > 0; i--) if (views[i].nome.toLowerCase() === own) views.splice(i, 1)
   const current = views.find((v) => v.id === view) ?? views[0]
   const widgets = current.widgets
-  const card = j.cards.find((c) => c.id === j.focusId) ?? j.cards.at(-1)
-  const refresh = async () => {
-    setRefreshing(true)
-    try {
-      setBrief(await api('/api/briefing/gerar', { method: 'POST' }))
-    } finally {
-      setRefreshing(false)
-    }
-  }
 
   return (
     <main className={`tela tela-${phase} ${phase === 'open' ? 'has-tabs' : ''}`}>
@@ -195,11 +220,7 @@ export function Tela({ id }: { id: string }) {
 
       {phase === 'open' && (
         <section className="widgets" key={current.id}>
-          {widgets.map((w, i) => (
-            <div className={`widget w-${w.split(':')[0]}`} key={w} style={{ animationDelay: `${i * 90}ms` }}>
-              <Widget id={w} j={j} brief={brief} card={card} lines={lines} cams={cams} />
-            </div>
-          ))}
+          <WidgetGrid j={j} widgets={widgets} data={data} />
           {widgets.length === 0 && <p className="muted">Nenhum widget nesta visão. Abra a engrenagem para montar.</p>}
         </section>
       )}

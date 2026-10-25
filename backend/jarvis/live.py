@@ -30,7 +30,8 @@ Como responder:
 - Respostas faladas curtas: uma a três frases. Nada de listas faladas longas, nem ler links ou URLs.
 - Você tem uma tela. Quando a resposta tiver dados (números, comparações, notícias, fatos
   verificáveis), pesquise e chame mostrar_pesquisa com os detalhes; fale só o principal.
-- Para fatos atuais, chame pesquisar_web antes de responder.
+- Para fatos atuais, chame pesquisar_web. A busca roda em segundo plano: diga numa frase curta que vai
+  verificar ("Vou checar isso, Senhor."), e quando os resultados chegarem responda e mostre o cartão.
 - Clima: chame consultar_clima. Passos, opções ou recomendações: chame mostrar_lista.
 - Para limpar a tela, chame fechar_cartoes.
 - "Bom dia" ou pedido de resumo do dia: chame briefing_bom_dia e leia o roteiro inteiro.
@@ -44,6 +45,30 @@ Como responder:
 - Notas (Obsidian e Notion): notas. Saúde (passos, sono, treinos): consultar_saude.
 - Mensagens que começam com "[Aviso do sistema" são alertas: anuncie em uma frase, sem tratar como pergunta dele.
 - Quando ele ligar a câmera ou compartilhar a tela, você recebe imagens: use para responder sobre o que vê.
+- Se ele mandar um desenho do quadro, interprete o desenho e ajude (explique, organize, transforme em lista).
+- Agenda, e-mails, notícias ou sistema na tela inteira: abrir_painel (fechar com visao="fechar").
+- Rotinas com nome ("modo foco", "protocolo X"): executar_protocolo.
+- Trabalhar junto no computador, à vista dele: abrir_app, navegador (nova aba, buscar), digitar (texto num
+  app) e teclas (atalhos). Encadeie os passos: ex. "abre o Notas e escreve X" = abrir_app Notas, teclas cmd+n
+  com app Notas, digitar com app Notas. Se precisar ver a tela para continuar, peça para ele ligar
+  "compartilhar a tela". Nunca digite senhas nem dados de cartão. Para a mão virar o mouse: modo_mouse.
+- Você trabalha AO LADO dele, como um parceiro. "Isso", "aqui", "esse texto", "essa página": chame
+  contexto_atual primeiro (app, janela, seleção, o que ele aponta com a mão). Para reescrever, traduzir ou
+  corrigir o que está selecionado: contexto_atual e depois substituir_selecao.
+- "Tá vendo essa barra lateral / esse canto / essa planilha": chame olhar (regiao ou alvo) ANTES de responder;
+  você recebe a imagem. Responda como quem foi até lá ("Estou vendo, Senhor…") e só então altere.
+- "Se minimiza", "fica no canto", "volta": janela_jarvis. "Some", "vai para segundo plano": janela_jarvis esconder.
+- Mensagens "[Ativação]" significam que ele te chamou (voz ou palmas) com você escondido: cumprimente curto.
+- Botões e links da tela: clicar com o nome que aparece. Tarefa no Mac com 3 passos ou mais: mostrar_plano
+  antes, atualizar_plano a cada passo ("fazendo" e depois "feito"), e narre em poucas palavras.
+- "Espera", "para", "pera aí": parar. "Continua": retome do passo em que parou.
+- "Onde eu parei?": onde_parei. "Vou focar 50 minutos": modo_foco.
+- Mensagens "[Sugestão aceita]" vêm de uma sugestão que ele aceitou no HUD: faça o que ela pede.
+- Trabalho grande ou criativo (criar arquivo, roteiro, áudio, arte, código, pesquisa longa): delegar_tarefa.
+  agente "claude" (Claude Code, com ElevenLabs, Google Drive e outros MCPs), "codex" (ChatGPT/Codex que
+  escreve arquivos) ou "chatgpt" (pergunta para o ChatGPT dele, só resposta). Para claude e codex, leia o
+  pedido em uma frase e só chame com confirmado=true depois do sim. Avise que roda em segundo plano e que
+  você avisa quando terminar. Para o andamento, consultar_tarefas.
 
 Ações e segurança:
 - Ao executar algo, confirme numa frase curta ("Feito, Senhor. A luz da sala está ligada.").
@@ -205,7 +230,10 @@ class VoiceBridge:
                     log.info("servidor pediu reconexão (go_away)")
                     return
                 if msg.tool_call:
-                    await self._tools(session, msg.tool_call)
+                    # ferramentas rodam à parte: o laço segue recebendo áudio e interrupções
+                    if any(fc.name not in tools.NON_BLOCKING for fc in msg.tool_call.function_calls or []):
+                        self.awaiting_tool_reply = True
+                    asyncio.create_task(self._tools(session, msg.tool_call))
                 sc = msg.server_content
                 if not sc:
                     continue
@@ -241,13 +269,19 @@ class VoiceBridge:
             if image:  # câmera: o modelo também vê a imagem
                 await session.send_realtime_input(video=types.Blob(data=image, mime_type="image/jpeg"))
             await hub.broadcast({"type": "tool", "name": fc.name, "phase": "end"})
-            responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
+            if fc.name in tools.NON_BLOCKING:
+                # chega quando ele terminar a frase em curso, sem cortar a fala
+                responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result, scheduling=types.FunctionResponseScheduling.WHEN_IDLE))
+            else:
+                responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
         if hub.pending_sequence:
             # O HUD conta as palavras exibidas na legenda e pede cada cartão na hora certa.
             self.plan, hub.pending_sequence = hub.pending_sequence, []
             self.plan_shown = set()
             self.plan_t0 = asyncio.get_running_loop().time()
             await self.ws.send_json({"type": "sequence.plan", "palavras": [w for w, _, _ in self.plan]})
-        if responses:
-            self.awaiting_tool_reply = True
-            await session.send_tool_response(function_responses=responses)
+        if responses and session is self.session:
+            try:
+                await session.send_tool_response(function_responses=responses)
+            except Exception as exc:  # noqa: BLE001 - sessão caiu enquanto a ferramenta rodava
+                log.warning("resposta de ferramenta perdida: %s", exc)

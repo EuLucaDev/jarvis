@@ -184,10 +184,12 @@ input {
 
 /* corpo em três colunas */
 .hud-body {
+  position: relative;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 340px;
-  gap: 18px;
-  padding: 4px 22px 0;
+  /* colunas acompanham a tela: estreitas no notebook, mais largas no monitor grande */
+  grid-template-columns: clamp(232px, 17vw, 330px) minmax(0, 1fr) clamp(256px, 19vw, 370px);
+  gap: clamp(12px, 1.2vw, 22px);
+  padding: 4px clamp(14px, 1.5vw, 26px) 0;
   min-height: 0;
 }
 .hud-col {
@@ -196,6 +198,15 @@ input {
   gap: 12px;
   min-height: 0;
   overflow: hidden;
+}
+/* sem buraco embaixo: o último painel da coluna estica até o rodapé */
+.hud-col > .hp:last-child {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: start;
+}
+.hud-col > .hp.grow:last-child {
+  max-height: none;
 }
 .hud-center {
   display: grid;
@@ -450,7 +461,7 @@ input {
 }
 .orb-wrap {
   grid-area: 1 / 1;
-  height: min(64vmin, 680px, 100%);
+  height: min(82vmin, 900px, 100%);
   aspect-ratio: 1;
   transition:
     transform 0.9s var(--ease-out-expo),
@@ -462,17 +473,23 @@ input {
   display: block;
 }
 .has-card .orb-wrap {
-  transform: scale(1.06);
-  opacity: 0.5;
+  transform: scale(1.04);
+  opacity: 0.62;
 }
 .focus {
   grid-area: 1 / 1;
-  width: min(600px, 100%);
+  width: min(clamp(460px, 44vw, 860px), 100%);
   max-height: 100%;
   overflow: auto;
   scrollbar-width: thin;
   z-index: 2;
   animation: card-in 0.7s var(--ease-out-expo) both;
+  transition: transform 0.35s var(--ease-out-expo);
+}
+.focus.dragging {
+  transition: none;
+  cursor: grabbing;
+  filter: drop-shadow(0 18px 40px rgb(63 211 232 / 0.35));
 }
 @keyframes card-in {
   from {
@@ -1498,4 +1515,1035 @@ input {
 }
 .health {
   grid-template-columns: repeat(2, 1fr);
+}
+
+/* frase de etapa ("Pesquisando na web…") embaixo do estado */
+.hud-state .step {
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.18em;
+  color: var(--fg-muted);
+  text-shadow: none;
+  animation: step-in 0.45s var(--ease-out-expo) both;
+}
+.hud-state .step::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+    letter-spacing: 0.4em;
+  }
+}
+@keyframes blink {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* cartões anteriores chegam à fileira vindos do centro */
+.strip .chip {
+  animation: chip-in 0.6s var(--ease-out-expo) both;
+}
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-60px) scale(1.25);
+    filter: blur(4px);
+  }
+}
+
+.chip-btn.on {
+  color: var(--signal);
+  box-shadow:
+    inset 0 0 0 1px var(--signal),
+    0 0 14px -4px rgb(63 211 232 / 0.6);
+}
+.chip-btn.primary {
+  color: #04102a;
+  background: var(--signal);
+  box-shadow: none;
+}
+.chip-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.bottom-l {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* painéis dentro do HUD (uma tela só) */
+.deck {
+  position: absolute;
+  inset: 0 clamp(14px, 1.5vw, 26px);
+  z-index: 6;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-radius: var(--radius-panel);
+  background: rgb(3 10 26 / 0.86);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    0 0 60px -20px rgb(40 140 255 / 0.6);
+  animation: card-in 0.5s var(--ease-out-expo) both;
+}
+.deck-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 0 0;
+}
+.deck-bar .tabs {
+  flex: 1;
+  padding: 0 12px 0 14px;
+}
+.deck-grid {
+  padding: 14px;
+}
+
+/* quadro de desenho */
+.board {
+  position: absolute;
+  inset: 0 clamp(14px, 1.5vw, 26px);
+  z-index: 7;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+  background:
+    linear-gradient(rgb(95 212 255 / 0.05) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, rgb(95 212 255 / 0.05) 1px, transparent 1px) 0 0 / 32px 32px,
+    rgb(3 10 26 / 0.9);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  animation: card-in 0.5s var(--ease-out-expo) both;
+}
+.board canvas {
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+.board-hint {
+  position: absolute;
+  inset: 0 0 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: 14px;
+  pointer-events: none;
+}
+.board-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  box-shadow: inset 0 1px 0 var(--line);
+}
+.board-bar input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: rgb(5 16 38 / 0.8);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+.inks {
+  display: flex;
+  gap: 6px;
+}
+.inks button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.inks button.on {
+  opacity: 1;
+  box-shadow:
+    0 0 0 2px #04102a,
+    0 0 0 3px currentColor;
+}
+
+/* cursor da mão */
+.hand-cursor {
+  position: fixed;
+  top: -14px;
+  left: -14px;
+  z-index: 50;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 2px var(--signal),
+    0 0 18px rgb(63 211 232 / 0.7);
+  pointer-events: none;
+  transition:
+    width 0.12s,
+    height 0.12s,
+    background 0.12s;
+}
+.hand-cursor.pinch {
+  background: rgb(63 211 232 / 0.55);
+  box-shadow:
+    inset 0 0 0 2px #fff,
+    0 0 26px rgb(63 211 232 / 0.95);
+}
+
+/* tarefas de outras IAs */
+.tasks ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tasks li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  font-size: 12.5px;
+}
+.tasks li svg {
+  margin-top: 2px;
+  color: var(--signal);
+}
+.tasks li.feito svg {
+  color: #5fd68f;
+}
+.tasks li.erro svg {
+  color: #f2715f;
+}
+.tasks li span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.tasks li b {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tasks li small {
+  color: var(--fg-subtle);
+  font-size: 11px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* títulos dos painéis numa linha só, mesmo em coluna estreita */
+.hp > header {
+  white-space: nowrap;
+  min-width: 0;
+}
+.hp > header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.hp > header em {
+  flex: none;
+}
+.top-r {
+  white-space: nowrap;
+}
+@media (max-width: 1400px) {
+  .link-state {
+    display: none;
+  }
+}
+@media (max-width: 1500px) {
+  .hp > header {
+    letter-spacing: 0.1em;
+  }
+}
+/* tela baixa: a coluna rola em vez de cortar o último painel */
+.hud-col {
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/* ---------- controle no ar ---------- */
+
+/* o que a pinça vai pegar fica destacado */
+.air-hover {
+  outline: 1.5px solid var(--signal) !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 22px -4px rgb(63 211 232 / 0.7) !important;
+  transition: outline-offset 0.15s;
+}
+.hand-cursor.second {
+  box-shadow:
+    inset 0 0 0 2px #ffb547,
+    0 0 18px rgb(255 181 71 / 0.6);
+}
+.hand-cursor.second.pinch {
+  background: rgb(255 181 71 / 0.5);
+}
+.zoom-line {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+}
+.zoom-line line {
+  stroke: var(--signal);
+  stroke-width: 2;
+  stroke-dasharray: 6 6;
+  filter: drop-shadow(0 0 6px rgb(63 211 232 / 0.8));
+}
+
+/* prévia da câmera com o esqueleto da mão */
+.gesture-panel {
+  position: fixed;
+  left: clamp(14px, 1.5vw, 26px);
+  bottom: 70px;
+  z-index: 40;
+  width: 210px;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border-radius: 12px;
+  background: rgb(3 10 26 / 0.86);
+  backdrop-filter: blur(10px);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    0 0 30px -12px rgb(40 140 255 / 0.6);
+  animation: card-in 0.5s var(--ease-out-expo) both;
+}
+.gp-cam {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    linear-gradient(rgb(95 212 255 / 0.06) 1px, transparent 1px) 0 0 / 16px 16px,
+    linear-gradient(90deg, rgb(95 212 255 / 0.06) 1px, transparent 1px) 0 0 / 16px 16px,
+    #020814;
+}
+.gp-cam canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+}
+.gp-tag {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+.gp-help {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(5 16 38 / 0.8);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.gp-help[aria-pressed='true'] {
+  color: var(--signal);
+}
+.gp-status {
+  margin: 0;
+  font: 500 11px/1.3 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--signal);
+  animation: step-in 0.3s var(--ease-out-expo) both;
+}
+.gp-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--fg-subtle);
+}
+.gp-list b {
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+/* zonas de soltar enquanto arrasta um cartão */
+.drop-zones {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.dz {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  background: rgb(63 211 232 / 0.04);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition:
+    background 0.2s,
+    color 0.2s,
+    box-shadow 0.2s;
+  animation: fade-in 0.3s both;
+}
+.dz-fixar {
+  inset: 12% auto 18% 0;
+  width: 12%;
+  flex-direction: column;
+  justify-content: flex-start; /* rótulo no alto: a prévia dos gestos ocupa a parte de baixo */
+  padding-top: 40px;
+  border-radius: 0 16px 16px 0;
+}
+.dz-fechar {
+  inset: 12% 0 18% auto;
+  width: 12%;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: 40px;
+  border-radius: 16px 0 0 16px;
+}
+.dz-guardar {
+  inset: auto 18% 0 18%;
+  height: 16%;
+  border-radius: 16px 16px 0 0;
+}
+.dz.on {
+  color: var(--signal);
+  background: rgb(63 211 232 / 0.14);
+  box-shadow:
+    inset 0 0 0 1.5px var(--signal),
+    0 0 40px -8px rgb(63 211 232 / 0.6);
+}
+.dz-fechar.on {
+  color: #f2715f;
+  background: rgb(242 113 95 / 0.12);
+  box-shadow: inset 0 0 0 1.5px #f2715f;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.focus.to-fechar {
+  opacity: 0.6;
+}
+.focus.to-fixar,
+.focus.to-guardar {
+  opacity: 0.85;
+}
+
+/* cartões fixos */
+.pinned {
+  position: fixed;
+  z-index: 8;
+  width: clamp(260px, 22vw, 360px);
+  max-height: 46vh;
+  overflow: auto;
+  scrollbar-width: none;
+  cursor: grab;
+  touch-action: none;
+  animation: card-in 0.5s var(--ease-out-expo) both;
+}
+.pinned .card {
+  font-size: 0.92em;
+}
+.pin-off {
+  position: absolute;
+  top: 10px;
+  right: 44px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: rgb(5 16 38 / 0.8);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.pin-off:hover {
+  color: var(--signal);
+}
+
+/* chip puxado da fileira */
+.chip.is-dragging {
+  position: relative;
+  z-index: 5;
+  transition: none;
+  animation: none;
+  box-shadow:
+    inset 0 0 0 1px var(--signal),
+    0 18px 40px -10px rgb(63 211 232 / 0.5);
+}
+
+/* períodos do mercado */
+.periods {
+  display: inline-flex;
+  gap: 4px;
+}
+.periods button {
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(5 16 38 / 0.6);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-subtle);
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.periods button.on {
+  color: var(--signal);
+  box-shadow: inset 0 0 0 1px var(--signal);
+}
+
+/* anel de progresso: parado em cima do cartão entra no ajuste; parado no ajuste fixa o tamanho */
+.air-ring {
+  --p: 0;
+  position: fixed;
+  top: -34px;
+  left: -34px;
+  z-index: 51;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: conic-gradient(var(--signal) calc(var(--p) * 360deg), rgb(95 212 255 / 0.12) 0);
+  -webkit-mask: radial-gradient(circle, transparent 27px, #000 28px);
+  mask: radial-gradient(circle, transparent 27px, #000 28px);
+  filter: drop-shadow(0 0 8px rgb(63 211 232 / 0.8));
+  pointer-events: none;
+}
+.air-ring.fixar {
+  background: conic-gradient(#7cf29a calc(var(--p) * 360deg), rgb(124 242 154 / 0.12) 0);
+  filter: drop-shadow(0 0 8px rgb(124 242 154 / 0.8));
+}
+.air-ring span {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.focus.resizing,
+.pinned.resizing {
+  transition: transform 0.08s linear;
+  filter: drop-shadow(0 0 30px rgb(63 211 232 / 0.45));
+}
+.focus.resizing .card,
+.pinned.resizing .card {
+  box-shadow:
+    inset 0 0 0 1.5px var(--signal),
+    0 0 40px -6px rgb(63 211 232 / 0.6);
+}
+.pinned {
+  transform-origin: top left;
+}
+.gp-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.gp-row small {
+  margin-right: 2px;
+  color: var(--fg-subtle);
+  font-size: 10.5px;
+}
+.gp-seg {
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(5 16 38 / 0.6);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-subtle);
+  font: 500 10px/1 var(--font-mono);
+  cursor: pointer;
+}
+.gp-seg.on {
+  color: var(--signal);
+  box-shadow: inset 0 0 0 1px var(--signal);
+}
+.gp-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+.gesture-panel.is-mouse {
+  box-shadow:
+    inset 0 0 0 1.5px var(--signal),
+    0 0 30px -8px rgb(63 211 232 / 0.8);
+}
+
+/* ---------- trabalhando junto ---------- */
+
+/* a esfera acompanha a mão de leve */
+.orb-wrap {
+  translate: calc(var(--look-x, 0) * 22px) calc(var(--look-y, 0) * 14px);
+  transition:
+    transform 0.9s var(--ease-out-expo),
+    opacity 0.9s,
+    translate 0.6s var(--ease-out-expo);
+}
+
+/* plano em andamento */
+.plan-bar {
+  height: 3px;
+  margin: 2px 0 10px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.07);
+  overflow: hidden;
+}
+.plan-bar span {
+  display: block;
+  height: 100%;
+  background: var(--signal);
+  box-shadow: 0 0 8px var(--signal);
+  transition: width 0.5s var(--ease-out-expo);
+}
+.plan {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.plan li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgb(3 10 26 / 0.45);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 13.5px;
+  color: var(--fg-muted);
+  transition:
+    background 0.3s,
+    color 0.3s;
+}
+.plan li svg {
+  margin-top: 2px;
+}
+.plan li i {
+  font: 500 10px/1 var(--font-mono);
+  font-style: normal;
+  color: var(--fg-subtle);
+  margin-right: 4px;
+}
+.plan li.st-fazendo {
+  color: var(--fg);
+  background: rgb(63 211 232 / 0.1);
+  box-shadow: inset 0 0 0 1px var(--signal);
+}
+.plan li.st-fazendo svg {
+  color: var(--signal);
+}
+.plan li.st-feito {
+  color: var(--fg);
+}
+.plan li.st-feito svg {
+  color: #5fd68f;
+}
+.plan li.st-pulado {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+.plan li.st-erro svg {
+  color: #f2715f;
+}
+.spin-slow {
+  animation: spin 2.4s linear infinite;
+}
+
+/* parar */
+.stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  margin-top: 2px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(242 113 95 / 0.12);
+  box-shadow: inset 0 0 0 1px rgb(242 113 95 / 0.6);
+  color: #f7a08f;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-shadow: none;
+  cursor: pointer;
+  animation: step-in 0.4s var(--ease-out-expo) both;
+}
+.stop-btn:hover {
+  background: rgb(242 113 95 / 0.22);
+}
+.hud-state .step.stopped {
+  color: #f7a08f;
+}
+
+/* foco a dois */
+.foco-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 181 71 / 0.12);
+  box-shadow: inset 0 0 0 1px rgb(255 181 71 / 0.6);
+  color: #ffcf85;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* sugestões discretas */
+.suggestions {
+  position: fixed;
+  right: clamp(14px, 1.5vw, 26px);
+  bottom: 70px;
+  z-index: 30;
+  display: grid;
+  gap: 8px;
+  width: min(380px, calc(100vw - 32px));
+}
+.suggestion {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 10px 10px 12px;
+  border-radius: 12px;
+  background: rgb(3 10 26 / 0.88);
+  backdrop-filter: blur(10px);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    0 0 30px -12px rgb(255 181 71 / 0.6);
+  font-size: 12.5px;
+  line-height: 1.4;
+  animation: card-in 0.5s var(--ease-out-expo) both;
+}
+.suggestion > svg {
+  color: #ffcf85;
+}
+
+/* zona de copiar, no alto */
+.dz-copiar {
+  inset: 0 30% auto 30%;
+  height: 10%;
+  border-radius: 0 0 16px 16px;
+}
+
+/* ---------- atualização ---------- */
+.update-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  width: min(560px, calc(100vw - 32px));
+  padding: 10px 10px 10px 14px;
+  border-radius: 12px;
+  transform: translateX(-50%);
+  background: rgb(3 10 26 / 0.92);
+  backdrop-filter: blur(10px);
+  box-shadow:
+    inset 0 0 0 1px var(--signal),
+    0 0 40px -10px rgb(63 211 232 / 0.7);
+  animation: card-in 0.5s var(--ease-out-expo) both;
+}
+.update-banner > svg {
+  color: var(--signal);
+}
+.update-banner span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.update-banner small {
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.update-banner.error {
+  grid-template-columns: minmax(0, 1fr) auto;
+  box-shadow: inset 0 0 0 1px #f2715f;
+}
+.update-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  background:
+    radial-gradient(circle at 50% 42%, rgb(30 110 255 / 0.22), transparent 55%),
+    rgb(2 7 18 / 0.96);
+  text-align: center;
+  animation: fade-in 0.6s both;
+}
+.us-rings {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 10px;
+}
+.us-rings i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--signal);
+  border-right-color: rgb(95 212 255 / 0.35);
+  filter: drop-shadow(0 0 10px rgb(63 211 232 / 0.8));
+  animation: spin 1.6s linear infinite;
+}
+.us-rings i:nth-child(2) {
+  inset: 22px;
+  border-top-color: #7cf29a;
+  animation-duration: 2.3s;
+  animation-direction: reverse;
+}
+.us-rings i:nth-child(3) {
+  inset: 46px;
+  border-style: dashed;
+  border-color: rgb(95 212 255 / 0.35);
+  animation-duration: 6s;
+}
+.us-rings b {
+  font: 500 34px/1 var(--font-mono);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.update-screen h2 {
+  margin: 0;
+  font: 600 26px/1.1 var(--font-display);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--signal);
+  text-shadow: 0 0 18px rgb(63 211 232 / 0.6);
+}
+.us-step {
+  margin: 0;
+  font: 500 12px/1 var(--font-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.us-bar {
+  width: min(420px, 80vw);
+  height: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  overflow: hidden;
+}
+.us-bar span {
+  display: block;
+  height: 100%;
+  background: var(--signal);
+  box-shadow: 0 0 10px var(--signal);
+  transition: width 0.8s var(--ease-out-expo);
+}
+.update-screen small {
+  color: var(--fg-subtle);
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+}
+.update-screen ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.update-done {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 90;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 26px 34px;
+  border-radius: 16px;
+  transform: translate(-50%, -50%);
+  background: rgb(3 10 26 / 0.92);
+  box-shadow:
+    inset 0 0 0 1px var(--signal),
+    0 0 60px -10px rgb(63 211 232 / 0.8);
+  animation: card-in 0.6s var(--ease-out-expo) both;
+}
+.update-done b {
+  font: 600 16px/1 var(--font-display);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+.update-done small {
+  color: var(--fg-muted);
+}
+.ud-ring {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 2px solid #7cf29a;
+  box-shadow: 0 0 20px rgb(124 242 154 / 0.7);
+  animation: ov-pop 0.6s var(--ease-out-expo) both;
+}
+@keyframes ov-pop {
+  from {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+}
+
+/* app instalado: os botões de janela do macOS ficam à esquerda do topo; a barra arrasta a janela */
+.in-app .hud-top {
+  padding-left: 88px;
+  -webkit-app-region: drag;
+}
+.in-app .hud-top button,
+.in-app .hud-top a,
+.in-app .top-pill {
+  -webkit-app-region: no-drag;
+}
+
+/* abertura ao ser chamado por voz ou palmas */
+.boot-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 46%, rgb(30 110 255 / 0.25), rgb(2 7 18 / 0.55) 60%);
+  animation: boot-fade 2.6s ease both;
+}
+.bi-rings {
+  position: relative;
+  width: 200px;
+  height: 200px;
+}
+.bi-rings i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--signal);
+  filter: drop-shadow(0 0 12px rgb(63 211 232 / 0.9));
+  animation:
+    boot-ring 1.2s var(--ease-out-expo) both,
+    spin 1.8s linear infinite;
+}
+.bi-rings i:nth-child(2) {
+  inset: 26px;
+  border-top-color: #7cf29a;
+  animation-delay: 0.15s;
+  animation-direction: normal, reverse;
+}
+.bi-rings i:nth-child(3) {
+  inset: 52px;
+  border: 1px dashed rgb(95 212 255 / 0.5);
+  animation-delay: 0.3s;
+}
+.boot-intro b {
+  font: 600 24px/1 var(--font-display);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--signal);
+  text-shadow: 0 0 20px rgb(63 211 232 / 0.7);
+  animation: step-in 0.8s 0.4s var(--ease-out-expo) both;
+}
+.boot-intro small {
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  animation: step-in 0.8s 0.7s var(--ease-out-expo) both;
+}
+@keyframes boot-ring {
+  from {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+}
+@keyframes boot-fade {
+  0% {
+    opacity: 0;
+  }
+  12%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }

@@ -270,14 +270,187 @@ DECLARATIONS = [
         parameters={"type": "OBJECT", "properties": {}},
     ),
     types.FunctionDeclaration(
+        name="abrir_painel",
+        description=(
+            "Abre na tela principal um painel grande: agenda (agenda, relógio e clima), comunicacoes "
+            "(e-mails e transcrição), radar (notícias por tema), nucleo (sistema do Mac), cameras. "
+            "Use 'fechar' para voltar à esfera. Funciona mesmo com um monitor só."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {"visao": {"type": S, "enum": ["agenda", "comunicacoes", "radar", "nucleo", "cameras", "fechar"]}},
+            "required": ["visao"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="executar_protocolo",
+        description=(
+            "Executa um protocolo (rotina com nome, cadastrada pelo Luca no painel): abre apps e sites, ajusta "
+            "volume e brilho, roda atalhos, liga a casa, abre painéis. Ex.: 'modo foco', 'protocolo trabalho'."
+        ),
+        parameters={"type": "OBJECT", "properties": {"nome": {"type": S}}, "required": ["nome"]},
+    ),
+    types.FunctionDeclaration(
+        name="delegar_tarefa",
+        description=(
+            "Passa uma tarefa para outra IA do Luca, que roda em segundo plano no Mac: 'claude' (Claude Code, "
+            "cria arquivos e usa MCPs como ElevenLabs e Google Drive), 'codex' (Codex com o ChatGPT dele, cria "
+            "arquivos e código) ou 'chatgpt' (só pergunta e resposta). Os arquivos ficam em ~/Jarvis/Tarefas. "
+            "claude e codex exigem confirmado=true depois do sim dele."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "agente": {"type": S, "enum": ["claude", "codex", "chatgpt"]},
+                "tarefa": {"type": S, "description": "Pedido completo e autossuficiente, com todos os detalhes que ele deu."},
+                "titulo": {"type": S, "description": "Nome curto da tarefa, até 6 palavras."},
+                "confirmado": {"type": "BOOLEAN"},
+            },
+            "required": ["agente", "tarefa"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="consultar_tarefas",
+        description="Mostra o andamento das tarefas passadas a outras IAs (rodando, feitas, com erro).",
+        parameters={"type": "OBJECT", "properties": {}},
+    ),
+    types.FunctionDeclaration(
+        name="digitar",
+        description=(
+            "Escreve um texto no Mac, à vista dele, como se fosse o teclado: num app (Notas, Mail, Chrome, Word, "
+            "WhatsApp…) ou no campo onde o cursor está. Passe app para trazer o app à frente antes. Use enter=true "
+            "para mandar/pesquisar no fim. Nunca digite senhas."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {"texto": {"type": S}, "app": {"type": S, "description": "Nome do app, opcional."}, "enter": {"type": "BOOLEAN"}},
+            "required": ["texto"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="teclas",
+        description=(
+            "Aperta uma tecla ou atalho no Mac, à vista: 'cmd+n' (novo), 'cmd+t' (nova aba), 'cmd+s', 'cmd+a', "
+            "'enter', 'tab', 'esc', 'cima', 'baixo'. Passe app para trazer o app à frente antes. Atalhos que "
+            "fecham ou apagam (cmd+q, cmd+delete) exigem confirmado=true depois do sim."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {"atalho": {"type": S}, "app": {"type": S}, "confirmado": {"type": "BOOLEAN"}},
+            "required": ["atalho"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="navegador",
+        description=(
+            "Navegador do Mac, à vista: nova_aba (com endereço ou termo de busca em valor), buscar (Google), "
+            "fechar_aba, voltar, avancar, recarregar, proxima_aba."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "acao": {"type": S, "enum": ["nova_aba", "buscar", "fechar_aba", "voltar", "avancar", "recarregar", "proxima_aba"]},
+                "valor": {"type": S},
+            },
+            "required": ["acao"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="contexto_atual",
+        description=(
+            "O que ele está fazendo agora no Mac: app e janela da frente, endereço da aba, texto selecionado, o que "
+            "está embaixo do mouse e o que a mão dele aponta no HUD. Chame SEMPRE que ele disser 'isso', 'isso aqui', "
+            "'esse texto', 'essa página', 'aqui', 'melhora', 'resume', 'traduz' sem dizer o quê."
+        ),
+        parameters={"type": "OBJECT", "properties": {"com_selecao": {"type": "BOOLEAN", "description": "false para não copiar a seleção."}}},
+    ),
+    types.FunctionDeclaration(
+        name="olhar",
+        description=(
+            "Vai até uma parte da tela dele e olha (a esfera voa até lá e destaca a área), recebendo a imagem e os "
+            "elementos dali. Use quando ele disser 'tá vendo essa barra lateral', 'olha esse canto', 'essa planilha', "
+            "antes de alterar algo. regiao em relação à janela da frente, ou alvo com o nome de um elemento."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "regiao": {"type": S, "enum": ["janela", "barra_lateral", "barra_lateral_direita", "topo", "rodape", "centro",
+                                                "canto_superior_esquerdo", "canto_superior_direito", "canto_inferior_esquerdo",
+                                                "canto_inferior_direito", "mouse"]},
+                "alvo": {"type": S, "description": "Nome de um botão, aba, coluna ou campo visível, opcional."},
+            },
+        },
+    ),
+    types.FunctionDeclaration(
+        name="janela_jarvis",
+        description="Janela do Jarvis: minimizar (vira a esfera pequena no canto), esconder (só o ícone na barra de menus, segue ouvindo 'Jarvis' e palmas) ou mostrar.",
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["minimizar", "esconder", "mostrar"]}}, "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
+        name="substituir_selecao",
+        description="Troca o texto selecionado no app da frente pelo novo (ou insere onde está o cursor), à vista. Use depois de contexto_atual para reescrever, traduzir ou corrigir.",
+        parameters={"type": "OBJECT", "properties": {"texto": {"type": S}}, "required": ["texto"]},
+    ),
+    types.FunctionDeclaration(
+        name="clicar",
+        description=(
+            "Clica num botão, link, aba, menu ou campo da janela da frente pelo nome que aparece na tela "
+            "(ex.: 'Enviar', 'Nova mensagem', 'Arquivo'). O cursor do Jarvis vai até lá à vista. Se não achar, "
+            "devolve as opções da tela. Passe app para trazer o app à frente antes."
+        ),
+        parameters={"type": "OBJECT", "properties": {"alvo": {"type": S}, "app": {"type": S}}, "required": ["alvo"]},
+    ),
+    types.FunctionDeclaration(
+        name="mostrar_plano",
+        description="Mostra na tela o plano de uma tarefa de vários passos no Mac antes de começar. Depois marque cada passo com atualizar_plano.",
+        parameters={
+            "type": "OBJECT",
+            "properties": {"titulo": {"type": S}, "passos": {"type": "ARRAY", "items": {"type": S}}},
+            "required": ["titulo", "passos"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="atualizar_plano",
+        description="Marca um passo do plano na tela (número a partir de 1): fazendo, feito, pulado ou erro.",
+        parameters={
+            "type": "OBJECT",
+            "properties": {"passo": {"type": N}, "estado": {"type": S, "enum": ["fazendo", "feito", "pulado", "erro"]}},
+            "required": ["passo", "estado"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="parar",
+        description="Para na hora o que você estiver fazendo no Mac (digitação, plano). Use quando ele disser 'espera', 'para', 'pera aí'.",
+        parameters={"type": "OBJECT", "properties": {}},
+    ),
+    types.FunctionDeclaration(
+        name="onde_parei",
+        description="Linha do tempo do que ele fez no Mac nas últimas horas (apps, janelas, páginas). Para 'onde eu parei?' e 'volta para o que eu estava fazendo'.",
+        parameters={"type": "OBJECT", "properties": {"horas": {"type": N}}},
+    ),
+    types.FunctionDeclaration(
+        name="modo_foco",
+        description="Foco a dois: segura os avisos não urgentes por X minutos e dá um resumo no fim. minutos=0 encerra.",
+        parameters={"type": "OBJECT", "properties": {"minutos": {"type": N}}, "required": ["minutos"]},
+    ),
+    types.FunctionDeclaration(
+        name="modo_mouse",
+        description="Liga ou desliga o modo em que a mão dele, pela câmera, controla o mouse do Mac.",
+        parameters={"type": "OBJECT", "properties": {"ligar": {"type": "BOOLEAN"}}, "required": ["ligar"]},
+    ),
+    types.FunctionDeclaration(
         name="fechar_cartoes",
         description="Remove todos os cartões da tela. Use quando pedirem para limpar ou fechar.",
         parameters={"type": "OBJECT", "properties": {}},
     ),
 ]
 
+# Ferramentas lentas que não travam a conversa: ele avisa que vai verificar e responde quando chegar.
+NON_BLOCKING = {"pesquisar_web"}
+
 SEARCH_DECL = types.FunctionDeclaration(
     name="pesquisar_web",
+    behavior=types.Behavior.NON_BLOCKING,
     description=(
         "Pesquisa na internet e devolve resultados com título, trecho, data e link. Use para qualquer "
         "fato atual, notícia, preço, placar ou dado que você não tenha certeza. Depois, mostre o "
@@ -514,6 +687,106 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "fechar_cartoes":
             await hub.clear_cards()
             return {"ok": True}
+        if name in ("digitar", "teclas", "navegador"):
+            from . import desktop
+
+            if name == "digitar":
+                return await asyncio.to_thread(desktop.type_into, args.get("texto", ""), args.get("app"), bool(args.get("enter")))
+            if name == "teclas":
+                return await asyncio.to_thread(desktop.keys_into, args.get("atalho", ""), args.get("app"), bool(args.get("confirmado")))
+            return await asyncio.to_thread(desktop.browser, args.get("acao", ""), args.get("valor", ""))
+        if name == "olhar":
+            from . import context
+
+            return await asyncio.to_thread(context.look_at, args.get("regiao"), args.get("alvo"))
+        if name == "janela_jarvis":
+            if not hub.count("overlay"):
+                return {"erro": "Isso funciona no app Jarvis instalado; no navegador, minimize a janela à mão."}
+            await hub.broadcast({"type": "janela", "acao": args.get("acao", "minimizar")})
+            return {"ok": True, "instrucao": "Confirme numa frase curta."}
+        if name in ("contexto_atual", "substituir_selecao", "clicar"):
+            from . import context, desktop
+
+            if name == "contexto_atual":
+                p = hub.pointed if hub.pointed and time.time() - hub.pointed.get("em", 0) < 15 else None
+                return await asyncio.to_thread(context.snapshot, p, args.get("com_selecao", True) is not False)
+            if name == "substituir_selecao":
+                return await asyncio.to_thread(context.replace_selection, args.get("texto", ""))
+            if args.get("app"):
+                r = await asyncio.to_thread(desktop.activate, args["app"])
+                if r.get("erro"):
+                    return r
+            return await asyncio.to_thread(context.click, args.get("alvo", ""))
+        if name == "mostrar_plano":
+            passos = [{"texto": str(p), "estado": "pendente"} for p in (args.get("passos") or [])][:12]
+            card = await hub.show_card("plano", {"titulo": args.get("titulo", "Plano"), "categoria": "Trabalhando junto", "passos": passos})
+            hub.plan_card = card["id"]
+            return {"ok": True, "instrucao": "Plano na tela. Diga em uma frase o que vai fazer e comece pelo passo 1, marcando com atualizar_plano."}
+        if name == "atualizar_plano":
+            card = next((c for c in hub.cards if c["id"] == getattr(hub, "plan_card", None)), None)
+            if not card:
+                return {"erro": "Nenhum plano na tela."}
+            i = int(args.get("passo", 1)) - 1
+            passos = [dict(p) for p in card["data"]["passos"]]
+            if 0 <= i < len(passos):
+                passos[i]["estado"] = args.get("estado", "feito")
+                await hub.update_card(card["id"], {**card["data"], "passos": passos})
+                from . import overlay
+
+                if args.get("estado") == "fazendo":
+                    overlay.label(passos[i]["texto"][:40])
+            return {"ok": True}
+        if name == "parar":
+            from . import overlay
+
+            overlay.stop("voz")
+            return {"ok": True, "instrucao": "Parou. Diga 'parei' e pergunte se continua ou muda algo."}
+        if name == "onde_parei":
+            from . import activity
+
+            res = await asyncio.to_thread(activity.recent, float(args.get("horas") or 8))
+            if res["trechos"]:
+                await hub.show_card("lista", {"titulo": "Onde você parou", "categoria": "Memória de trabalho", "itens": [
+                    {"titulo": f"{t['app']} · {t['janela'][:70]}", "detalhe": t.get("url") or "", "etiqueta": f"{t['inicio']} · {t['minutos']} min"}
+                    for t in res["trechos"][-6:][::-1]
+                ]})
+            return {**res, "instrucao": "Cartão na tela. Diga em 1 ou 2 frases onde ele parou; ofereça reabrir (abrir_app / navegador)."}
+        if name == "modo_foco":
+            minutos = float(args.get("minutos") or 0)
+            hub.focus_until = time.time() + minutos * 60 if minutos > 0 else time.time() - 1
+            await hub.broadcast({"type": "foco", "ate": hub.focus_until if minutos > 0 else 0})
+            return {"ok": True, "instrucao": "Confirme numa frase. Avisos não urgentes ficam para o fim do foco."}
+        if name == "modo_mouse":
+            await hub.broadcast({"type": "modo_mouse", "ligado": bool(args.get("ligar"))})
+            return {"ok": True, "instrucao": "Confirme em uma frase. Para sair: punho fechado ou 'desliga o modo mouse'."}
+        if name == "abrir_painel":
+            visao = args.get("visao")
+            await hub.broadcast({"type": "painel", "visao": None if visao == "fechar" else visao})
+            return {"ok": True, "instrucao": "Painel na tela. Confirme numa frase curta, sem ler o conteúdo."}
+        if name == "executar_protocolo":
+            from . import protocols
+
+            return await protocols.run(args.get("nome", ""))
+        if name == "delegar_tarefa":
+            from . import agents
+
+            agente = args.get("agente", "chatgpt")
+            if agente in ("claude", "codex") and not args.get("confirmado"):
+                return {
+                    "precisa_confirmar": True,
+                    "instrucao": "Leia o pedido para ele em uma frase e pergunte se pode mandar. Só chame de novo com confirmado=true depois do sim.",
+                }
+            res = await agents.iniciar(agente, args.get("tarefa", ""), args.get("titulo"))
+            if "erro" not in res:
+                res["instrucao"] = "Diga numa frase que passou a tarefa adiante e que avisa quando terminar. Não espere o resultado."
+            return res
+        if name == "consultar_tarefas":
+            if not hub.tasks:
+                return {"tarefas": [], "instrucao": "Nenhuma tarefa ainda."}
+            await hub.show_card("lista", {"titulo": "Tarefas em andamento", "categoria": "Operações · Outras IAs", "itens": [
+                {"titulo": t["titulo"], "detalhe": t.get("resumo") or t.get("pasta", ""), "etiqueta": t["estado"]} for t in hub.tasks[:6]
+            ]})
+            return {"tarefas": [{k: t.get(k) for k in ("titulo", "agente", "estado", "resumo")} for t in hub.tasks[:6]]}
     except Exception as exc:  # noqa: BLE001 - erro vira resposta falável
         log.exception("ferramenta %s falhou", name)
         return {"erro": f"A ferramenta {name} falhou: {exc}"}

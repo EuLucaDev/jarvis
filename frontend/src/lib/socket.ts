@@ -1,7 +1,7 @@
 // Conexão única com o backend: eventos em JSON e áudio em frames binários.
 
 export type ServerEvent =
-  | { type: 'sync'; cards: Card[]; status: VoiceStatus }
+  | { type: 'sync'; cards: Card[]; status: VoiceStatus; tarefas?: Task[] }
   | ({ type: 'status' } & VoiceStatus)
   | { type: 'user.text'; text: string; typed?: boolean }
   | { type: 'model.text'; text: string }
@@ -9,6 +9,7 @@ export type ServerEvent =
   | { type: 'tool'; name: string; phase: 'start' | 'end' }
   | { type: 'card'; card: Card }
   | { type: 'card.close'; id: string }
+  | { type: 'card.update'; card: Card }
   | { type: 'cards.clear' }
   | { type: 'audio.flush' }
   | { type: 'sequence.plan'; palavras: number[] }
@@ -16,6 +17,20 @@ export type ServerEvent =
   | ({ type: 'alerta' } & Alert)
   | ({ type: 'telemetria' } & Telemetry)
   | { type: 'telas.config'; telas: ScreenConfig[] }
+  | { type: 'painel'; visao: string | null }
+  | { type: 'modo_mouse'; ligado: boolean }
+  | { type: 'sugestao'; id: string; texto: string; pedido: string }
+  | { type: 'parado'; origem: string }
+  | { type: 'foco'; ate: number }
+  | { type: 'janela'; acao: 'minimizar' | 'mostrar' | 'esconder' }
+  | { type: 'despertar'; origem: string; comando: string; bom_dia: boolean }
+  | { type: 'atualizacao'; etapa: string; pct: number; erro?: string; reiniciar?: boolean; app_muda?: boolean }
+  | { type: 'olhar'; x: number; y: number; w: number; h: number; label: string; modo: string }
+  | { type: 'olhar.rotulo'; label: string }
+  | { type: 'olhar.fim' }
+  | { type: 'tarefa'; tarefa: Task }
+
+export type Task = { id: string; agente: string; titulo: string; estado: 'rodando' | 'feito' | 'erro'; resumo?: string; pasta?: string; inicio: string }
 
 export type Alert = { id: string; titulo: string; texto: string; nivel: string; at: string; silencioso?: boolean }
 
@@ -40,7 +55,7 @@ export type VoiceStatus = {
 
 export type Card = {
   id: string
-  kind: 'pesquisa' | 'clima' | 'lista' | 'emails' | 'agenda' | 'noticia' | 'carregando' | 'camera' | 'mercado' | 'mensagens' | 'saude'
+  kind: 'pesquisa' | 'clima' | 'lista' | 'emails' | 'agenda' | 'noticia' | 'carregando' | 'camera' | 'mercado' | 'mensagens' | 'saude' | 'plano'
   at: string
   data: Record<string, any>
 }

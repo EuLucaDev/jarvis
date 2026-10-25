@@ -70,14 +70,18 @@ export function Orb({ live, phase }: { live: MutableRefObject<Live>; phase: Phas
     resize()
 
     const frame = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000)
+      // Um quadro com erro não pode matar a animação: o próximo é agendado antes de desenhar.
+      raf = requestAnimationFrame(frame)
+      const dt = Math.min(0.05, Math.max(0, (now - last) / 1000))
       last = now
       const target = PHASE_LOOK[phaseRef.current]
       for (const key of ['speed', 'amp', 'glow', 'hue'] as const) look[key] += (target[key] - look[key]) * 0.05
-      const lvl = live.current.level
+      const lvl = Number.isFinite(live.current.level) ? Math.min(1, Math.max(0, live.current.level)) : 0
       t += dt * look.speed * (reduce ? 0.2 : 1) * (1 + lvl * 0.8)
+      if (!Number.isFinite(t)) t = 0
 
       const size = Math.min(cv.clientWidth, cv.clientHeight)
+      if (!size) return
       const c = size / 2
       const R = size * 0.36
       ctx.clearRect(0, 0, size, size)
@@ -139,7 +143,6 @@ export function Orb({ live, phase }: { live: MutableRefObject<Live>; phase: Phas
         }
       })
       ctx.globalCompositeOperation = 'source-over'
-      raf = requestAnimationFrame(frame)
     }
     raf = requestAnimationFrame(frame)
     return () => {

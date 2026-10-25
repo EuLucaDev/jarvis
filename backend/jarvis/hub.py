@@ -22,10 +22,15 @@ class Hub:
         # cartões do briefing que entram durante a fala: (palavras antes do cartão, tipo, dados)
         self.pending_sequence: list[tuple[int, str, dict[str, Any]]] = []
         self.voice: Any = None  # VoiceBridge ao vivo, para avisos falados
+        self.tasks: list[dict[str, Any]] = []  # tarefas passadas a outras IAs (agents.py)
+        self.pointed: dict[str, Any] | None = None  # o que a mão está apontando no HUD ("isso aqui")
+        self.focus_until = 0.0  # modo foco a dois: avisos esperam até aqui
+        self.focus_queue: list[dict[str, Any]] = []
+        self.plan_card: str | None = None  # cartão do plano que está sendo executado
 
     async def join(self, ws: WebSocket, info: dict[str, Any]) -> None:
         self.clients[ws] = info
-        await ws.send_json({"type": "sync", "cards": self.cards, "status": self.status})
+        await ws.send_json({"type": "sync", "cards": self.cards, "status": self.status, "tarefas": self.tasks})
 
     def leave(self, ws: WebSocket) -> None:
         self.clients.pop(ws, None)
@@ -70,6 +75,14 @@ class Hub:
         async with self._lock:
             self.cards = (self.cards + [card])[-MAX_CARDS:]
         await self.broadcast({"type": "card", "card": card})
+        return card
+
+    async def update_card(self, card_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+        card = next((c for c in self.cards if c["id"] == card_id), None)
+        if not card:
+            return None
+        card["data"] = data
+        await self.broadcast({"type": "card.update", "card": card})
         return card
 
     async def close_card(self, card_id: str) -> None:

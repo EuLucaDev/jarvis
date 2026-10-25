@@ -1,0 +1,46 @@
+{
+  "name": "jarvis-app",
+  "productName": "Jarvis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "J.A.R.V.I.S. para macOS: HUD, camada sobre a tela e atualizações",
+  "main": "main.cjs",
+  "jarvis": {
+    "projeto": "/Users/lpc/Documents/jarvis"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac dir"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.lpc.jarvis",
+    "productName": "Jarvis",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "package.json",
+      "build/trayTemplate*.png"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": [
+        "dir"
+      ],
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "O Jarvis ouve você para conversar por voz.",
+        "NSCameraUsageDescription": "A câmera é usada para os gestos e o reconhecimento do seu rosto, tudo neste Mac.",
+        "NSAppleEventsUsageDescription": "O Jarvis abre apps e abas quando você pede.",
+        "NSSpeechRecognitionUsageDescription": "O Jarvis reconhece no próprio Mac quando você diz “Jarvis”, para acordar."
+      }
+    }
+  }
+}
