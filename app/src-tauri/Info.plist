@@ -8,6 +8,8 @@
   <string>A câmera é usada para as mãos virarem o ponteiro e para o Jarvis ver o que você mostra. Tudo fica neste Mac.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>O Jarvis abre apps e abas quando você pede.</string>
+  <key>LSAppNapIsDisabled</key>
+  <true/>
   <key>LSUIElement</key>
   <true/>
 </dict>

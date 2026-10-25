@@ -1,12 +1,12 @@
-J.A.R.V.I.S. 2 — como instalar
+J.A.R.V.I.S. 2.1 — como instalar
 ================================
 
 Este pacote tem o Jarvis para os três sistemas. Use só a pasta do seu.
 
 MAC (Apple Silicon: M1, M2, M3, M4…)
-  1. Abra a pasta Mac e arraste o Jarvis para a pasta Aplicativos.
-  2. Na primeira vez: clique com o botão direito no Jarvis → Abrir → Abrir.
+  1. Na pasta Mac, clique com o botão direito no Jarvis → Abrir → Abrir.
      (o app não tem assinatura paga da Apple; esse passo é só uma vez)
+  2. Ele se copia sozinho para a pasta Aplicativos e reabre de lá (é dali que ele liga com o Mac).
   3. A configuração inicial abre sozinha: cole a chave da Gemini, seu nome e sua cidade.
   4. Quando o macOS perguntar, permita para o "Jarvis": Microfone, Câmera, Acessibilidade e
      Gravação de Tela. Depois de ligar a Acessibilidade, saia do Jarvis (ícone na barra de menus →
@@ -32,8 +32,13 @@ DEPOIS DE INSTALADO
       pinça e solta = clica · pinça e mexe = arrasta · pinça parada = ajusta o tamanho
       (abra polegar e indicador em L; parado fixa; mão aberta cancela)
       dois dedos e mexe = rola · mão aberta para cima = mostra o HUD · para baixo = minimiza
+  - Fechar a janela do Jarvis deixa ele no canto (esfera pequena com o vídeo da câmera); ele segue
+    ouvindo. Para sumir de vez: ícone → Sair do Jarvis. "Abrir com o computador" também fica no ícone.
   - Os cartões aparecem flutuando na tela; dá para arrastar, aumentar e fechar.
+  - Memória: "Jarvis, mostre minha memória" abre o mapa (você no centro, temas e memórias ligadas).
+    Ele aprende sozinho ao fim de cada conversa. A memória também vira notas em Markdown que abrem
+    no Obsidian (no mapa: "Abrir como notas").
   - Peça coisas no computador: "abre o Notas e escreve…", "olha essa planilha", "minimize sua tela".
 
 A chave da Gemini é grátis: https://aistudio.google.com/apikey
-Seus dados (memória, ajustes, chave) ficam só no seu computador.
+Cada pessoa começa do zero: memória, ajustes e chave ficam só no computador dela.

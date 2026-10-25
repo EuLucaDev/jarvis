@@ -1,12 +1,14 @@
-import { Activity, AudioLines, Cpu, MessageSquare, SendHorizontal, Thermometer, Waves } from 'lucide-react'
+import { Activity, AudioLines, Camera, Cpu, MessageSquare, SendHorizontal, Thermometer, Waves } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { usePhase, voiceStore } from '../lib/live'
+import { CameraView } from '../ui/CameraView'
 import type { LogLine } from './useJarvis'
 
-export type PanelId = 'entrada' | 'espectro' | 'leitura' | 'servicos' | 'clima' | 'canal'
+export type PanelId = 'camera' | 'entrada' | 'espectro' | 'leitura' | 'servicos' | 'clima' | 'canal'
 
 export const PANELS: Record<PanelId, { nome: string; desc: string }> = {
+  camera: { nome: 'Visão · Câmera', desc: 'O que a câmera vê, com o mapeamento das mãos.' },
   entrada: { nome: 'Sinal · Entrada', desc: 'Onda ao vivo do som que entra e sai.' },
   espectro: { nome: 'Sinal · Espectro', desc: 'Frequências da voz, de 20 Hz a 20 kHz.' },
   leitura: { nome: 'Voz · Leitura', desc: 'Intensidade da voz agora.' },
@@ -57,6 +59,14 @@ function useScope(draw: (ctx: CanvasRenderingContext2D, w: number, h: number, hi
     return () => cancelAnimationFrame(raf)
   }, [])
   return ref
+}
+
+export function CameraPanel({ on }: { on: boolean }) {
+  return (
+    <Frame icon={Camera} title="Visão · Câmera" tag={on ? 'ao vivo' : 'desligada'}>
+      <CameraView on={on} />
+    </Frame>
+  )
 }
 
 export function SignalIn() {

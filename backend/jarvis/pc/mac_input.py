@@ -1,4 +1,4 @@
-"""Controle do computador à vista: mouse, teclado e navegador, como se o Luca estivesse mexendo.
+"""Controle do computador à vista: mouse, teclado e navegador, como se a pessoa estivesse mexendo.
 
 Tudo acontece na tela (ele vê o Jarvis trabalhando) e passa pelo macOS, que exige a permissão de
 Acessibilidade para o Python do serviço (Ajustes do Sistema → Privacidade e Segurança → Acessibilidade).
@@ -298,7 +298,7 @@ def keys_into(combo: str, app: str | None = None, confirmado: bool = False) -> d
 
 
 def browser(acao: str, valor: str = "") -> dict[str, Any]:
-    """Navegador padrão do Luca (Chrome normal, não o perfil do HUD): nova aba, buscar, voltar…"""
+    """Navegador padrão: nova aba, buscar, voltar…"""
     from urllib.parse import quote_plus
 
     if acao in ("nova_aba", "abrir"):

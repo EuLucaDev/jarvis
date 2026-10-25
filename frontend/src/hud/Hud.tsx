@@ -3,14 +3,14 @@
 // tela (overlay), onde você arruma com a mão ou o mouse.
 
 import { ArrowDown, ArrowLeftRight, ArrowUp, Bell, Camera, CameraOff, Headphones, LayoutDashboard, LayoutGrid, Lightbulb, Mic, MicOff, Minus, Square, Timer, Volume2, VolumeX, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { app, isApp } from '../lib/app'
 import { usePhase, type Phase } from '../lib/live'
 import { play, setSoundsOn, soundsOn } from '../lib/sfx'
 import { Aura } from '../ui/Aura'
 import { Deck, Tasks } from './Deck'
-import { Channel, PANELS, Services, SignalIn, Spectrum, VoiceRead, Weather, type PanelId } from './Panels'
+import { CameraPanel, Channel, PANELS, Services, SignalIn, Spectrum, VoiceRead, Weather, type PanelId } from './Panels'
 import { useJarvis } from './useJarvis'
 import { useWidgetData } from './Widgets'
 
@@ -18,12 +18,17 @@ const PHASE_LABEL: Record<Phase, string> = { espera: 'Em espera', ouvindo: 'Ouvi
 
 type Layout = { left: PanelId[]; right: PanelId[]; hidden: PanelId[] }
 const LAYOUT_KEY = 'jarvis.hudLayout'
-const DEFAULT_LAYOUT: Layout = { left: ['entrada', 'espectro', 'leitura', 'servicos'], right: ['clima', 'canal'], hidden: [] }
+const DEFAULT_LAYOUT: Layout = { left: ['entrada', 'espectro', 'leitura', 'servicos'], right: ['camera', 'clima', 'canal'], hidden: [] }
 
 function loadLayout(): Layout {
   try {
     const l = JSON.parse(localStorage.getItem(LAYOUT_KEY) || 'null')
-    if (l?.left && l?.right) return { hidden: [], ...l }
+    if (l?.left && l?.right) {
+      // painel novo (de uma versão nova) entra no começo da coluna da direita
+      const todos = [...l.left, ...l.right]
+      const novos = (Object.keys(PANELS) as PanelId[]).filter((id) => !todos.includes(id))
+      return { hidden: [], ...l, right: [...novos, ...l.right] }
+    }
   } catch {
     /* padrão */
   }
@@ -60,6 +65,13 @@ export function Hud() {
       /* sem armazenamento */
     }
   }, [layout])
+  // como cumprimentar ("Senhor", "Senhora" ou o nome, escolhido na configuração inicial)
+  const chamar = useRef('')
+  useEffect(() => {
+    api('/api/setup')
+      .then((c) => (chamar.current = c.tratamento || c.user_name || ''))
+      .catch(() => {})
+  }, [])
   useEffect(() => {
     api('/api/ajustes/voz')
       .then((v) => setBarge(!!v.interromper))
@@ -73,7 +85,8 @@ export function Hud() {
     if (e.type === 'despertar') {
       app.showHud()
       const h = new Date().getHours()
-      setIntro(h < 12 ? 'Bom dia, Senhor' : h < 18 ? 'Boa tarde, Senhor' : 'Boa noite, Senhor')
+      const quem = chamar.current
+      setIntro(`${h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'}${quem ? `, ${quem}` : ''}`)
       const t = setTimeout(() => setIntro(null), 2600)
       return () => clearTimeout(t)
     }
@@ -116,6 +129,8 @@ export function Hud() {
   const renderPanel = (id: PanelId) => {
     if (layout.hidden.includes(id)) return null
     switch (id) {
+      case 'camera':
+        return <CameraPanel key={id} on={j.camera.ligada} />
       case 'entrada':
         return <SignalIn key={id} />
       case 'espectro':

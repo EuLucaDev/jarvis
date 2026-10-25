@@ -122,6 +122,7 @@ async def despertar(origem: str) -> None:
     if bom_dia:
         store.put("presenca", {**p, "ultimo_briefing": hoje})
     log.info("despertar por %s", origem)
+    hub.app_cmd("mostrar")
     await hub.broadcast({"type": "despertar", "origem": origem, "bom_dia": bom_dia})
     if origem == "voz":
         # a frase inteira ("Jarvis, abre o Notas") já está no microfone: vai junto, e a instrução vem como texto

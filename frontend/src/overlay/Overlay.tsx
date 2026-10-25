@@ -14,11 +14,12 @@
 import { Pin, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { app, type HudState } from '../lib/app'
-import { handStore, useHands, voiceStore } from '../lib/live'
+import { useHands, voiceStore } from '../lib/live'
 import { play } from '../lib/sfx'
 import { CardView, cardText } from '../hud/Cards'
 import { useJarvis } from '../hud/useJarvis'
 import { Aura } from '../ui/Aura'
+import { CameraView } from '../ui/CameraView'
 import { useHandControl } from './handControl'
 import './overlay.css'
 
@@ -336,9 +337,11 @@ export function Overlay() {
             className={`dcard ${hc.hoverCard === c.id ? 'hover' : ''}`}
             data-card={c.id}
             data-hit
-            style={{ transform: `translate(${p.x}px, ${p.y}px) scale(${p.z})`, width: CARD_W }}
+            style={{ transform: `translate(${p.x}px, ${p.y}px)` }}
             onPointerDown={onPointerDown(c.id, 'mover')}
           >
+            {/* zoom (e não scale) muda o tamanho redesenhando o texto: o cartão fica nítido em qualquer tamanho */}
+            <div className="dcard-body" style={{ width: CARD_W, zoom: p.z }}>
             <div className="dcard-bar">
               <span>{c.at}</span>
               <button onClick={() => setPos((x) => ({ ...x, [c.id]: { ...x[c.id], fixo: !x[c.id].fixo } }))} aria-label="Fixar" className={p.fixo ? 'on' : ''}>
@@ -356,6 +359,7 @@ export function Overlay() {
             </div>
             <CardView card={c} onPeriod={c.kind === 'mercado' ? (per) => j.send({ type: 'mercado.periodo', id: c.id, periodo: per }) : undefined} />
             <span className="dcard-grip" onPointerDown={onPointerDown(c.id, 'tamanho')} aria-hidden="true" />
+            </div>
           </div>
         )
       })}
@@ -411,47 +415,11 @@ function Bars() {
   )
 }
 
-const LINKS: [number, number][] = [
-  [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
-  [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17],
-]
-
-/** Quadradinho ao lado da esfera do canto: o mapeamento da mão ao vivo (para ver se a câmera está pegando). */
+/** Quadradinho ao lado da esfera do canto: a câmera e o mapeamento da mão ao vivo. */
 function HandPreview() {
-  const ref = useRef<HTMLCanvasElement>(null)
-  useEffect(
-    () =>
-      handStore.subscribe(() => {
-        const cv = ref.current
-        if (!cv) return
-        const ctx = cv.getContext('2d')!
-        const { hands, pts } = handStore.get()
-        ctx.clearRect(0, 0, cv.width, cv.height)
-        pts.forEach((p, i) => {
-          const pinch = hands[i]?.pinch
-          ctx.strokeStyle = pinch ? '#ffffff' : 'rgb(95 212 255 / 0.95)'
-          ctx.lineWidth = 1.6
-          ctx.beginPath()
-          for (const [a, b] of LINKS) {
-            ctx.moveTo(p[a][0] * cv.width, p[a][1] * cv.height)
-            ctx.lineTo(p[b][0] * cv.width, p[b][1] * cv.height)
-          }
-          ctx.stroke()
-          ctx.fillStyle = pinch ? '#fff' : '#5fd4ff'
-          for (const k of [4, 8]) {
-            ctx.beginPath()
-            ctx.arc(p[k][0] * cv.width, p[k][1] * cv.height, 2.6, 0, Math.PI * 2)
-            ctx.fill()
-          }
-        })
-      }),
-    [],
-  )
-  const { hands } = useHands()
   return (
     <div className="ov-preview" aria-hidden="true">
-      <canvas ref={ref} width={150} height={112} />
-      <span>{hands.length ? `${hands.length === 2 ? 'Duas mãos' : 'Mão'}${hands.some((h) => h.pinch) ? ' · pinça' : ''}` : 'Procurando a mão'}</span>
+      <CameraView on />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-"""O que o Luca está fazendo agora, pela Acessibilidade do macOS: app e janela da frente, endereço da aba,
+"""O que a pessoa está fazendo agora, pela Acessibilidade do macOS: app e janela da frente, endereço da aba,
 texto selecionado, o que está embaixo do mouse e os botões/links da janela (para clicar pelo nome).
 
 Tudo local e só quando o Jarvis precisa (ferramentas `contexto_atual` e `clicar`); nada é guardado aqui.

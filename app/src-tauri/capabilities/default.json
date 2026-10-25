@@ -12,6 +12,7 @@
     "allow-hud-estado",
     "allow-painel-abrir",
     "allow-configuracao-pronta",
-    "allow-regioes"
+    "allow-regioes",
+    "allow-memoria-abrir"
   ]
 }

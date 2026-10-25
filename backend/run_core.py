@@ -9,10 +9,29 @@ import multiprocessing
 import os
 import sys
 
-# o MediaPipe puxa o matplotlib, que monta um cache de fontes: fica na pasta do Jarvis (uma vez só)
+# o MediaPipe puxa o matplotlib, que monta um cache de fontes: fica na pasta do Jarvis (uma vez só). Atribuição
+# direta: o gancho do PyInstaller já apontou para uma pasta temporária, e aí o cache era refeito a cada início (15 s)
 if os.getenv("JARVIS_HOME"):
-    os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.environ["JARVIS_HOME"], "mpl"))
+    os.environ["MPLCONFIGDIR"] = os.path.join(os.environ["JARVIS_HOME"], "mpl")
+    os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 os.environ.setdefault("GLOG_minloglevel", "2")  # menos mensagens do MediaPipe no log
+
+
+def _sem_sonecas() -> None:
+    """Erro fatal (falha de memória numa biblioteca) vai para falhas.log; no Mac, sem App Nap em segundo plano."""
+    import faulthandler
+
+    if os.getenv("JARVIS_HOME"):
+        f = open(os.path.join(os.environ["JARVIS_HOME"], "falhas.log"), "a", encoding="utf-8")  # noqa: SIM115
+        faulthandler.enable(f)
+    if sys.platform == "darwin":
+        try:
+            from Foundation import NSProcessInfo
+
+            # 0x00FFFFFF = NSActivityUserInitiated, menos o "impedir o Mac de dormir"
+            _sem_sonecas.token = NSProcessInfo.processInfo().beginActivityWithOptions_reason_(0x00FFFFFF & ~0x100000, "Jarvis ouvindo")
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def verificar() -> int:
@@ -62,6 +81,7 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     if "--verificar" in sys.argv:
         sys.exit(verificar())
+    _sem_sonecas()
     from jarvis.app import main
 
     main()

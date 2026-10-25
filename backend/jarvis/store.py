@@ -25,7 +25,7 @@ DEFAULTS: dict[str, Any] = {
     "atalhos": [],  # nomes de Atalhos do macOS que o Jarvis pode rodar
     "alexa": {"token": "", "dispositivos": []},  # [{"nome": "luz da sala", "ligar": "luz-on", "desligar": "luz-off"}]
     "mercado": {"ativos": ["^BVSP", "BRL=X", "BTC-USD", "PETR4.SA", "VALE3.SA"]},
-    "rosto": {"descritores": [], "nome": "Luca"},  # reconhecimento facial local
+    "rosto": {"descritores": [], "nome": ""},  # reconhecimento facial local
     "presenca": {"briefing_auto": True, "ultimo_briefing": ""},
     # rotinas com nome; passos usam a lista fechada de protocols.TIPOS
     "protocolos": [

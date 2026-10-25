@@ -336,9 +336,10 @@ body:has(.overlay) {
   pointer-events: auto;
   cursor: grab;
   border-radius: 16px;
-  filter: drop-shadow(0 24px 50px rgb(0 0 0 / 0.45));
-  animation: dcard-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-  transition: filter 0.2s;
+  animation: dcard-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.dcard-body {
+  position: relative;
 }
 .dcard:active {
   cursor: grabbing;
@@ -346,7 +347,8 @@ body:has(.overlay) {
 .dcard .card {
   box-shadow:
     inset 0 0 0 1px rgb(95 212 255 / 0.55),
-    0 0 40px -10px rgb(63 211 232 / 0.55);
+    0 0 40px -10px rgb(63 211 232 / 0.55),
+    0 24px 50px rgb(0 0 0 / 0.45);
 }
 .dcard.hover .card {
   box-shadow:
@@ -407,7 +409,6 @@ body:has(.overlay) {
   from {
     opacity: 0;
     translate: 40px 0;
-    filter: blur(6px);
   }
 }
 
@@ -428,22 +429,18 @@ body:has(.overlay) {
     0 0 24px -8px rgb(63 211 232 / 0.6);
   animation: ov-in-win 0.4s ease-out both;
 }
-.ov-preview canvas {
-  display: block;
-  width: 150px;
-  height: 112px;
-}
-.ov-preview span {
-  position: absolute;
-  left: 8px;
-  bottom: 6px;
-  font: 500 9px/1 'JetBrains Mono', monospace;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #5fd4ff;
+.ov-preview .camview {
+  border-radius: 0;
 }
 .ov-hand.second {
   box-shadow:
     inset 0 0 0 2px #ffb547,
     0 0 18px rgb(255 181 71 / 0.6);
+}
+
+/* na área de trabalho não há o que desfocar atrás (a janela é transparente): desfoque só deixava o cartão
+   embaçado no WebKit. Fundo quase opaco, para ler em cima de qualquer coisa. */
+.dcard .card {
+  backdrop-filter: none;
+  background: rgb(6 16 34 / 0.96);
 }

@@ -9,7 +9,6 @@ A pasta de dados vem de JARVIS_HOME (o app passa a dele) ou do padrão de cada s
 
 import json
 import os
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,6 +37,7 @@ DEFAULTS: dict[str, Any] = {
     "configurado": False,
     "gemini_api_key": "",
     "user_name": "",
+    "tratamento": "Senhor",  # como o Jarvis chama a pessoa: "Senhor", "Senhora" ou "" (pelo nome)
     "city": "",
     "voice": "Charon",
     "live_model": "gemini-3.8-live",
@@ -47,25 +47,6 @@ DEFAULTS: dict[str, Any] = {
     "port": 8765,
 }
 
-# chaves do .env antigo (versão 1) que viram config.json na primeira vez
-_LEGACY_ENV = {"GEMINI_API_KEY": "gemini_api_key", "JARVIS_USER_NAME": "user_name", "JARVIS_CITY": "city", "JARVIS_VOICE": "voice",
-               "GEMINI_LIVE_MODEL": "live_model", "GEMINI_TEXT_MODEL": "text_model", "JARVIS_SEARCH": "search"}
-
-
-def _migrate_v1(cfg: dict[str, Any]) -> dict[str, Any]:
-    """Jarvis 1 no mesmo Mac: traz a chave, o nome, a cidade e a memória (uma vez só)."""
-    for root in (Path.home() / "Documents" / "jarvis", CODE_ROOT):
-        env, db = root / ".env", root / "data" / "jarvis.db"
-        if env.exists() and not cfg.get("gemini_api_key"):
-            for line in env.read_text(errors="ignore").splitlines():
-                k, _, v = line.partition("=")
-                if k.strip() in _LEGACY_ENV and v.strip():
-                    cfg[_LEGACY_ENV[k.strip()]] = v.strip()
-        if db.exists() and not (DATA / "jarvis.db").exists():
-            shutil.copy2(db, DATA / "jarvis.db")
-    return cfg
-
-
 class Settings:
     """Lê o config.json a cada acesso alterado: a configuração inicial e o painel valem na hora."""
 
@@ -73,7 +54,7 @@ class Settings:
         self._cfg: dict[str, Any] = {}
         self._mtime = -1.0
         if not CONFIG_FILE.exists():
-            self.save(_migrate_v1(dict(DEFAULTS)))
+            self.save(dict(DEFAULTS))
         self._load()
 
     def _load(self) -> None:
@@ -122,7 +103,13 @@ class Settings:
     @property
     def user_name(self) -> str:  # noqa: D102
         self._load()
-        return self._cfg.get("user_name") or "Senhor"
+        return self._cfg.get("user_name") or self.chamar
+
+    @property
+    def chamar(self) -> str:
+        """Como o Jarvis se dirige à pessoa: "Senhor"/"Senhora" ou o nome."""
+        self._load()
+        return self._cfg.get("tratamento") or self._cfg.get("user_name") or "Senhor"
 
     @property
     def web_dist(self) -> Path:

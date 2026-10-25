@@ -1,4 +1,4 @@
-"""Tarefas passadas a outras IAs do Luca, que rodam no Mac com a assinatura dele.
+"""Tarefas passadas a outras IAs instaladas neste computador (com a conta de quem usa).
 
 - claude: Claude Code (`claude -p`), com os MCPs dele (ElevenLabs, Google Drive, Canva…) para criar coisas.
 - codex: Codex CLI (`codex exec`) logado com o ChatGPT; escreve só dentro da pasta da tarefa.

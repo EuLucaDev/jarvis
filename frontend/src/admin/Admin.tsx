@@ -1,6 +1,8 @@
 import {
   Bot,
+  Brain,
   BrainCircuit,
+  FolderOpen,
   CalendarDays,
   Cpu,
   LineChart,
@@ -33,6 +35,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api'
+import { app, isApp } from '../lib/app'
 import type { Telemetry } from '../lib/socket'
 import { useJarvis } from '../hud/useJarvis'
 import './admin.css'
@@ -578,6 +581,7 @@ function MemoriasPage() {
   const [filtro, setFiltro] = useState<string>('todas')
   const [novo, setNovo] = useState('')
   const [tipo, setTipo] = useState('nota')
+  const [zerar, setZerar] = useState('')
   const load = () => api('/api/memorias').then(setData)
   useEffect(() => {
     load()
@@ -597,11 +601,27 @@ function MemoriasPage() {
   }
   return (
     <div className="stack">
-      <Panel title="Como ele aprende" desc="Ao fim de cada conversa, ele relê o que foi dito e guarda fatos, preferências, correções e lições. As mais importantes entram em toda conversa nova. Tudo fica no seu Mac (data/jarvis.db).">
+      <Panel
+        title="Mapa da memória"
+        desc="Você no centro, os temas em volta e cada memória ligada aos temas e às parecidas. Ao buscar, ele segue as ligações. Também abre por voz: “Jarvis, mostre minha memória”."
+        actions={
+          <div className="seg">
+            <button onClick={() => (isApp ? app.openMemory() : window.open('/memoria', '_blank'))}>
+              <Brain size={13} /> Abrir o mapa
+            </button>
+            <button onClick={() => api('/api/memoria/pasta', { method: 'POST' })}>
+              <FolderOpen size={13} /> Abrir como notas (Obsidian)
+            </button>
+          </div>
+        }
+      >
+        {null}
+      </Panel>
+      <Panel title="Como ele aprende" desc="Ao fim de cada conversa, ele relê o que foi dito e guarda fatos, preferências, correções e lições, já ligados aos temas. As mais importantes entram em toda conversa nova. Tudo fica neste computador.">
         <form className="form-row" onSubmit={add}>
           <label className="field-a">
             <span>Ensinar algo</span>
-            <input value={novo} onChange={(e) => setNovo(e.target.value)} placeholder="Ex.: Luca prefere reuniões depois das 10h." />
+            <input value={novo} onChange={(e) => setNovo(e.target.value)} placeholder="Ex.: Prefiro reuniões depois das 10h." />
           </label>
           <div className="seg" role="radiogroup" aria-label="Tipo">
             {Object.keys(data.tipos).map((t) => (
@@ -648,6 +668,26 @@ function MemoriasPage() {
             ))}
           </ul>
         )}
+      </Panel>
+      <Panel title="Começar do zero" desc="Apaga todas as memórias, temas e conversas guardadas. Não dá para desfazer.">
+        <form
+          className="form-row"
+          onSubmit={async (e) => {
+            e.preventDefault()
+            if (zerar !== 'APAGAR') return
+            await api('/api/memoria/zerar', { method: 'POST', json: { confirmar: 'APAGAR' } })
+            setZerar('')
+            load()
+          }}
+        >
+          <label className="field-a">
+            <span>Digite APAGAR para confirmar</span>
+            <input value={zerar} onChange={(e) => setZerar(e.target.value)} placeholder="APAGAR" />
+          </label>
+          <button className="btn danger" disabled={zerar !== 'APAGAR'}>
+            <Trash2 size={14} /> Apagar toda a memória
+          </button>
+        </form>
       </Panel>
     </div>
   )

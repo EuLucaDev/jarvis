@@ -55,6 +55,7 @@ class Hands:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._jpeg: bytes | None = None
+        self.viewers = 0  # telas mostrando o vídeo ao vivo (aí o JPEG sai a cada quadro, não a cada segundo)
         self.state: dict[str, dict[str, Any]] = {}
         self.pose = ""
         self.pose_since = 0.0
@@ -68,6 +69,7 @@ class Hands:
 
     def start(self) -> None:
         if self.on:
+            self._emit({"type": "camera", "ligada": True, "erro": self.erro})
             return
         self._stop.clear()
         self.on = True
@@ -122,7 +124,7 @@ class Hands:
                     time.sleep(0.05)
                     continue
                 agora = time.monotonic()
-                if agora - ultimo_jpeg > 1.0:  # um quadro por segundo para a Gemini "ver", se pedirem
+                if agora - ultimo_jpeg > (0.06 if self.viewers else 1.0):  # vídeo ao vivo ou um quadro por segundo para a Gemini
                     ultimo_jpeg = agora
                     ok2, buf = cv2.imencode(".jpg", cv2.flip(frame, 1), [cv2.IMWRITE_JPEG_QUALITY, 70])
                     self._jpeg = buf.tobytes() if ok2 else None

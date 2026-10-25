@@ -15,6 +15,7 @@ const STEP: Record<string, string> = {
   briefing_bom_dia: 'Mostrando suas prioridades',
   buscar_memorias: 'Consultando a memória',
   lembrar: 'Anotando',
+  mostrar_memoria: 'Abrindo sua memória',
   consultar_mercado: 'Lendo o mercado',
   ler_mensagens: 'Lendo suas mensagens',
   notas: 'Procurando nas notas',

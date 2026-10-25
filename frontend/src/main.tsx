@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Admin } from './admin/Admin'
 import { Hud } from './hud/Hud'
+import { Memoria } from './memoria/Memoria'
 import { Overlay } from './overlay/Overlay'
 import { Setup } from './setup/Setup'
 import './hud/hud.css'
@@ -10,11 +11,13 @@ import './hud/widgets.css'
 // /          HUD (a esfera e a conversa)
 // /overlay   camada transparente sobre a tela (cartões, mãos, esfera que voa); uma por monitor
 // /setup     configuração inicial
+// /memoria  mapa da memória (estilo Obsidian)
 // /admin/... painel de ajustes
 const path = location.pathname
-const page = path.startsWith('/admin') ? <Admin /> : path.startsWith('/overlay') ? <Overlay /> : path.startsWith('/setup') ? <Setup /> : <Hud />
+const page = path.startsWith('/admin') ? <Admin /> : path.startsWith('/memoria') ? <Memoria /> : path.startsWith('/overlay') ? <Overlay /> : path.startsWith('/setup') ? <Setup /> : <Hud />
 
 if (path.startsWith('/admin')) document.title = 'Jarvis · Painel'
 else if (path.startsWith('/setup')) document.title = 'Jarvis · Configuração'
+else if (path.startsWith('/memoria')) document.title = 'Jarvis · Memória'
 
 createRoot(document.getElementById('root')!).render(<StrictMode>{page}</StrictMode>)

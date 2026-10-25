@@ -9,13 +9,13 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
@@ -23,6 +23,8 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 const PORT: u16 = 8765;
 static SAINDO: AtomicBool = AtomicBool::new(false);
+/// HUD fora da tela: 1 = no canto (esfera pequena na camada), 2 = oculto (só o ícone na barra/bandeja)
+static FORA: AtomicU8 = AtomicU8::new(2);
 
 fn base() -> String {
     format!("http://127.0.0.1:{PORT}")
@@ -62,8 +64,12 @@ struct HudEstado {
 
 /// HTTP mínimo (sem dependências) para falar com o núcleo local.
 fn http(metodo: &str, caminho: &str) -> Option<String> {
+    http_t(metodo, caminho, 3)
+}
+
+fn http_t(metodo: &str, caminho: &str, segundos: u64) -> Option<String> {
     let mut s = TcpStream::connect(("127.0.0.1", PORT)).ok()?;
-    s.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(segundos))).ok()?;
     let req = format!("{metodo} {caminho} HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n");
     s.write_all(req.as_bytes()).ok()?;
     let mut out = String::new();
@@ -93,7 +99,12 @@ fn start_core(app: &AppHandle) {
     };
     let home = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
     let _ = std::fs::create_dir_all(&home);
-    let log = std::fs::File::create(home.join("nucleo.log")).ok();
+    // acrescenta (não apaga): se o núcleo cair e voltar, o motivo continua no registro
+    let caminho_log = home.join("nucleo.log");
+    if std::fs::metadata(&caminho_log).map(|m| m.len() > 5_000_000).unwrap_or(false) {
+        let _ = std::fs::rename(&caminho_log, home.join("nucleo.anterior.log"));
+    }
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(&caminho_log).ok();
     let mut cmd = Command::new(&exe);
     cmd.env("JARVIS_HOME", &home).env("JARVIS_PORT", PORT.to_string()).stdin(Stdio::null());
     if let Some(f) = log {
@@ -160,7 +171,13 @@ fn ler_estado(app: &AppHandle) -> HudEstado {
     };
     let visivel = w.is_visible().unwrap_or(false);
     let min = w.is_minimized().unwrap_or(false);
-    let modo = if !visivel { "oculto" } else if min { "minimizado" } else { "visivel" };
+    let modo = if visivel && !min {
+        "visivel"
+    } else if min || FORA.load(Ordering::SeqCst) == 1 {
+        "minimizado"
+    } else {
+        "oculto"
+    };
     let esc = w.scale_factor().unwrap_or(1.0);
     let bounds = match (w.outer_position(), w.outer_size()) {
         (Ok(p), Ok(s)) => Some(Bounds { x: p.x as f64 / esc, y: p.y as f64 / esc, w: s.width as f64 / esc, h: s.height as f64 / esc }),
@@ -183,18 +200,33 @@ fn criar_hud(app: &AppHandle, visivel: bool) -> tauri::Result<WebviewWindow> {
         .build()?;
     let h = app.clone();
     w.on_window_event(move |ev| match ev {
-        // fechar só esconde: a voz, o ouvido e as mãos seguem ligados (Sair fica no menu do ícone)
+        // fechar vai para o canto (esfera pequena): a voz, o ouvido e as mãos seguem ligados
         WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
-            if let Some(w) = h.get_webview_window("hud") {
-                let _ = w.hide();
-            }
-            emit_estado(&h);
+            ir_para_canto(&h);
         }
         WindowEvent::Resized(_) | WindowEvent::Moved(_) | WindowEvent::Focused(_) => emit_estado(&h),
         _ => {}
     });
     Ok(w)
+}
+
+/// Some com o HUD e deixa a esfera pequena no canto (a camada desenha). Sem minimizar de verdade:
+/// no Mac o app não tem ícone no Dock, e a janela minimizada ficaria perdida.
+fn ir_para_canto(app: &AppHandle) {
+    FORA.store(1, Ordering::SeqCst);
+    if let Some(w) = app.get_webview_window("hud") {
+        let _ = w.hide();
+    }
+    emit_estado(app);
+}
+
+fn esconder_tudo(app: &AppHandle) {
+    FORA.store(2, Ordering::SeqCst);
+    if let Some(w) = app.get_webview_window("hud") {
+        let _ = w.hide();
+    }
+    emit_estado(app);
 }
 
 fn mostrar_hud(app: &AppHandle) {
@@ -209,10 +241,7 @@ fn mostrar_hud(app: &AppHandle) {
 fn alternar_hud(app: &AppHandle) {
     let e = ler_estado(app);
     if e.modo == "visivel" && e.focused {
-        if let Some(w) = app.get_webview_window("hud") {
-            let _ = w.minimize();
-        }
-        emit_estado(app);
+        ir_para_canto(app);
     } else {
         mostrar_hud(app);
     }
@@ -286,6 +315,52 @@ fn abrir_painel(app: &AppHandle) {
     let _ = WebviewWindowBuilder::new(app, "painel", url("/admin")).title("Jarvis · Painel").inner_size(1360.0, 880.0).center().build();
 }
 
+/// Mapa da memória (estilo Obsidian) numa janela própria; com foco, destaca o tema pedido.
+fn abrir_memoria(app: &AppHandle, foco: String) {
+    let foco: String = foco.chars().filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-').collect();
+    let caminho = format!("/memoria?foco={}", foco.replace(' ', "%20"));
+    if let Some(w) = app.get_webview_window("memoria") {
+        let _ = w.eval(&format!("window.jarvisFoco && window.jarvisFoco({foco:?})"));
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, "memoria", url(&caminho))
+        .title("Jarvis · Memória")
+        .inner_size(1280.0, 820.0)
+        .min_inner_size(720.0, 480.0)
+        .center()
+        .build();
+}
+
+/// Pedidos do núcleo (chamado por "Jarvis", "vai para o canto", "mostre minha memória"). Espera no próprio
+/// núcleo (até 20 s por vez), então vale mesmo com todas as janelas escondidas.
+fn ouvir_nucleo(app: AppHandle) {
+    thread::spawn(move || loop {
+        if SAINDO.load(Ordering::SeqCst) {
+            return;
+        }
+        let Some(corpo) = http_t("GET", "/api/app/comandos", 30) else {
+            thread::sleep(Duration::from_secs(2));
+            continue;
+        };
+        let Ok(lista) = serde_json::from_str::<Vec<serde_json::Value>>(&corpo) else { continue };
+        for c in lista {
+            let acao = c.get("acao").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let foco = c.get("foco").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let h = app.clone();
+            let _ = app.run_on_main_thread(move || match acao.as_str() {
+                "mostrar" => mostrar_hud(&h),
+                "minimizar" => ir_para_canto(&h),
+                "esconder" => esconder_tudo(&h),
+                "memoria" => abrir_memoria(&h, foco),
+                _ => {}
+            });
+        }
+    });
+}
+
 fn abrir_configuracao(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("setup") {
         let _ = w.set_focus();
@@ -308,18 +383,17 @@ fn hud_mostrar(app: AppHandle) {
 
 #[tauri::command]
 fn hud_minimizar(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("hud") {
-        let _ = w.minimize();
-    }
-    emit_estado(&app);
+    ir_para_canto(&app);
 }
 
 #[tauri::command]
 fn hud_esconder(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("hud") {
-        let _ = w.hide();
-    }
-    emit_estado(&app);
+    esconder_tudo(&app);
+}
+
+#[tauri::command]
+fn memoria_abrir(app: AppHandle, foco: Option<String>) {
+    abrir_memoria(&app, foco.unwrap_or_default());
 }
 
 #[tauri::command]
@@ -353,20 +427,28 @@ fn regioes(window: tauri::Window, app: AppHandle, rects: Vec<Rect>) {
 fn montar_bandeja(app: &AppHandle) -> tauri::Result<()> {
     let mostrar = MenuItem::with_id(app, "mostrar", "Mostrar o Jarvis", true, Some("Alt+Space"))?;
     let canto = MenuItem::with_id(app, "canto", "Ficar no canto", true, None::<&str>)?;
+    let memoria = MenuItem::with_id(app, "memoria", "Memória", true, None::<&str>)?;
     let painel = MenuItem::with_id(app, "painel", "Painel", true, None::<&str>)?;
+    let inicio = CheckMenuItem::with_id(app, "inicio", "Abrir com o computador", true, inicio_ligado(app), None::<&str>)?;
     let config = MenuItem::with_id(app, "config", "Configuração inicial…", true, None::<&str>)?;
     let sair = MenuItem::with_id(app, "sair", "Sair do Jarvis", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&mostrar, &canto, &sep, &painel, &config, &sep2, &sair])?;
+    let menu = Menu::with_items(app, &[&mostrar, &canto, &sep, &memoria, &painel, &config, &inicio, &sep2, &sair])?;
     TrayIconBuilder::with_id("jarvis")
         .icon(app.default_window_icon().cloned().expect("ícone"))
         .tooltip("Jarvis")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, ev| match ev.id().as_ref() {
+        .on_menu_event(move |app, ev| match ev.id().as_ref() {
             "mostrar" => mostrar_hud(app),
-            "canto" => hud_minimizar(app.clone()),
+            "canto" => ir_para_canto(app),
+            "memoria" => abrir_memoria(app, String::new()),
+            "inicio" => {
+                let ligar = !inicio_ligado(app);
+                definir_inicio(app, ligar);
+                let _ = inicio.set_checked(ligar);
+            }
             "painel" => abrir_painel(app),
             "config" => abrir_configuracao(app),
             "sair" => sair_app(app),
@@ -390,6 +472,56 @@ fn sair_app(app: &AppHandle) {
 }
 
 // ---------- início ----------
+
+fn marca_sem_inicio(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join(".sem-iniciar-com-o-computador"))
+}
+
+fn inicio_ligado(app: &AppHandle) -> bool {
+    marca_sem_inicio(app).map(|m| !m.exists()).unwrap_or(true)
+}
+
+/// Liga ou desliga abrir com o computador. Ligado, o registro é refeito a cada abertura, apontando para onde o
+/// app está agora (se ele for movido de pasta, o início automático continua achando).
+fn definir_inicio(app: &AppHandle, ligar: bool) {
+    let Some(m) = marca_sem_inicio(app) else { return };
+    let _ = std::fs::create_dir_all(m.parent().unwrap());
+    if ligar {
+        let _ = std::fs::remove_file(&m);
+        let _ = app.autolaunch().disable();
+        let _ = app.autolaunch().enable();
+    } else {
+        let _ = std::fs::write(&m, "1");
+        let _ = app.autolaunch().disable();
+    }
+}
+
+/// Mac: aberto direto do zip (Downloads, Mesa), o sistema roda o app numa pasta temporária ("App
+/// Translocation"): o início automático aponta para um lugar que some e as permissões não ficam. Então o
+/// Jarvis se copia para Aplicativos, tira a marca de "baixado da internet" e reabre de lá.
+#[cfg(target_os = "macos")]
+fn ir_para_aplicativos() -> bool {
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let s = exe.to_string_lossy().to_string();
+    if s.starts_with("/Applications/") || s.contains("/target/") {
+        return false;
+    }
+    let Some(pos) = s.find(".app/") else { return false };
+    let origem = &s[..pos + 4];
+    let destino = "/Applications/Jarvis.app";
+    let novo = "/Applications/.Jarvis-novo.app";
+    let _ = std::fs::remove_dir_all(novo);
+    let ok = Command::new("/usr/bin/ditto").args([origem, novo]).status().map(|st| st.success()).unwrap_or(false);
+    if !ok {
+        return false;
+    }
+    let _ = Command::new("/usr/bin/xattr").args(["-dr", "com.apple.quarantine", novo]).status();
+    let _ = std::fs::remove_dir_all(destino);
+    if std::fs::rename(novo, destino).is_err() {
+        return false;
+    }
+    Command::new("/usr/bin/open").args(["-n", destino]).spawn().is_ok()
+}
 
 /// Aberto logo depois de entrar no computador (por qualquer item de login)? Então fica escondido.
 fn login_recente() -> bool {
@@ -433,21 +565,21 @@ pub fn run() {
             hud_estado,
             painel_abrir,
             configuracao_pronta,
-            regioes
+            regioes,
+            memoria_abrir
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory); // só o ícone na barra de menus
 
             let h = app.handle().clone();
-            // abre junto com o computador (escondido, só o ícone) a partir da primeira vez
-            let marca = h.path().app_data_dir().map(|d| d.join(".iniciar-configurado")).ok();
-            if let Some(m) = marca {
-                if !m.exists() {
-                    let _ = h.autolaunch().enable();
-                    let _ = std::fs::create_dir_all(m.parent().unwrap());
-                    let _ = std::fs::write(&m, "1");
-                }
+            #[cfg(target_os = "macos")]
+            if ir_para_aplicativos() {
+                std::process::exit(0);
+            }
+            // abre junto com o computador (escondido, só o ícone), a menos que tenham desligado no menu
+            if inicio_ligado(&h) {
+                definir_inicio(&h, true);
             }
             let _ = h.global_shortcut().register(Shortcut::new(Some(Modifiers::ALT), Code::Space));
             montar_bandeja(&h)?;
@@ -480,6 +612,7 @@ pub fn run() {
                         abrir_configuracao(&h2);
                     }
                     vigiar_mouse(h2.clone());
+                    ouvir_nucleo(h2.clone());
                     emit_estado(&h2);
                 });
             });

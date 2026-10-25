@@ -8,12 +8,12 @@ Três partes, um processo de cada lado da permissão:
 
 | Parte | Pasta | O que faz |
 |---|---|---|
-| Casca | `app/` (Tauri 2, Rust) | Sobe o núcleo (filho dele, então as permissões do macOS ficam com o "Jarvis"), abre o HUD e uma camada transparente por monitor, bandeja/barra de menus, Alt+Espaço, abrir com o computador (escondido). Janelas carregam as páginas do núcleo em `http://127.0.0.1:8765`. |
+| Casca | `app/` (Tauri 2, Rust) | No Mac, se aberto fora de Aplicativos (App Translocation), se copia para lá e reabre. Fechar = ir para o canto (esconde o HUD; a camada mostra a esfera pequena); "esconder" = só o ícone. Refaz o registro de abrir com o computador a cada abertura (desliga pelo menu). Sobe o núcleo (filho dele, então as permissões do macOS ficam com o "Jarvis"), abre o HUD e uma camada transparente por monitor, bandeja/barra de menus, Alt+Espaço, abrir com o computador (escondido). Janelas carregam as páginas do núcleo em `http://127.0.0.1:8765`. |
 | Núcleo | `backend/jarvis/` (Python 3.12, empacotado com PyInstaller) | Voz, ouvido, mãos, controle do PC, dados e a API/WebSocket. |
 | Interface | `frontend/src/` (React + Vite) | HUD (`/`), camada sobre a tela (`/overlay`), configuração inicial (`/setup`), painel (`/admin`). Servida pelo núcleo. |
 
 ### Núcleo (`backend/jarvis/`)
-- `config.py`: pasta de dados por sistema (`JARVIS_HOME`, ou `~/Library/Application Support/Jarvis`, `%APPDATA%\Jarvis`, `~/.local/share/jarvis`) e `config.json` (chave da Gemini, nome, cidade, voz, câmera). Lê de novo a cada mudança. No Mac do Luca importa uma vez o `.env` e a memória do Jarvis 1.
+- `config.py`: pasta de dados por sistema (`JARVIS_HOME`, ou `~/Library/Application Support/Jarvis`, `%APPDATA%\Jarvis`, `~/.local/share/jarvis`) e `config.json` (chave da Gemini, nome, tratamento, cidade, voz, câmera). Lê de novo a cada mudança. Produto para qualquer pessoa: nada vem do Jarvis 1 nem do Mac do Luca; cada instalação começa do zero.
 - `audio.py`: microfone 16 kHz (sempre aberto, guarda 3 s) e alto-falante 24 kHz (sounddevice), níveis de entrada/saída.
 - `live.py`: `voice`, a sessão com a Gemini Live. Microfone mudo enquanto ele fala (a menos que `ajustes.voz.interromper`). Legenda sai quando o alto-falante alcança o áudio do pedaço (`legenda`); fase e nível vão às telas (`vivo`, 20/s). Cartões do briefing liberados pela contagem de palavras faladas. Dorme após 45 s quieta.
 - `listener.py`: ouvido offline. Vosk pt-BR com gramática `["jarbas","jantar","[unk]"]` ("Jarvis" não está no vocabulário; "Jarbas" soa igual, "jantar" é isca) e confiança ≥ 0,7 no resultado final; a frase inteira vai junto para a Gemini (`audio.recent`). Palmas por pico de energia. Gera `despertar`.
@@ -21,14 +21,17 @@ Três partes, um processo de cada lado da permissão:
 - `pc/`: controle do computador com a mesma interface nos três sistemas (`mac.py` + `mac_*.py` com Quartz/Acessibilidade; `win.py` com Win32/UI Automation/pycaw; `linux.py` com wmctrl/xdotool/xclip, só X11). Janelas: `win_aim/grab/move/scale/throw/release`. Contexto: `snapshot`, `look_at`, `click_named`, seleção.
 - `overlay.py`: o que a camada mostra quando ele olha/age (`olhar`) e o "parar".
 - `tools.py`: ferramentas do modelo. `pesquisar_web` é `NON_BLOCKING`. Todas rodam em task à parte.
-- Dados: `memory.py` (SQLite + embeddings, reflexão ao fim da sessão), `briefing.py` + `sources/`, `alerts.py`, `activity.py` (memória de trabalho, sugestões, modo foco), `agents.py` (tarefas para Claude Code/Codex/ChatGPT), `protocols.py`, `market.py`, `system.py`, `store.py`.
-- `app.py`: API, `/ws` (só JSON), páginas. `JARVIS_TESTE=1` sobe sem microfone, câmera e ouvido (testes e CI).
+- `memory.py`: memória em mapa (estilo Obsidian). Tabelas `memorias`, `temas`, `ligacoes` (rótulos `sobre` memória→tema, `parte de` tema→tema/`eu`, `relacionado` memória↔memória por cosseno ≥ 0,74). `search` parte das mais parecidas e segue as ligações; `reflect` extrai memórias já com temas; `organize` liga as soltas; `write_vault` escreve `Memória/` (uma nota por tema com [[ligações]], só reescreve notas com a marca do Jarvis). Página `/memoria` (d3-force), ferramenta `mostrar_memoria`.
+- Dados: `briefing.py` + `sources/`, `alerts.py`, `activity.py` (memória de trabalho, sugestões, modo foco), `agents.py` (tarefas para Claude Code/Codex/ChatGPT), `protocols.py`, `market.py`, `system.py`, `store.py`.
+- `app.py`: API, `/ws` (só JSON; ao conectar manda `sync` e o estado da câmera), páginas. `/api/app/comandos`: o app espera ali pedidos de janela (mostrar, minimizar, esconder, memoria) vindos do ouvido e das ferramentas, então funciona com tudo escondido. `/api/camera/ao-vivo`: vídeo MJPEG. `JARVIS_TESTE=1` sobe sem microfone, câmera e ouvido (testes e CI).
 
 ### Interface (`frontend/src/`)
 - `lib/live.ts`: stores fora do React para `vivo` e `maos` (nada re-renderiza 30 vezes por segundo). `lib/socket.ts` joga esses eventos direto nos stores.
 - `ui/Aura.tsx`: esfera Aura (shader da LiveKit, MIT) num renderizador WebGL próprio; reage à fase e ao volume.
 - `hud/`: HUD (colunas de painéis, esfera, legenda, botão Parar, painéis/widgets em `Deck`/`Widgets`).
-- `overlay/`: camada por monitor. Cartões na área de trabalho (arrastar, alça de tamanho, fechar, fixar), esfera mini + quadradinho do mapeamento da mão quando o HUD está minimizado, esfera que voa em curva até onde ele olha, borda azul na janela mirada, cursor da mão. `handControl.ts`: **um modo só** (pinça e solta clica; pinça e mexe arrasta cartão ou janela; pinça parada → anel → ajuste em L; dois dedos rolam; borda joga para outro monitor). Elementos com `data-hit` recebem o mouse (a casca consulta `regioes`).
+- `memoria/`: mapa da memória (`/memoria`), janela própria aberta pelo app.
+- `ui/CameraView.tsx`: vídeo da câmera com o esqueleto das mãos (painel "Visão · Câmera" e quadradinho do canto).
+- `overlay/`: camada por monitor. Cartões com `zoom` (nítidos), sem desfoque. Cartões na área de trabalho (arrastar, alça de tamanho, fechar, fixar), esfera mini + quadradinho do mapeamento da mão quando o HUD está minimizado, esfera que voa em curva até onde ele olha, borda azul na janela mirada, cursor da mão. `handControl.ts`: **um modo só** (pinça e solta clica; pinça e mexe arrasta cartão ou janela; pinça parada → anel → ajuste em L; dois dedos rolam; borda joga para outro monitor). Elementos com `data-hit` recebem o mouse (a casca consulta `regioes`).
 - `setup/`: configuração inicial em 4 passos (boas-vindas, chave com teste, nome/cidade/voz/câmera, permissões).
 
 ## Compilar e entregar

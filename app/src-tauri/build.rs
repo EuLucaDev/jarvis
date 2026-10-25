@@ -8,6 +8,7 @@ fn main() {
         "painel_abrir",
         "configuracao_pronta",
         "regioes",
+        "memoria_abrir",
     ])))
     .expect("falha no build do Tauri");
 }

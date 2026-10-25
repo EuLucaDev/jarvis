@@ -17,7 +17,7 @@ const VOZES = [
   ['Aoede', 'feminina, suave'],
 ] as const
 
-type Cfg = { tem_chave: boolean; user_name: string; city: string; voice: string; camera_auto: boolean; sistema: string; configurado: boolean }
+type Cfg = { tem_chave: boolean; user_name: string; tratamento: string; city: string; voice: string; camera_auto: boolean; sistema: string; configurado: boolean }
 
 export function Setup() {
   const [passo, setPasso] = useState(0)
@@ -27,6 +27,7 @@ export function Setup() {
   const [testando, setTestando] = useState(false)
   const [nome, setNome] = useState('')
   const [cidade, setCidade] = useState('')
+  const [trato, setTrato] = useState('Senhor')
   const [voz, setVoz] = useState('Charon')
   const [camera, setCamera] = useState(true)
   const [salvando, setSalvando] = useState(false)
@@ -36,6 +37,7 @@ export function Setup() {
     api<Cfg>('/api/setup').then((c) => {
       setCfg(c)
       setNome(c.user_name || '')
+      setTrato(c.tratamento ?? 'Senhor')
       setCidade(c.city || '')
       setVoz(c.voice || 'Charon')
       setCamera(c.camera_auto)
@@ -54,7 +56,7 @@ export function Setup() {
     setSalvando(true)
     await api('/api/setup', {
       method: 'POST',
-      json: { ...(chave.trim() ? { gemini_api_key: chave.trim() } : {}), user_name: nome.trim(), city: cidade.trim(), voice: voz, camera_auto: camera },
+      json: { ...(chave.trim() ? { gemini_api_key: chave.trim() } : {}), user_name: nome.trim(), tratamento: trato, city: cidade.trim(), voice: voz, camera_auto: camera },
     })
     setSalvando(false)
     await app.setupDone()
@@ -136,8 +138,21 @@ export function Setup() {
             </h2>
             <label>
               <span>Seu nome</span>
-              <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Luca" />
+              <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Ana" />
             </label>
+            <span className="label">Como o Jarvis te chama</span>
+            <div className="voices" role="radiogroup">
+              {[
+                ['Senhor', '“Pois não, Senhor”'],
+                ['Senhora', '“Pois não, Senhora”'],
+                ['', nome.trim() ? `Pelo nome: “${nome.trim()}”` : 'Pelo nome'],
+              ].map(([id, desc]) => (
+                <button key={id || 'nome'} role="radio" aria-checked={trato === id} className={trato === id ? 'on' : ''} onClick={() => setTrato(id)}>
+                  <b>{id || 'Nome'}</b>
+                  <small>{desc}</small>
+                </button>
+              ))}
+            </div>
             <label>
               <span>Sua cidade (para o clima)</span>
               <input value={cidade} onChange={(e) => setCidade(e.target.value)} placeholder="Ex.: Maceió" />

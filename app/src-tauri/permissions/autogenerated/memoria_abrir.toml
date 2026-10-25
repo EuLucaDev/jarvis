@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memoria-abrir"
+description = "Enables the memoria_abrir command without any pre-configured scope."
+commands.allow = ["memoria_abrir"]
+
+[[permission]]
+identifier = "deny-memoria-abrir"
+description = "Denies the memoria_abrir command without any pre-configured scope."
+commands.deny = ["memoria_abrir"]

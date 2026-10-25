@@ -14,7 +14,7 @@ import time
 from typing import Any
 
 from fastapi import Body, FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import briefing, chat, pc, store, system
@@ -26,7 +26,7 @@ from .hub import hub
 from .listener import estado as ouvido_estado
 from .listener import ouvido
 from .live import voice
-from .memory import TIPOS, _db, memory
+from .memory import TIPOS, VAULT as MEMORIA_PASTA, _db, memory
 
 # ---------- logs em memória (página Sistema) e em arquivo ----------
 LOGS: collections.deque[dict[str, Any]] = collections.deque(maxlen=400)
@@ -147,7 +147,7 @@ async def setup_testar(body: dict = Body(...)):
 
 @app.post("/api/setup")
 async def setup_salvar(body: dict = Body(...)):
-    campos = {k: v for k, v in body.items() if k in ("gemini_api_key", "user_name", "city", "voice", "camera_auto") and v is not None}
+    campos = {k: v for k, v in body.items() if k in ("gemini_api_key", "user_name", "tratamento", "city", "voice", "camera_auto") and v is not None}
     if "gemini_api_key" in campos:
         campos["gemini_api_key"] = str(campos["gemini_api_key"]).strip()
     settings.update(**campos, configurado=True)
@@ -207,6 +207,39 @@ async def camera(acao: str):
     store.put("camera", {**store.get("camera"), "ligada": acao == "ligar"})
     await asyncio.to_thread(hands.start if acao == "ligar" else hands.stop)
     return {"ok": True, "camera": hands.on, "erro": hands.erro}
+
+
+@app.get("/api/camera/ao-vivo")
+async def camera_ao_vivo():
+    """Vídeo da câmera (MJPEG) para o HUD e o quadradinho do canto."""
+
+    async def quadros():
+        hands.viewers += 1
+        ultimo = None
+        try:
+            while True:
+                q = hands.latest_jpeg()
+                if q and q is not ultimo:
+                    ultimo = q
+                    yield b"--q\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(q)).encode() + b"\r\n\r\n" + q + b"\r\n"
+                await asyncio.sleep(1 / 15)
+        finally:
+            hands.viewers -= 1
+
+    return StreamingResponse(quadros(), media_type="multipart/x-mixed-replace; boundary=q", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/app/comandos")
+async def app_comandos():
+    """O app (Tauri) pergunta aqui o que fazer com as janelas; espera até 20 s por um pedido."""
+    try:
+        primeiro = await asyncio.wait_for(hub.app_queue.get(), timeout=20)
+    except asyncio.TimeoutError:
+        return []
+    out = [primeiro]
+    while not hub.app_queue.empty():
+        out.append(hub.app_queue.get_nowait())
+    return out
 
 
 @app.get("/api/permissoes")
@@ -440,12 +473,78 @@ async def memorias():
 async def nova_memoria(body: dict = Body(...)):
     if not body.get("texto"):
         raise HTTPException(400, "Texto vazio.")
-    return await memory.add(body.get("tipo", "nota"), body["texto"], fonte="painel")
+    return await memory.add(body.get("tipo", "nota"), body["texto"], fonte="painel", temas=body.get("temas"))
+
+
+@app.patch("/api/memorias/{mid}")
+async def editar_memoria(mid: str, body: dict = Body(...)):
+    await memory.edit(mid, body.get("texto"), body.get("tipo"))
+    return {"ok": True}
 
 
 @app.delete("/api/memorias/{mid}")
 async def apagar_memoria(mid: str):
     memory.delete(mid)
+    return {"ok": True}
+
+
+# mapa da memória (/memoria): nós, ligações, busca que segue as ligações, organizar
+@app.get("/api/memoria/mapa")
+async def mapa_memoria():
+    return memory.graph()
+
+
+@app.get("/api/memoria/buscar")
+async def buscar_memoria(q: str):
+    return await memory.search(q, limit=12)
+
+
+@app.post("/api/memoria/ligar")
+async def ligar_memoria(body: dict = Body(...)):
+    if not body.get("a") or not body.get("b"):
+        raise HTTPException(400)
+    if body.get("desligar"):
+        memory.disconnect(body["a"], body["b"])
+    else:
+        memory.connect(body["a"], body["b"])
+    return {"ok": True}
+
+
+@app.post("/api/memoria/temas")
+async def novo_tema(body: dict = Body(...)):
+    if not body.get("nome"):
+        raise HTTPException(400, "Nome vazio.")
+    return {"id": await memory.tema(body["nome"], body.get("tipo", "assunto"), body.get("parte_de"))}
+
+
+@app.delete("/api/memoria/temas/{tid}")
+async def apagar_tema(tid: str):
+    memory.delete_tema(tid)
+    return {"ok": True}
+
+
+@app.post("/api/memoria/organizar")
+async def organizar_memoria():
+    return {"ligadas": await memory.organize()}
+
+
+@app.post("/api/memoria/pasta")
+async def abrir_pasta_memoria():
+    """Abre a pasta de notas da memória (dá para abrir como cofre no Obsidian)."""
+    await asyncio.to_thread(memory.write_vault)
+    await asyncio.to_thread(pc.open_path, str(MEMORIA_PASTA))
+    return {"ok": True, "pasta": str(MEMORIA_PASTA)}
+
+
+@app.post("/api/memoria/zerar")
+async def zerar_memoria(body: dict = Body(...)):
+    """Apaga toda a memória e as conversas guardadas (o painel pede para digitar APAGAR)."""
+    if body.get("confirmar") != "APAGAR":
+        raise HTTPException(400, "Confirmação ausente.")
+    with _db() as con:
+        for tabela in ("memorias", "temas", "ligacoes", "conversas", "sessoes"):
+            con.execute(f"delete from {tabela}")  # noqa: S608 - nomes fixos
+    await asyncio.to_thread(memory.write_vault)
     return {"ok": True}
 
 
@@ -503,6 +602,7 @@ async def _janela(ws: WebSocket, kind: str, data: dict[str, Any], aviso: list[fl
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
     await hub.join(ws, {"role": ws.query_params.get("role", "hud")})
+    await ws.send_json({"type": "camera", "ligada": hands.on, "erro": hands.erro})  # a câmera liga antes das telas
     aviso = [0.0]  # aviso de permissão: no máximo um a cada 15 s
     try:
         while True:

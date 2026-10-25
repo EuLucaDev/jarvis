@@ -112,9 +112,19 @@ DECLARATIONS = [
             "properties": {
                 "texto": {"type": S, "description": "Uma frase autossuficiente, na terceira pessoa."},
                 "tipo": {"type": S, "enum": list(TIPOS), "description": "; ".join(f"{k}: {v}" for k, v in TIPOS.items())},
+                "temas": {"type": "ARRAY", "items": {"type": S},
+                          "description": "1 ou 2 temas curtos do mapa (pessoa, projeto, lugar, assunto). Reuse os que já existem."},
             },
             "required": ["texto", "tipo"],
         },
+    ),
+    types.FunctionDeclaration(
+        name="mostrar_memoria",
+        description=(
+            "Abre o mapa da memória na tela: ele no centro, os temas e as memórias interligadas. Use para "
+            "'mostre minha memória', 'o que você sabe sobre mim' ou 'sobre X' (foco = o tema ou assunto)."
+        ),
+        parameters={"type": "OBJECT", "properties": {"foco": {"type": S, "description": "Tema ou assunto para destacar, opcional."}}},
     ),
     types.FunctionDeclaration(
         name="buscar_memorias",
@@ -280,7 +290,7 @@ DECLARATIONS = [
     types.FunctionDeclaration(
         name="executar_protocolo",
         description=(
-            "Executa um protocolo (rotina com nome, cadastrada pelo Luca no painel): abre apps e sites, ajusta "
+            "Executa um protocolo (rotina com nome, cadastrada no painel): abre apps e sites, ajusta "
             "volume e brilho, roda atalhos, liga a casa, abre painéis. Ex.: 'modo foco', 'protocolo trabalho'."
         ),
         parameters={"type": "OBJECT", "properties": {"nome": {"type": S}}, "required": ["nome"]},
@@ -288,7 +298,7 @@ DECLARATIONS = [
     types.FunctionDeclaration(
         name="delegar_tarefa",
         description=(
-            "Passa uma tarefa para outra IA do Luca, que roda em segundo plano no Mac: 'claude' (Claude Code, "
+            "Passa uma tarefa para outra IA instalada neste computador, que roda em segundo plano: 'claude' (Claude Code, "
             "cria arquivos e usa MCPs como ElevenLabs e Google Drive), 'codex' (Codex com o ChatGPT dele, cria "
             "arquivos e código) ou 'chatgpt' (só pergunta e resposta). Os arquivos ficam em ~/Jarvis/Tarefas. "
             "claude e codex exigem confirmado=true depois do sim dele."
@@ -378,7 +388,7 @@ DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="janela_jarvis",
-        description="Janela do Jarvis: minimizar (vira a esfera pequena no canto), esconder (só o ícone na barra de menus, segue ouvindo 'Jarvis' e palmas) ou mostrar.",
+        description="Janela do Jarvis: minimizar (vai para o canto como esfera pequena), esconder (só o ícone na barra de menus, segue ouvindo 'Jarvis' e palmas) ou mostrar.",
         parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["minimizar", "esconder", "mostrar"]}}, "required": ["acao"]},
     ),
     types.FunctionDeclaration(
@@ -571,8 +581,17 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             res = await asyncio.to_thread(_search, args.get("consulta", ""), args.get("tipo", "geral"))
             return {"resultados": res} if res else {"erro": "A busca não trouxe resultados."}
         if name == "lembrar":
-            res = await memory.add(args.get("tipo", "nota"), args.get("texto", ""), fonte="pedido")
+            res = await memory.add(args.get("tipo", "nota"), args.get("texto", ""), fonte="pedido", temas=args.get("temas"))
             return {"ok": True, **res}
+        if name == "mostrar_memoria":
+            foco = (args.get("foco") or "").strip()
+            hub.app_cmd("memoria", foco=foco)
+            g = memory.graph()
+            temas = [n["rotulo"] for n in g["nodes"] if n["grupo"] == "tema"]
+            res = {"ok": True, "memorias": sum(n["grupo"] == "memoria" for n in g["nodes"]), "temas": temas[:30]}
+            if foco:
+                res["sobre_o_foco"] = await memory.search(foco, limit=6)
+            return {**res, "instrucao": "O mapa abriu na tela. Diga em uma ou duas frases o que tem lá (ou sobre o foco)."}
         if name == "buscar_memorias":
             return {"memorias": await memory.search(args.get("consulta", ""))}
         if name == "esquecer":
@@ -694,7 +713,7 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
             return await asyncio.to_thread(pc.look_at, args.get("regiao"), args.get("alvo"))
         if name == "janela_jarvis":
-            await hub.broadcast({"type": "janela", "acao": args.get("acao", "minimizar")})
+            hub.app_cmd(args.get("acao", "minimizar"))
             return {"ok": True, "instrucao": "Confirme numa frase curta."}
         if name in ("contexto_atual", "substituir_selecao", "clicar"):
             from . import pc

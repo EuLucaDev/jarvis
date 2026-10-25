@@ -26,6 +26,12 @@ class Hub:
         self.focus_until = 0.0  # modo foco a dois: avisos esperam até aqui
         self.focus_queue: list[dict[str, Any]] = []
         self.plan_card: str | None = None  # cartão do plano que está sendo executado
+        # pedidos para o app (mostrar o HUD, ir para o canto, abrir a memória): o app busca em /api/app/comandos,
+        # assim funciona mesmo com todas as janelas escondidas
+        self.app_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+    def app_cmd(self, acao: str, **dados: Any) -> None:
+        self.app_queue.put_nowait({"acao": acao, **dados})
 
     async def join(self, ws: WebSocket, info: dict[str, Any]) -> None:
         self.clients[ws] = info
