@@ -2,11 +2,17 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <title>J.A.R.V.I.S.</title>
+    <title>Jarvis</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #030a1a; color: #5fd4ff; font: 600 14px/1 system-ui, sans-serif; }
-      body { display: grid; place-items: center; letter-spacing: 0.3em; text-transform: uppercase; }
+      html, body { margin: 0; height: 100%; background: #030a1a; color: #e8f4ff; font: 500 13px/1.5 system-ui, sans-serif; }
+      body { display: grid; place-items: center; text-align: center; border-radius: 14px; box-shadow: inset 0 0 0 1px rgb(95 212 255 / 0.4); }
+      b { display: block; color: #5fd4ff; font: 600 18px/1 system-ui, sans-serif; letter-spacing: 0.3em; margin-bottom: 10px; }
+      i { display: inline-block; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #5fd4ff33; border-top-color: #5fd4ff; animation: g 0.9s linear infinite; margin-bottom: 10px; }
+      small { color: #7f93ad; }
+      @keyframes g { to { transform: rotate(360deg); } }
     </style>
   </head>
-  <body>Iniciando o Jarvis…</body>
+  <body>
+    <div><i></i><b>J.A.R.V.I.S.</b>Iniciando o Jarvis…<br /><small>Na primeira vez pode levar um minuto.</small></div>
+  </body>
 </html>

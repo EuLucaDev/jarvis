@@ -452,12 +452,27 @@ pub fn run() {
             let _ = h.global_shortcut().register(Shortcut::new(Some(Modifiers::ALT), Code::Space));
             montar_bandeja(&h)?;
 
+            // janelinha "Iniciando o Jarvis…" enquanto o núcleo sobe (na primeira vez o sistema inspeciona
+            // o pacote e pode levar mais de um minuto); não aparece quando abre escondido no login
+            if !escondido {
+                let _ = WebviewWindowBuilder::new(&h, "inicio", WebviewUrl::App("index.html".into()))
+                    .title("Jarvis")
+                    .inner_size(420.0, 180.0)
+                    .resizable(false)
+                    .decorations(false)
+                    .always_on_top(true)
+                    .center()
+                    .build();
+            }
             start_core(&h);
             watch_core(h.clone());
             thread::spawn(move || {
-                let ok = wait_core(Duration::from_secs(90));
+                let ok = wait_core(Duration::from_secs(600));
                 let h2 = h.clone();
                 let _ = h.run_on_main_thread(move || {
+                    if let Some(w) = h2.get_webview_window("inicio") {
+                        let _ = w.close();
+                    }
                     let pronto = ok && configurado();
                     let _ = criar_hud(&h2, pronto && !escondido);
                     criar_camadas(&h2);
