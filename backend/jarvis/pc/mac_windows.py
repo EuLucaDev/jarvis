@@ -320,3 +320,15 @@ def controlar(pedido: str, acao: str, confirmado: bool = False) -> dict[str, Any
 
 def apps_abertos() -> list[str]:
     return sorted({str(a.localizedName()).strip("\u200e\u200f") for a in _apps_abertos()})
+
+
+def front_rect() -> tuple[float, float, float, float] | None:
+    """Quadro da janela da frente (fora o Jarvis), em pontos globais: para onde a esfera voa."""
+    infos = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements, Quartz.kCGNullWindowID) or []
+    for w in infos:
+        if w.get("kCGWindowLayer", 1) != 0 or str(w.get("kCGWindowOwnerName", "")) in PROPRIOS:
+            continue
+        b = w.get("kCGWindowBounds") or {}
+        if b.get("Width", 0) > 200 and b.get("Height", 0) > 120:
+            return b["X"], b["Y"], b["Width"], b["Height"]
+    return None

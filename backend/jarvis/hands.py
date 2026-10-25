@@ -26,14 +26,14 @@ log = logging.getLogger("jarvis.hands")
 MODELO = CODE_ROOT / "models" / "gesture_recognizer.task"
 AREA = (0.18, 0.82, 0.22, 0.78)  # miolo do quadro da câmera que vira a tela inteira (x0, x1, y0, y1)
 
-POSES = {
-    "Open_Palm": ("mostrar", 1.4, "Mão aberta parada · mostra o Jarvis"),
-    "Closed_Fist": ("fechar", 0.7, "Punho fechado · fecha os cartões"),
-    "Thumb_Up": ("sim", 0.6, "Polegar para cima · sim"),
-    "Thumb_Down": ("nao", 0.6, "Polegar para baixo · não"),
+POSES = {  # pose → segundos parada para valer (a ação de cada uma é escolhida no painel: gestures.py)
+    "Open_Palm": 1.4,
+    "Closed_Fist": 0.7,
+    "Thumb_Up": 0.6,
+    "Thumb_Down": 0.6,
+    "Pointing_Up": 1.3,  # mais tempo: apontar parado também acontece ao mirar
+    "ILoveYou": 0.8,
 }
-DESLIZES = {"esquerda": "Deslizar para a esquerda", "direita": "Deslizar para a direita", "cima": "Deslizar para cima · mostra o HUD",
-            "baixo": "Deslizar para baixo · minimiza o HUD"}
 
 
 def _clamp(v: float) -> float:
@@ -209,10 +209,10 @@ class Hands:
             dx, dy = s["px"] - fx, s["py"] - fy
             if abs(dx) > 0.3 and abs(dx) > abs(dy) * 1.8:
                 s["trail"] = []
-                self._acao("esquerda" if dx < 0 else "direita", DESLIZES["esquerda" if dx < 0 else "direita"], agora)
+                self._acao("deslize_esquerda" if dx < 0 else "deslize_direita", agora)
             elif abs(dy) > 0.28 and abs(dy) > abs(dx) * 1.8:
                 s["trail"] = []
-                self._acao("cima" if dy < 0 else "baixo", DESLIZES["cima" if dy < 0 else "baixo"], agora)
+                self._acao("deslize_cima" if dy < 0 else "deslize_baixo", agora)
         # pose parada
         nome = h["pose"] if h and not h["pinch"] else ""
         if nome != self.pose:
@@ -221,15 +221,23 @@ class Hands:
         elif nome in POSES and h:
             if _dist(h["palm"], self.pose_anchor) > 0.06:
                 self.pose_since, self.pose_anchor = agora, tuple(h["palm"])
-            elif agora - self.pose_since >= POSES[nome][1]:
+            elif agora - self.pose_since >= POSES[nome]:
                 self.pose_since = agora + 1000  # exige soltar e repetir
-                self._acao(POSES[nome][0], POSES[nome][2], agora, 1.6)
+                self._acao(nome, agora, 1.6)
 
-    def _acao(self, acao: str, rotulo: str, agora: float, espera: float = 0.9) -> None:
+    def _acao(self, gesto: str, agora: float, espera: float = 0.9) -> None:
+        from . import gestures
+
         if agora < self.cooldown:
             return
+        acao = gestures.acao_de(gesto)
+        if acao == "nada":
+            return
         self.cooldown = agora + espera
-        self._emit({"type": "gesto", "acao": acao, "rotulo": rotulo})
+        rotulo = f"{gestures.GESTOS[gesto]} · {gestures.ACOES[acao]}"
+        self._emit({"type": "gesto", "gesto": gesto, "acao": acao, "rotulo": rotulo})
+        if self.loop:
+            asyncio.run_coroutine_threadsafe(gestures.executar(acao), self.loop)
 
 
 hands = Hands()

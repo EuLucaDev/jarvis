@@ -444,3 +444,65 @@ body:has(.overlay) {
   backdrop-filter: none;
   background: rgb(6 16 34 / 0.96);
 }
+
+/* aviso do gesto de atalho reconhecido ("Polegar para cima · Responder sim") */
+.ov-gesto {
+  position: absolute;
+  left: 50%;
+  top: 22px;
+  translate: -50% 0;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgb(3 10 26 / 0.92);
+  box-shadow: inset 0 0 0 1px rgb(95 212 255 / 0.6), 0 0 30px -8px rgb(63 211 232 / 0.8);
+  color: #e8f4ff;
+  font: 500 12px/1 'Manrope', system-ui, sans-serif;
+  animation: ov-gesto 1.8s ease both;
+  pointer-events: none;
+}
+@keyframes ov-gesto {
+  0% { opacity: 0; translate: -50% -8px; }
+  12%, 80% { opacity: 1; translate: -50% 0; }
+  100% { opacity: 0; }
+}
+
+/* controles rápidos acima da esfera do canto */
+.ov-quick {
+  position: absolute;
+  right: 57px;
+  bottom: 214px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgb(3 10 26 / 0.9);
+  box-shadow: inset 0 0 0 1px rgb(95 212 255 / 0.4), 0 0 30px -10px rgb(63 211 232 / 0.7);
+  pointer-events: auto;
+  animation: ov-quick 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.ov-quick button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #9fb4cc;
+  cursor: pointer;
+}
+.ov-quick button:hover {
+  color: #e8f4ff;
+  background: rgb(95 212 255 / 0.12);
+}
+.ov-quick button.on {
+  color: #5fd4ff;
+  background: rgb(95 212 255 / 0.16);
+}
+@keyframes ov-quick {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}

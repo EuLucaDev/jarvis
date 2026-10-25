@@ -299,6 +299,125 @@ def trash_item(caminho: str, confirmado: bool = False) -> dict[str, Any]:
     return {"ok": True, "na_lixeira": str(p).replace(str(HOME), "~")}
 
 
+TEXTO_MAX = 20000  # o que vai para o modelo ler ou resumir
+
+
+def _curto(p: Path) -> str:
+    return str(p).replace(str(HOME), "~")
+
+
+def create_file(caminho: str, conteudo: str = "", confirmado: bool = False) -> dict[str, Any]:
+    """Cria um arquivo de texto (.txt se vier sem extensão). Não sobrescreve sem confirmação."""
+    p = _resolve(caminho, must_exist=False)
+    if not p:
+        return {"erro": "Só crio arquivos dentro da sua pasta pessoal."}
+    if not p.suffix:
+        p = p.with_suffix(".txt")
+    if p.exists() and not confirmado:
+        return {"precisa_confirmar": True, "arquivo": _curto(p), "instrucao": "Já existe um arquivo com esse nome. Pergunte se pode substituir."}
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(conteudo, encoding="utf-8")
+    return {"ok": True, "arquivo": _curto(p)}
+
+
+def _texto_de(p: Path) -> str:
+    ext = p.suffix.lower()
+    if ext == ".pdf":
+        from pypdf import PdfReader
+
+        partes, total = [], 0
+        for pag in PdfReader(str(p)).pages:
+            t = pag.extract_text() or ""
+            partes.append(t)
+            total += len(t)
+            if total > TEXTO_MAX:
+                break
+        return "\n".join(partes)
+    if ext in (".docx", ".pptx", ".xlsx", ".odt"):
+        import re
+        import zipfile
+
+        with zipfile.ZipFile(p) as z:
+            nomes = [n for n in z.namelist() if n.endswith(".xml") and any(k in n for k in ("word/document", "ppt/slides/slide", "xl/sharedStrings", "content.xml"))]
+            xml = " ".join(z.read(n).decode("utf-8", "ignore") for n in sorted(nomes))
+        xml = re.sub(r"</w:p>|</a:p>|</text:p>", "\n", xml)
+        return re.sub(r"<[^>]+>", "", xml)
+    return p.read_text(encoding="utf-8", errors="ignore")
+
+
+def read_file(caminho: str) -> dict[str, Any]:
+    """Texto de um arquivo (txt, md, csv, código, PDF, Word, PowerPoint, Excel) para ler ou resumir."""
+    p = _resolve(caminho)
+    if not p:
+        hits = _search_files(Path(caminho).name or caminho, 1)
+        p = Path(hits[0]) if hits else None
+    if not p or not p.is_file():
+        return {"erro": f"Não encontrei o arquivo '{caminho}'."}
+    if p.stat().st_size > 60_000_000:
+        return {"erro": "Arquivo grande demais para ler."}
+    try:
+        texto = _texto_de(p)
+    except Exception as exc:  # noqa: BLE001
+        return {"erro": f"Não consegui ler esse tipo de arquivo ({p.suffix}): {exc}"[:200]}
+    texto = "\n".join(ln.rstrip() for ln in texto.splitlines() if ln.strip())
+    return {"ok": True, "arquivo": _curto(p), "caracteres": len(texto), "texto": texto[:TEXTO_MAX],
+            "cortado": len(texto) > TEXTO_MAX}
+
+
+def list_folder(caminho: str) -> dict[str, Any]:
+    p = _resolve(caminho or "mesa")
+    if not p or not p.is_dir():
+        return {"erro": f"Pasta '{caminho}' não encontrada."}
+    itens = sorted((f for f in p.iterdir() if not f.name.startswith(".")), key=lambda f: (not f.is_dir(), f.name.lower()))
+    return {"ok": True, "pasta": _curto(p), "total": len(itens),
+            "itens": [f.name + ("/" if f.is_dir() else "") for f in itens[:80]]}
+
+
+def rename_item(caminho: str, novo_nome: str) -> dict[str, Any]:
+    p = _resolve(caminho)
+    if not p:
+        return {"erro": f"Não encontrei '{caminho}'."}
+    if p in PLACES.values() or p == HOME.resolve():
+        return {"erro": "Não renomeio pastas do sistema."}
+    nome = Path(novo_nome).name
+    if not Path(nome).suffix and p.suffix and p.is_file():
+        nome += p.suffix  # mantém a extensão
+    alvo = p.with_name(nome)
+    if alvo.exists():
+        return {"erro": f"Já existe '{nome}' nessa pasta."}
+    p.rename(alvo)
+    return {"ok": True, "agora": _curto(alvo)}
+
+
+def move_item(caminho: str, destino: str, copiar: bool = False) -> dict[str, Any]:
+    p = _resolve(caminho)
+    d = _resolve(destino, must_exist=False)
+    if not p:
+        return {"erro": f"Não encontrei '{caminho}'."}
+    if not d:
+        return {"erro": "O destino tem que ficar dentro da sua pasta pessoal."}
+    if not copiar and (p in PLACES.values() or p == HOME.resolve()):
+        return {"erro": "Não movo pastas do sistema."}
+    d.mkdir(parents=True, exist_ok=True)
+    alvo = d / p.name
+    if alvo.exists():
+        return {"erro": f"Já existe '{p.name}' em {_curto(d)}."}
+    if copiar:
+        (shutil.copytree if p.is_dir() else shutil.copy2)(p, alvo)
+    else:
+        shutil.move(str(p), str(alvo))
+    return {"ok": True, "agora": _curto(alvo)}
+
+
+def open_item(caminho: str) -> dict[str, Any]:
+    """Abre um arquivo ou pasta no app padrão (procura pelo nome se não achar o caminho)."""
+    p = _resolve(caminho)
+    if p:
+        pc.open_path(str(p))
+        return {"ok": True, "aberto": _curto(p)}
+    return find_file(caminho)
+
+
 # ---------- Alexa via Voice Monkey ----------
 
 

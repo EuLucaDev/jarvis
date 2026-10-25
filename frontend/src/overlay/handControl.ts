@@ -6,6 +6,7 @@
 //   pinça PARADA (o anel)  → ajuste de tamanho: polegar e indicador em L, abrir aumenta, fechar diminui;
 //                            parado de novo fixa; mão aberta ou tirar a mão cancela (volta como estava)
 //   dois dedos e mexe      → rola a página embaixo
+//   duas mãos em pinça     → zoom no app da frente: afastar as mãos aproxima, juntar afasta
 //
 // O cursor, o anel e a borda são desenhados pela camada (Overlay.tsx) a partir do estado daqui.
 
@@ -51,9 +52,37 @@ export function useHandControl(ctx: Ctx, active: boolean) {
 
   useEffect(() => {
     if (!active) return
-    return handStore.subscribe(() => step(handStore.get().hands[0]))
+    return handStore.subscribe(() => {
+      const hs = handStore.get().hands
+      if (hs.length === 2 && hs[0].pinch && hs[1].pinch && mode.current.m !== 'resize') return zoom(hs[0], hs[1])
+      zoomBase.current = null
+      step(hs[0])
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
+
+  // duas pinças: cada vez que a distância entre as mãos muda 18%, um passo de zoom (Cmd/Ctrl + ou -)
+  const zoomBase = useRef<number | null>(null)
+  function zoom(a: Hand, b: Hand) {
+    const k = c.current
+    if (mode.current.m !== 'idle') {
+      if (mode.current.m === 'drag-win') k.send({ type: 'janela.soltar', cancelar: true })
+      reset()
+    }
+    const d = Math.hypot(a.x - b.x, a.y - b.y)
+    if (zoomBase.current == null) {
+      zoomBase.current = d
+      setTip('Zoom: afaste ou aproxime as mãos')
+      return
+    }
+    const r = d / zoomBase.current
+    if (r > 1.18 || r < 0.85) {
+      k.send({ type: 'zoom', direcao: r > 1 ? 1 : -1 })
+      zoomBase.current = d
+      setTip(r > 1 ? 'Zoom +' : 'Zoom −')
+      play('step', 0)
+    }
+  }
 
   const reset = (msg = '') => {
     mode.current = { m: 'idle' }

@@ -11,8 +11,9 @@
 //
 // O clique só é capturado em cima dos elementos com data-hit (cartões, esfera); o resto passa para os apps.
 
-import { Pin, X } from 'lucide-react'
+import { Brain, Camera, CameraOff, Maximize2, Mic, MicOff, MonitorOff, MonitorUp, Pin, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { api } from '../lib/api'
 import { app, type HudState } from '../lib/app'
 import { useHands, voiceStore } from '../lib/live'
 import { play } from '../lib/sfx'
@@ -131,17 +132,30 @@ export function Overlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hc.hoverCard])
 
-  // gestos de atalho (poses paradas e deslizes)
+  // gestos de atalho (poses paradas e deslizes): o núcleo já fez a ação escolhida no painel; aqui só o aviso
+  const [gesto, setGesto] = useState<string | null>(null)
   useEffect(() => {
     const e = j.last
     if (!principal || !e || e.type !== 'gesto') return
-    if (e.acao === 'mostrar' || e.acao === 'cima') app.showHud()
-    else if (e.acao === 'baixo') app.minimize()
-    else if (e.acao === 'fechar') j.clearCards()
-    else if (e.acao === 'sim') j.ask('Sim')
-    else if (e.acao === 'nao') j.ask('Não')
+    setGesto(e.rotulo)
+    play('step', 0.6)
+    const t = setTimeout(() => setGesto(null), 1800)
+    return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [j.last])
+
+  // ---------- controles rápidos na esfera do canto (aparecem ao passar o mouse) ----------
+  const [rapido, setRapido] = useState(false)
+  const rapidoT = useRef(0)
+  const abrirRapido = () => {
+    clearTimeout(rapidoT.current)
+    setRapido(true)
+  }
+  const fecharRapido = () => {
+    clearTimeout(rapidoT.current)
+    rapidoT.current = window.setTimeout(() => setRapido(false), 700)
+  }
+  const voz = j.status.voice === 'live'
 
   // ---------- janela realçada (borda azul) ----------
   const [win, setWin] = useState<(Rect & { estado: string; app: string; titulo: string; escala?: number }) | null>(null)
@@ -369,6 +383,8 @@ export function Overlay() {
         className={`ov-orb ${mini && !look && !voando ? 'mini' : ''}`}
         data-hit={mini ? '' : undefined}
         onClick={() => app.showHud()}
+        onPointerEnter={() => mini && abrirRapido()}
+        onPointerLeave={fecharRapido}
         role="button"
         aria-label="Mostrar o Jarvis"
       >
@@ -381,8 +397,24 @@ export function Overlay() {
         )}
       </div>
 
+      {mini && rapido && !look && !voando && (
+        <div className="ov-quick" data-hit onPointerEnter={abrirRapido} onPointerLeave={fecharRapido}>
+          {[
+            { on: voz, rotulo: voz ? 'Parar de ouvir' : 'Falar com o Jarvis', icon: voz ? Mic : MicOff, f: () => (voz ? j.stopVoice() : j.startVoice()) },
+            { on: j.camera.ligada, rotulo: j.camera.ligada ? 'Desligar a câmera' : 'Ligar a câmera (mãos)', icon: j.camera.ligada ? Camera : CameraOff, f: () => api(`/api/camera/${j.camera.ligada ? 'desligar' : 'ligar'}`, { method: 'POST' }) },
+            { on: j.tela.ligada, rotulo: j.tela.ligada ? 'Parar de espelhar a tela' : 'Espelhar a tela', icon: j.tela.ligada ? MonitorUp : MonitorOff, f: () => api(`/api/tela/${j.tela.ligada ? 'desligar' : 'ligar'}`, { method: 'POST' }) },
+            { on: false, rotulo: 'Mapa da memória', icon: Brain, f: () => app.openMemory() },
+            { on: false, rotulo: 'Abrir o HUD', icon: Maximize2, f: () => app.showHud() },
+          ].map(({ on, rotulo, icon: Icon, f }) => (
+            <button key={rotulo} className={on ? 'on' : ''} onClick={f} aria-label={rotulo} title={rotulo}>
+              <Icon size={15} />
+            </button>
+          ))}
+        </div>
+      )}
       {mini && handsOn && <HandPreview />}
       {handsOn && <HandCursors ring={hc.ring} tip={hc.tip} />}
+      {gesto && <div className="ov-gesto">{gesto}</div>}
     </main>
   )
 }

@@ -3,6 +3,7 @@ import {
   Brain,
   BrainCircuit,
   FolderOpen,
+  Hand,
   CalendarDays,
   Cpu,
   LineChart,
@@ -40,7 +41,7 @@ import type { Telemetry } from '../lib/socket'
 import { useJarvis } from '../hud/useJarvis'
 import './admin.css'
 
-type Page = 'chat' | 'briefing' | 'conexoes' | 'operacoes' | 'memorias' | 'financeiro' | 'saude' | 'conversas' | 'sistema'
+type Page = 'chat' | 'briefing' | 'conexoes' | 'operacoes' | 'gestos' | 'memorias' | 'financeiro' | 'saude' | 'conversas' | 'sistema'
 
 const NAV: { group: string; items: { id: Page; label: string; desc: string; icon: typeof Bot }[] }[] = [
   {
@@ -54,7 +55,8 @@ const NAV: { group: string; items: { id: Page; label: string; desc: string; icon
     group: 'Dados e automação',
     items: [
       { id: 'conexoes', label: 'Conexões', desc: 'E-mail, agenda, casa, mercado', icon: Plug },
-      { id: 'operacoes', label: 'Operações', desc: 'Protocolos e tarefas para outras IAs', icon: Workflow },
+      { id: 'operacoes', label: 'Operações', desc: 'Rotinas, horários e tarefas para outras IAs', icon: Workflow },
+      { id: 'gestos', label: 'Gestos', desc: 'O que cada gesto da mão faz', icon: Hand },
       { id: 'memorias', label: 'Memórias', desc: 'O que ele sabe sobre você', icon: BrainCircuit },
       { id: 'financeiro', label: 'Financeiro', desc: 'Bolsa, câmbio e cripto', icon: LineChart },
       { id: 'saude', label: 'Saúde', desc: 'Passos, sono e treinos', icon: HeartPulse },
@@ -137,6 +139,7 @@ export function Admin() {
           {page === 'briefing' && <BriefingPage />}
           {page === 'conexoes' && <ConexoesPage />}
           {page === 'operacoes' && <OperacoesPage tasks={j.tasks} />}
+          {page === 'gestos' && <GestosPage />}
           {page === 'financeiro' && <FinanceiroPage />}
           {page === 'saude' && <SaudePage />}
           {page === 'memorias' && <MemoriasPage />}
@@ -685,6 +688,67 @@ function MemoriasPage() {
   )
 }
 
+/* ---------- gestos ---------- */
+
+function GestosPage() {
+  const [d, setD] = useState<{ gestos: Record<string, string>; acoes: Record<string, string>; mapa: Record<string, string>; padrao: Record<string, string> } | null>(null)
+  const [toast, toastNode] = useToast()
+  useEffect(() => {
+    api('/api/gestos').then(setD)
+  }, [])
+  if (!d) return <p className="muted">Carregando…</p>
+  const salvar = async (mapa: Record<string, string>) => {
+    setD(await api('/api/gestos', { method: 'PUT', json: mapa }))
+    toast('Gestos salvos')
+  }
+  return (
+    <div className="stack">
+      <Panel title="Ponteiro (sempre igual)" desc="Com a câmera ligada, a mão é o mouse da tela inteira. O ponteiro segue os nós dos dedos, então fica parado quando você faz a pinça.">
+        <ul className="rows">
+          {[
+            ['Pinça e solta', 'Clica onde a pinça começou (em qualquer app ou nos cartões do Jarvis)'],
+            ['Pinça e mexe', 'Arrasta o cartão ou a janela embaixo da mão; segurar na borda manda para o outro monitor'],
+            ['Pinça parada', 'Enche o anel e entra no ajuste de tamanho: abra polegar e indicador em L; parado fixa, mão aberta cancela'],
+            ['Dois dedos (V) e mexe', 'Rola a página embaixo'],
+          ].map(([g, a]) => (
+            <li key={g}>
+              <span>
+                <b>{g}</b>
+                <small>{a}</small>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Panel>
+      <Panel
+        title="Gestos de atalho"
+        desc="Poses paradas por um instante e deslizes da mão. Escolha o que cada um faz; as ações do navegador só valem com o navegador na frente."
+        actions={
+          <button className="btn" onClick={() => salvar(d.padrao)}>
+            Voltar ao padrão
+          </button>
+        }
+      >
+        <div className="form-grid">
+          {Object.entries(d.gestos).map(([g, nome]) => (
+            <label className="field-a" key={g}>
+              <span>{nome}</span>
+              <select value={d.mapa[g] ?? 'nada'} onChange={(e) => salvar({ ...d.mapa, [g]: e.target.value })}>
+                {Object.entries(d.acoes).map(([id, rotulo]) => (
+                  <option key={id} value={id}>
+                    {rotulo}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      </Panel>
+      {toastNode}
+    </div>
+  )
+}
+
 /* ---------- conversas ---------- */
 
 function ConversasPage() {
@@ -1172,7 +1236,8 @@ function LineMini({ serie }: { serie: number[] }) {
 /* ---------- operações: protocolos e tarefas ---------- */
 
 type Passo = { tipo: string; valor: string }
-type Protocolo = { id: string; nome: string; frases: string[]; fala: string; passos: Passo[] }
+type Protocolo = { id: string; nome: string; frases: string[]; fala: string; passos: Passo[]; quando?: { hora: string; dias: number[] } }
+const DIAS_CURTOS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 
 const AGENTES = [
   { id: 'chatgpt', nome: 'ChatGPT', desc: 'Pergunta e resposta, pela sua assinatura (Codex)' },
@@ -1195,7 +1260,7 @@ function OperacoesPage({ tasks }: { tasks: { id: string; agente: string; titulo:
   const edit = (i: number, p: Partial<Protocolo>) => setLista(lista.map((x, k) => (k === i ? { ...x, ...p } : x)))
   const save = async () => {
     setLista(await api('/api/ajustes/protocolos', { method: 'PUT', json: lista }))
-    toast('Protocolos salvos')
+    toast('Rotinas salvas')
   }
   const enviar = async (e: FormEvent) => {
     e.preventDefault()
@@ -1205,7 +1270,7 @@ function OperacoesPage({ tasks }: { tasks: { id: string; agente: string; titulo:
   }
   return (
     <div className="stack">
-      <Panel title="Protocolos" desc="Rotinas com nome. Diga “Jarvis, modo foco” ou “Jarvis, protocolo encerrar o dia”. Os passos rodam em ordem.">
+      <Panel title="Rotinas" desc="Automações com nome. Diga “Jarvis, modo foco”, ou dê um horário para rodarem sozinhas. Também dá para criar por voz: “Jarvis, toda segunda às 9 abre o e-mail e a agenda”.">
         <div className="stack">
           {lista.map((p, i) => (
             <section className="panel-a proto" key={p.id}>
@@ -1218,10 +1283,38 @@ function OperacoesPage({ tasks }: { tasks: { id: string; agente: string; titulo:
                   <span>Outras frases que ativam (separe por vírgula)</span>
                   <input value={p.frases.join(', ')} onChange={(e) => edit(i, { frases: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} />
                 </label>
-                <label className="field-a span2">
+                <label className="field-a">
                   <span>O que ele diz ao terminar (opcional)</span>
                   <input value={p.fala} onChange={(e) => edit(i, { fala: e.target.value })} />
                 </label>
+                <div className="field-a">
+                  <span>Rodar sozinha no horário (opcional)</span>
+                  <div className="row">
+                    <input
+                      type="time"
+                      value={p.quando?.hora ?? ''}
+                      onChange={(e) => edit(i, { quando: e.target.value ? { hora: e.target.value, dias: p.quando?.dias ?? [0, 1, 2, 3, 4, 5, 6] } : undefined })}
+                      aria-label="Horário"
+                    />
+                    <div className="seg" role="group" aria-label="Dias">
+                      {DIAS_CURTOS.map((d, n) => {
+                        const on = !!p.quando?.dias.includes(n)
+                        return (
+                          <button
+                            key={d}
+                            type="button"
+                            className={on ? 'on' : ''}
+                            disabled={!p.quando}
+                            aria-pressed={on}
+                            onClick={() => p.quando && edit(i, { quando: { ...p.quando, dias: on ? p.quando.dias.filter((x) => x !== n) : [...p.quando.dias, n].sort() } })}
+                          >
+                            {d}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
               <ol className="steps">
                 {p.passos.map((st, k) => (
@@ -1255,10 +1348,10 @@ function OperacoesPage({ tasks }: { tasks: { id: string; agente: string; titulo:
           ))}
           <div className="row end">
             <button className="btn" onClick={() => setLista([...lista, { id: Math.random().toString(36).slice(2, 8), nome: 'Novo protocolo', frases: [], fala: '', passos: [] }])}>
-              <Plus size={14} /> Novo protocolo
+              <Plus size={14} /> Nova rotina
             </button>
             <button className="btn primary" onClick={save}>
-              Salvar protocolos
+              Salvar rotinas
             </button>
           </div>
         </div>

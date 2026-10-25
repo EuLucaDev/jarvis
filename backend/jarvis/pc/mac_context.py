@@ -291,3 +291,45 @@ def snapshot(pointed: dict[str, Any] | None = None, com_selecao: bool = True) ->
     if um and um.get("texto"):
         out["embaixo_do_mouse"] = um
     return out
+
+
+def menu(caminho: str, app: str | None = None) -> dict[str, Any]:
+    """Usa a barra de menus pelo nome: "Arquivo > Exportar como PDF", "Formatar > Fonte > Negrito".
+    Sem app, vale o app da frente. Cada nível é aberto à vista."""
+    if not desktop.permitido():
+        return {"erro": "Sem permissão de Acessibilidade."}
+    if app:
+        r = desktop.activate(app)
+        if r.get("erro"):
+            return r
+    nome, pid = front()
+    if desktop.front_is_jarvis():
+        return {"erro": "A janela da frente é o próprio Jarvis; diga de qual app é o menu."}
+    passos = [p.strip() for p in caminho.replace("→", ">").replace("/", ">").split(">") if p.strip()]
+    if not passos:
+        return {"erro": "Diga o caminho do menu, ex.: Arquivo > Exportar."}
+    atual = _get(AXUIElementCreateApplication(pid), "AXMenuBar")
+    from .. import overlay
+
+    for i, passo in enumerate(passos):
+        if atual is None:
+            return {"erro": f"Não achei o menu '{passo}'."}
+        filhos = _get(atual, "AXChildren") or []
+        if i > 0 and len(filhos) == 1 and _get(filhos[0], "AXRole") == "AXMenu":
+            filhos = _get(filhos[0], "AXChildren") or []
+        nomes = {_norm(_get(f, "AXTitle") or ""): f for f in filhos if _get(f, "AXTitle")}
+        alvo = _norm(passo)
+        el = nomes.get(alvo) or next((f for n, f in nomes.items() if n.startswith(alvo) or alvo in n), None)
+        if el is None:
+            perto = difflib.get_close_matches(alvo, list(nomes), n=1, cutoff=0.6)
+            el = nomes[perto[0]] if perto else None
+        if el is None:
+            return {"erro": f"Não achei '{passo}' no menu.", "opcoes": [str(_get(f, "AXTitle")) for f in filhos if _get(f, "AXTitle")][:30]}
+        fr = _frame(el)
+        if fr:
+            overlay.look(*fr, f"Menu · {passo}")
+            time.sleep(0.5)
+        AXUIElementPerformAction(el, "AXPress")
+        time.sleep(0.35)
+        atual = el
+    return {"ok": True, "app": nome, "menu": " > ".join(passos)}

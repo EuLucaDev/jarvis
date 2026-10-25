@@ -213,16 +213,22 @@ DECLARATIONS = [
         name="arquivos",
         description=(
             "Pastas e arquivos dentro da pasta pessoal. Caminhos curtos: 'Projetos' (na Mesa), 'Downloads', "
-            "'Documentos/Contratos'. Ações: criar_pasta, abrir_pasta, buscar (procura pelo nome e abre), "
-            "organizar (separa por tipo; exige confirmação), compactar (gera .zip), lixeira (manda para a "
-            "Lixeira; exige confirmação). Para organizar e lixeira, chame primeiro sem confirmado, conte o "
-            "plano, e só repita com confirmado=true depois do sim dele."
+            "'Documentos/Contratos', 'Mesa/notas.md'. Ações: criar_pasta; criar_arquivo (conteudo = o texto; sem "
+            "extensão vira .txt); ler (texto de txt, md, PDF, Word, PowerPoint, Excel, para ler ou resumir); listar "
+            "(o que tem na pasta); abrir (arquivo ou pasta no app padrão; procura pelo nome); buscar (procura e "
+            "abre); renomear (novo_nome); mover e copiar (destino = pasta); compactar (.zip); organizar (separa "
+            "por tipo); lixeira (apagar: vai para a Lixeira, recuperável). Organizar, lixeira e substituir arquivo "
+            "exigem confirmação: chame sem confirmado, conte o plano e repita com confirmado=true depois do sim."
         ),
         parameters={
             "type": "OBJECT",
             "properties": {
-                "acao": {"type": S, "enum": ["criar_pasta", "abrir_pasta", "buscar", "organizar", "compactar", "lixeira"]},
-                "caminho": {"type": S, "description": "Pasta ou nome do arquivo."},
+                "acao": {"type": S, "enum": ["criar_pasta", "criar_arquivo", "ler", "listar", "abrir", "abrir_pasta", "buscar",
+                                              "renomear", "mover", "copiar", "compactar", "organizar", "lixeira"]},
+                "caminho": {"type": S, "description": "Pasta ou arquivo."},
+                "conteudo": {"type": S, "description": "Texto do arquivo (criar_arquivo)."},
+                "novo_nome": {"type": S},
+                "destino": {"type": S, "description": "Pasta de destino (mover, copiar)."},
                 "confirmado": {"type": "BOOLEAN"},
             },
             "required": ["acao", "caminho"],
@@ -290,10 +296,35 @@ DECLARATIONS = [
     types.FunctionDeclaration(
         name="executar_protocolo",
         description=(
-            "Executa um protocolo (rotina com nome, cadastrada no painel): abre apps e sites, ajusta "
+            "Executa um protocolo (rotina com nome, do painel ou criada por voz com rotinas): abre apps e sites, ajusta "
             "volume e brilho, roda atalhos, liga a casa, abre painéis. Ex.: 'modo foco', 'protocolo trabalho'."
         ),
         parameters={"type": "OBJECT", "properties": {"nome": {"type": S}}, "required": ["nome"]},
+    ),
+    types.FunctionDeclaration(
+        name="rotinas",
+        description=(
+            "Cria, lista ou apaga rotinas (automações). criar: nome, passos e, se ele quiser no horário, hora (HH:MM) "
+            "e dias (0=segunda … 6=domingo; vazio = todo dia); frases = jeitos de chamar; fala = o que você diz ao "
+            "terminar. Tipos de passo: app (nome), link (endereço), aba (endereço ou pesquisa), janela (app:acao, "
+            "ex.: Spotify:minimizar, Chrome:esquerda), pasta (caminho), volume (0-100), brilho, midia (tocar_pausar, "
+            "proxima), espelho (ligar/desligar), camera (ligar/desligar), painel (agenda, comunicacoes, radar, "
+            "nucleo, fechar), limpar, esperar (segundos), atalho (Atalhos do macOS), casa (Alexa dispositivo:ligar). "
+            "Antes de criar, diga em uma frase o que a rotina vai fazer e quando."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "acao": {"type": S, "enum": ["criar", "listar", "apagar"]},
+                "nome": {"type": S},
+                "passos": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {"tipo": {"type": S}, "valor": {"type": S}}, "required": ["tipo"]}},
+                "hora": {"type": S},
+                "dias": {"type": "ARRAY", "items": {"type": "INTEGER"}},
+                "frases": {"type": "ARRAY", "items": {"type": S}},
+                "fala": {"type": S},
+            },
+            "required": ["acao"],
+        },
     ),
     types.FunctionDeclaration(
         name="delegar_tarefa",
@@ -348,14 +379,23 @@ DECLARATIONS = [
     types.FunctionDeclaration(
         name="navegador",
         description=(
-            "Navegador do Mac, à vista: nova_aba (com endereço ou termo de busca em valor), buscar (Google), "
-            "fechar_aba, voltar, avancar, recarregar, proxima_aba."
+            "Navegador dele, à vista. nova_aba (valor = endereço ou termo); buscar (valor = o que pesquisar; site = "
+            "youtube, imagens, maps, wikipedia, mercado livre, amazon, github, spotify, noticias ou vazio p/ Google); "
+            "abrir_resultados (pesquisa e abre os 3 melhores resultados em abas); ler_pagina (texto da aba aberta, "
+            "para ler em voz alta, resumir ou responder sobre ela; mostre o resumo num cartão se for longo); "
+            "localizar (valor = palavra na página); fechar_aba, proxima_aba, aba_anterior, ir_para_aba (valor = número), "
+            "reabrir_aba, voltar, avancar, recarregar, rolar_baixo, rolar_cima, zoom_mais, zoom_menos, zoom_normal, "
+            "favoritar, nova_janela, janela_anonima, historico."
         ),
         parameters={
             "type": "OBJECT",
             "properties": {
-                "acao": {"type": S, "enum": ["nova_aba", "buscar", "fechar_aba", "voltar", "avancar", "recarregar", "proxima_aba"]},
+                "acao": {"type": S, "enum": ["nova_aba", "buscar", "abrir_resultados", "ler_pagina", "localizar", "fechar_aba",
+                                              "proxima_aba", "aba_anterior", "ir_para_aba", "reabrir_aba", "voltar", "avancar",
+                                              "recarregar", "rolar_baixo", "rolar_cima", "zoom_mais", "zoom_menos", "zoom_normal",
+                                              "favoritar", "nova_janela", "janela_anonima", "historico"]},
                 "valor": {"type": S},
+                "site": {"type": S},
             },
             "required": ["acao"],
         },
@@ -390,6 +430,15 @@ DECLARATIONS = [
         name="janela_jarvis",
         description="Janela do Jarvis: minimizar (vai para o canto como esfera pequena), esconder (só o ícone na barra de menus, segue ouvindo 'Jarvis' e palmas) ou mostrar.",
         parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["minimizar", "esconder", "mostrar"]}}, "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
+        name="usar_menu",
+        description=(
+            "Usa a barra de menus de um app pelo nome, à vista: caminho = 'Arquivo > Exportar como PDF', "
+            "'Formatar > Fonte > Negrito', 'Visualizar > Mostrar barra lateral'. app opcional (traz à frente). "
+            "Se não achar, devolve as opções daquele nível."
+        ),
+        parameters={"type": "OBJECT", "properties": {"caminho": {"type": S}, "app": {"type": S}}, "required": ["caminho"]},
     ),
     types.FunctionDeclaration(
         name="controlar_janela",
@@ -589,9 +638,44 @@ async def fetch_weather(city: str) -> dict[str, Any]:
     }
 
 
+# Ações que mexem no computador à vista: a esfera vai até a janela onde ele está mexendo (com o HUD
+# minimizado, ela sai do canto, voa até lá e volta). ANTES = voa e depois faz; DEPOIS = faz e voa até o que abriu.
+_ROTULO = {
+    "abrir_app": lambda a: f"Abrindo {a.get('nome', '')}".strip(),
+    "abrir_link": lambda a: "Abrindo o site",
+    "digitar": lambda a: "Escrevendo",
+    "teclas": lambda a: f"Teclando {a.get('atalho', '')}".strip(),
+    "arquivos": lambda a: {"criar_pasta": "Criando a pasta", "criar_arquivo": "Criando o arquivo", "ler": "Lendo o arquivo",
+                           "listar": "Olhando a pasta", "abrir": "Abrindo", "abrir_pasta": "Abrindo a pasta", "buscar": "Procurando",
+                           "renomear": "Renomeando", "mover": "Movendo", "copiar": "Copiando", "compactar": "Compactando",
+                           "organizar": "Organizando", "lixeira": "Mandando para a Lixeira"}.get(a.get("acao", ""), "Arquivos"),
+    "usar_menu": lambda a: f"Menu {a.get('caminho', '')}".strip(),
+}
+_DEPOIS = {"abrir_app", "abrir_link"}
+
+
 async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
     """Executa a ferramenta e devolve o que o modelo deve saber para falar."""
     args = args or {}
+    rotulo = _ROTULO[name](args) if name in _ROTULO else ""
+    if rotulo:
+        from . import overlay
+
+        if name not in _DEPOIS:
+            await asyncio.to_thread(overlay.at_front, rotulo)
+            await asyncio.sleep(0.5)  # dá tempo de a esfera chegar antes de agir
+        try:
+            res = await _run(name, args)
+        finally:
+            if name in _DEPOIS or (name == "arquivos" and args.get("acao") in ("abrir", "abrir_pasta", "buscar")):
+                await asyncio.sleep(1.0)  # a janela nova aparece
+                await asyncio.to_thread(overlay.at_front, rotulo)
+            overlay.hide_later()
+        return res
+    return await _run(name, args)
+
+
+async def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
     try:
         if name == "mostrar_pesquisa":
             card = await hub.show_card("pesquisa", args)
@@ -658,6 +742,13 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 acao, cam, ok = args.get("acao"), args.get("caminho", ""), bool(args.get("confirmado"))
                 fn = {
                     "criar_pasta": lambda: system.create_folder(cam),
+                    "criar_arquivo": lambda: system.create_file(cam, args.get("conteudo", ""), ok),
+                    "ler": lambda: system.read_file(cam),
+                    "listar": lambda: system.list_folder(cam),
+                    "abrir": lambda: system.open_item(cam),
+                    "renomear": lambda: system.rename_item(cam, args.get("novo_nome", "")),
+                    "mover": lambda: system.move_item(cam, args.get("destino", "")),
+                    "copiar": lambda: system.move_item(cam, args.get("destino", ""), copiar=True),
                     "abrir_pasta": lambda: system.open_folder(cam),
                     "buscar": lambda: system.find_file(cam),
                     "organizar": lambda: system.organize_folder(cam, ok),
@@ -735,7 +826,12 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 return await asyncio.to_thread(pc.type_into, args.get("texto", ""), args.get("app"), bool(args.get("enter")))
             if name == "teclas":
                 return await asyncio.to_thread(pc.keys_into, args.get("atalho", ""), args.get("app"), bool(args.get("confirmado")))
-            return await asyncio.to_thread(pc.browser, args.get("acao", ""), args.get("valor", ""))
+            from . import web
+
+            res = await asyncio.to_thread(web.acao, args.get("acao", ""), args.get("valor", ""), args.get("site", ""))
+            if args.get("acao") == "ler_pagina" and res.get("ok"):
+                res["instrucao"] = "Use o texto para o que ele pediu (ler, resumir, responder). Resumo longo: mostrar_lista ou mostrar_pesquisa."
+            return res
         if name == "olhar":
             from . import pc
 
@@ -795,6 +891,10 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             hub.focus_until = time.time() + minutos * 60 if minutos > 0 else time.time() - 1
             await hub.broadcast({"type": "foco", "ate": hub.focus_until if minutos > 0 else 0})
             return {"ok": True, "instrucao": "Confirme numa frase. Avisos não urgentes ficam para o fim do foco."}
+        if name == "usar_menu":
+            from . import pc
+
+            return await asyncio.to_thread(pc.usar_menu, args.get("caminho", ""), args.get("app"))
         if name == "controlar_janela":
             from . import pc
 
@@ -843,6 +943,16 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             from . import protocols
 
             return await protocols.run(args.get("nome", ""))
+        if name == "rotinas":
+            from . import protocols
+
+            acao = args.get("acao")
+            if acao == "listar":
+                return {"rotinas": protocols.describe()}
+            if acao == "apagar":
+                return protocols.remove(args.get("nome", ""))
+            return protocols.save(args.get("nome", ""), args.get("passos") or [], args.get("frases"), args.get("fala", ""),
+                                  args.get("hora"), args.get("dias"))
         if name == "delegar_tarefa":
             from . import agents
 

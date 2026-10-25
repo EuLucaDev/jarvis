@@ -30,6 +30,29 @@ def look(x: float, y: float, w: float = 0, h: float = 0, label: str = "", modo: 
     _send({"type": "olhar", "x": x, "y": y, "w": w, "h": h, "label": label, "modo": modo})
 
 
+def at_front(rotulo: str = "") -> bool:
+    """A esfera vai até a janela da frente (a faixa de cima, onde ficam título e abas). False se não achou."""
+    from . import pc
+
+    try:
+        r = pc.front_rect()
+    except Exception:  # noqa: BLE001
+        r = None
+    if not r:
+        if rotulo:
+            label(rotulo)
+        return False
+    x, y, w, h = r
+    look(x, y, w, min(h, 160), label=rotulo)
+    return True
+
+
+def hide_later(segundos: float = 2.5) -> None:
+    """Deixa a esfera um tempo no lugar (para dar para ver o que ele fez) e depois volta."""
+    if _loop:
+        _loop.call_soon_threadsafe(lambda: _loop.call_later(segundos, hide))
+
+
 def point(x: float, y: float, label: str = "") -> None:
     look(x, y, 0, 0, label)
 

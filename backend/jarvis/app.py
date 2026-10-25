@@ -63,7 +63,7 @@ async def telemetry_loop() -> None:
 @app.on_event("startup")
 async def startup():
     loop = asyncio.get_running_loop()
-    from . import activity, alerts, overlay
+    from . import activity, alerts, overlay, protocols
 
     overlay.bind_loop(loop)
     espelho.bind(loop)
@@ -79,6 +79,7 @@ async def startup():
     asyncio.create_task(telemetry_loop())
     asyncio.create_task(alerts.loop())
     asyncio.create_task(activity.loop())
+    asyncio.create_task(protocols.loop())
     log.info("Jarvis %s no ar em http://127.0.0.1:%s (%s)", VERSION, settings.port, pc.SISTEMA)
 
 
@@ -267,6 +268,21 @@ async def app_comandos():
     while not hub.app_queue.empty():
         out.append(hub.app_queue.get_nowait())
     return out
+
+
+@app.get("/api/gestos")
+async def gestos_estado():
+    from . import gestures
+
+    return gestures.descrever()
+
+
+@app.put("/api/gestos")
+async def gestos_salvar(body: dict = Body(...)):
+    from . import gestures
+
+    store.put("gestos", {k: v for k, v in body.items() if k in gestures.GESTOS and v in gestures.ACOES})
+    return gestures.descrever()
 
 
 @app.get("/api/permissoes")
@@ -652,6 +668,8 @@ async def ws_endpoint(ws: WebSocket):
                 # pinça rápida fora do Jarvis: clique de verdade onde a mão aponta (0..1 do monitor principal)
                 x0, y0, w, h = pc.main_bounds()
                 await asyncio.to_thread(pc.click, x0 + float(data.get("x", 0.5)) * w, y0 + float(data.get("y", 0.5)) * h)
+            elif kind == "zoom" and pc.permitido() and not pc.front_is_jarvis():
+                await asyncio.to_thread(pc.press, "cmd+=" if int(data.get("direcao", 1)) > 0 else "cmd+-")
             elif kind == "rolar" and pc.permitido():
                 await asyncio.to_thread(pc.scroll, max(-400, min(400, int(data.get("dy", 0)))))
             elif kind == "apontado":

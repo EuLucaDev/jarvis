@@ -36,13 +36,20 @@ DEPOIS DE INSTALADO
       o ponteiro segue os nós dos dedos (fica parado quando você faz a pinça)
       pinça e solta = clica onde começou · pinça e mexe = arrasta · pinça parada = ajusta o tamanho
       (abra polegar e indicador em L; parado fixa; mão aberta cancela)
-      dois dedos e mexe = rola · mão aberta para cima = mostra o HUD · para baixo = minimiza
+      dois dedos e mexe = rola · duas mãos em pinça: afastar = zoom +, juntar = zoom −
+    Gestos de atalho (escolha o que cada um faz em Painel → Gestos): indicador para cima = falar,
+    polegar = sim/não, punho = fecha os cartões, chifrinho = espelhar a tela, deslizar = trocar de aba.
   - Fechar a janela do Jarvis deixa ele no canto (esfera pequena com o vídeo da câmera); ele segue
     ouvindo. Para sumir de vez: ícone → Sair do Jarvis. "Abrir com o computador" também fica no ícone.
   - Os cartões aparecem flutuando na tela; dá para arrastar, aumentar e fechar.
   - Memória: "Jarvis, mostre minha memória" abre o mapa (você no centro, temas e memórias ligadas).
     Ele aprende sozinho ao fim de cada conversa. A memória também vira notas em Markdown que abrem
     no Obsidian (no mapa: "Abrir como notas").
+  - Com o Jarvis no canto, passe o mouse na esfera: aparecem botões de falar, câmera, tela, memória e HUD.
+  - Navegador: "pesquisa X no YouTube", "abre os resultados de…", "lê/resume essa página", "próxima aba".
+  - Arquivos: "cria uma pasta Projetos na Mesa", "cria um arquivo com…", "resume o PDF contrato",
+    "move o relatório para Documentos", "apaga a pasta teste" (vai para a Lixeira, com confirmação).
+  - Rotinas: "Jarvis, toda segunda às 9 abre o Gmail e a agenda" (ou em Painel → Operações).
   - Peça coisas no computador: "abre o Notas e escreve…", "olha essa planilha", "minimiza o navegador",
     "fecha essa janela", "põe o Chrome na metade da esquerda", "manda pro outro monitor".
   - "Espelha minha tela": o Jarvis passa a ver a sua tela o tempo todo (aparece no HUD); "para de

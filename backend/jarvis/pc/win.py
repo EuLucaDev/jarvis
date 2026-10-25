@@ -29,7 +29,7 @@ __all__ = [
     "clipboard_text", "front_app", "front_is_jarvis", "front_window_title", "keys_into", "lock_screen", "look_at",
     "main_bounds", "media", "move", "open_app", "open_link", "open_path", "pedir_permissao", "permitido", "position", "press",
     "replace_selection", "scroll", "selected_text", "set_clipboard", "snapshot", "type_into", "type_text", "volume",
-    "win_aim", "win_grab", "win_move", "win_release", "win_run", "win_scale", "win_throw", "apps_abertos", "janela_app",
+    "win_aim", "win_grab", "win_move", "win_release", "win_run", "win_scale", "win_throw", "apps_abertos", "janela_app", "front_rect", "usar_menu",
 ]
 
 _in = PynputInput()
@@ -654,3 +654,17 @@ def janela_app(pedido: str, acao: str, confirmado: bool = False) -> dict[str, An
         _frente(hwnd)
     overlay.hide()
     return {"ok": True, "app": nome, "feito": ACOES_JANELA[acao].lower()}
+
+
+def front_rect() -> tuple[float, float, float, float] | None:
+    """Quadro da janela da frente (fora o Jarvis), em pontos lógicos: para onde a esfera voa."""
+    js = _windows()
+    if not js:
+        return None
+    x, y, w, h = js[0][3]
+    return x / ESC, y / ESC, w / ESC, h / ESC
+
+
+def usar_menu(caminho: str, app: str | None = None) -> dict[str, Any]:
+    """Menus pelo nome ainda são só no Mac; aqui o Jarvis usa clicar (pelo nome) ou teclas."""
+    return {"erro": "Neste sistema, use clicar com o nome do menu (ex.: 'Arquivo') e depois o item, ou teclas de atalho."}

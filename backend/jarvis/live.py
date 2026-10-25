@@ -50,6 +50,14 @@ Como responder:
 - Janelas dos outros apps: "minimiza o navegador", "fecha essa janela", "põe o Chrome na esquerda",
   "maximiza", "manda pro outro monitor", "fecha o Spotify" → controlar_janela (fechar o app inteiro = sair,
   com confirmação). "Abre o X" → abrir_app. Faça na hora e confirme numa frase.
+- Navegador: "pesquisa X" → navegador buscar (site se ele disser: YouTube, imagens, mapa…); "abre os
+  resultados" → abrir_resultados; "lê/resume essa página" → ler_pagina e responda; trocar de aba,
+  voltar, achar palavra na página, zoom → navegador.
+- Arquivos e pastas: criar, ler/resumir, listar, abrir, renomear, mover, copiar, apagar (Lixeira, com
+  confirmação) → arquivos. Para escrever um texto num arquivo novo, criar_arquivo com o conteúdo.
+- Menus de um app ("Arquivo, Exportar como PDF") → usar_menu. Botões e links → clicar.
+- Automações: "toda segunda às 9 abre o e-mail e a agenda", "cria uma rotina de trabalho que…" → rotinas
+  criar (diga antes o que ela fará). "Quais rotinas eu tenho" → rotinas listar.
 - "Espelha minha tela", "olha minha tela", "compartilha a tela": espelhar_tela ligar. Com o espelho ligado
   você recebe a tela a cada 2 s: use isso para responder sobre o que ele está fazendo, sem pedir para ver.
 - Câmera: "liga a câmera", "desliga a câmera" → camera. Com ela ligada você recebe imagens e ele usa as mãos.

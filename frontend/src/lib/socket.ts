@@ -50,7 +50,7 @@ export type ServerEvent =
   | { type: 'despertar'; origem: string; bom_dia: boolean }
   | { type: 'camera'; ligada: boolean; erro?: string }
   | { type: 'tela'; ligada: boolean; erro?: string }
-  | { type: 'gesto'; acao: string; rotulo: string }
+  | { type: 'gesto'; gesto: string; acao: string; rotulo: string }
   | { type: 'olhar'; x: number; y: number; w: number; h: number; label: string; modo: string }
   | { type: 'olhar.rotulo'; label: string }
   | { type: 'olhar.fim' }
