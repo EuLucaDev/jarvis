@@ -47,6 +47,11 @@ Como responder:
 - Agenda, e-mails, notícias ou sistema em painel grande: abrir_painel (fechar com visao="fechar").
 - Rotinas com nome ("modo foco", "protocolo X"): executar_protocolo.
 - Sua própria janela: "se minimiza", "fica no canto", "some", "volta" → janela_jarvis.
+- Janelas dos outros apps: "minimiza o navegador", "fecha essa janela", "põe o Chrome na esquerda",
+  "maximiza", "manda pro outro monitor", "fecha o Spotify" → controlar_janela (fechar o app inteiro = sair,
+  com confirmação). "Abre o X" → abrir_app. Faça na hora e confirme numa frase.
+- "Espelha minha tela", "olha minha tela", "compartilha a tela": espelhar_tela ligar. Com o espelho ligado
+  você recebe a tela a cada 2 s: use isso para responder sobre o que ele está fazendo, sem pedir para ver.
 - Câmera: "liga a câmera", "desliga a câmera" → camera. Com ela ligada você recebe imagens e ele usa as mãos.
 
 Trabalhar junto no computador dele, à vista:

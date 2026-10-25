@@ -1,14 +1,15 @@
-import { Activity, AudioLines, Camera, Cpu, MessageSquare, SendHorizontal, Thermometer, Waves } from 'lucide-react'
+import { Activity, AudioLines, Camera, MonitorUp, Cpu, MessageSquare, SendHorizontal, Thermometer, Waves } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { usePhase, voiceStore } from '../lib/live'
 import { CameraView } from '../ui/CameraView'
 import type { LogLine } from './useJarvis'
 
-export type PanelId = 'camera' | 'entrada' | 'espectro' | 'leitura' | 'servicos' | 'clima' | 'canal'
+export type PanelId = 'camera' | 'tela' | 'entrada' | 'espectro' | 'leitura' | 'servicos' | 'clima' | 'canal'
 
 export const PANELS: Record<PanelId, { nome: string; desc: string }> = {
   camera: { nome: 'Visão · Câmera', desc: 'O que a câmera vê, com o mapeamento das mãos.' },
+  tela: { nome: 'Visão · Tela', desc: 'O espelho da sua tela: o que o Jarvis está vendo.' },
   entrada: { nome: 'Sinal · Entrada', desc: 'Onda ao vivo do som que entra e sai.' },
   espectro: { nome: 'Sinal · Espectro', desc: 'Frequências da voz, de 20 Hz a 20 kHz.' },
   leitura: { nome: 'Voz · Leitura', desc: 'Intensidade da voz agora.' },
@@ -65,6 +66,21 @@ export function CameraPanel({ on }: { on: boolean }) {
   return (
     <Frame icon={Camera} title="Visão · Câmera" tag={on ? 'ao vivo' : 'desligada'}>
       <CameraView on={on} />
+    </Frame>
+  )
+}
+
+export function ScreenPanel({ on, erro, onToggle }: { on: boolean; erro?: string; onToggle: () => void }) {
+  return (
+    <Frame icon={MonitorUp} title="Visão · Tela" tag={on ? 'espelhando' : 'desligada'}>
+      <div className="camview tela">
+        {on && <img src={`/api/tela/ao-vivo?t=${Date.now()}`} alt="Sua tela, como o Jarvis vê" />}
+        {!on && (
+          <button className="camview-off" onClick={onToggle}>
+            {erro || 'Espelhar a tela'}
+          </button>
+        )}
+      </div>
     </Frame>
   )
 }

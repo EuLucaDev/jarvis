@@ -392,6 +392,34 @@ DECLARATIONS = [
         parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["minimizar", "esconder", "mostrar"]}}, "required": ["acao"]},
     ),
     types.FunctionDeclaration(
+        name="controlar_janela",
+        description=(
+            "Mexe nas janelas de qualquer app aberto, à vista: minimizar, restaurar (volta da minimizada), focar "
+            "(trazer para a frente), maximizar, tela_cheia, esquerda/direita (metade da tela), outro_monitor, fechar "
+            "(a janela), esconder, sair (fecha o app inteiro, só com confirmado=true depois do sim). app = o nome que "
+            "ele disser ('navegador', 'Chrome', 'Spotify', 'WhatsApp'); vazio = o app da frente. Para abrir um app "
+            "use abrir_app; para a janela do próprio Jarvis use janela_jarvis."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "app": {"type": S},
+                "acao": {"type": S, "enum": ["minimizar", "restaurar", "focar", "maximizar", "tela_cheia", "esquerda", "direita",
+                                              "outro_monitor", "fechar", "esconder", "sair"]},
+                "confirmado": {"type": "BOOLEAN"},
+            },
+            "required": ["acao"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="espelhar_tela",
+        description=(
+            "Espelho da tela: ligar (você passa a ver a tela dele o tempo todo, como numa chamada com a tela "
+            "compartilhada, e ela aparece no HUD), desligar, ou ver (uma foto da tela agora)."
+        ),
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["ligar", "desligar", "ver"]}}, "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
         name="substituir_selecao",
         description="Troca o texto selecionado no app da frente pelo novo (ou insere onde está o cursor), à vista. Use depois de contexto_atual para reescrever, traduzir ou corrigir.",
         parameters={"type": "OBJECT", "properties": {"texto": {"type": S}}, "required": ["texto"]},
@@ -767,6 +795,30 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             hub.focus_until = time.time() + minutos * 60 if minutos > 0 else time.time() - 1
             await hub.broadcast({"type": "foco", "ate": hub.focus_until if minutos > 0 else 0})
             return {"ok": True, "instrucao": "Confirme numa frase. Avisos não urgentes ficam para o fim do foco."}
+        if name == "controlar_janela":
+            from . import pc
+
+            if not pc.permitido():
+                return {"erro": "Falta a permissão de Acessibilidade para o Jarvis (Ajustes do Sistema → Privacidade e Segurança → Acessibilidade)."}
+            res = await asyncio.to_thread(pc.janela_app, args.get("app") or "", args.get("acao", ""), bool(args.get("confirmado")))
+            return {**res, "instrucao": "Confirme numa frase curta."} if res.get("ok") else res
+        if name == "espelhar_tela":
+            from .screen import espelho
+
+            acao = args.get("acao")
+            if acao == "ligar":
+                await asyncio.to_thread(espelho.start)
+                return {"ok": True, "instrucao": "Diga numa frase que agora está vendo a tela dele. As imagens chegam sozinhas."}
+            if acao == "desligar":
+                await asyncio.to_thread(espelho.stop)
+                return {"ok": True}
+            from . import pc
+
+            x, y, w, h = await asyncio.to_thread(pc.main_bounds)
+            img = espelho.latest() or await asyncio.to_thread(pc.capture, x, y, w, h, 1280)
+            if not img:
+                return {"erro": "Não consegui ver a tela. No Mac, libere Gravação de Tela para o Jarvis."}
+            return {"ok": True, "_imagem": img, "instrucao": "Você recebeu a tela de agora. Responda sobre o que ele perguntou."}
         if name == "camera":
             from .hands import hands
 

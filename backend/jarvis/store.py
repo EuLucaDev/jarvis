@@ -15,8 +15,6 @@ DEFAULTS: dict[str, Any] = {
         "agendas": [],  # [{"nome": "...", "url": "https://...ics"}]
         "temas": ["tecnologia", "novos modelos de IA", "política"],
         "fontes": [],  # domínios preferidos, ex.: "g1.globo.com"
-        "cidade": settings.city,
-        "fuso": "America/Maceio",
         "atualizar_min": 15,
         "clima": True,
         "noticias_por_tema": 3,
@@ -29,13 +27,13 @@ DEFAULTS: dict[str, Any] = {
     "presenca": {"briefing_auto": True, "ultimo_briefing": ""},
     # rotinas com nome; passos usam a lista fechada de protocols.TIPOS
     "protocolos": [
-        {"id": "foco", "nome": "Modo foco", "frases": ["foco", "hora de focar"], "fala": "Modo foco ativo, Senhor.",
+        {"id": "foco", "nome": "Modo foco", "frases": ["foco", "hora de focar"], "fala": "Modo foco ativo.",
          "passos": [{"tipo": "limpar", "valor": ""}, {"tipo": "volume", "valor": "25"}, {"tipo": "painel", "valor": "agenda"}]},
         {"id": "encerrar", "nome": "Encerrar o dia", "frases": ["fim do dia", "boa noite"], "fala": "",
          "passos": [{"tipo": "limpar", "valor": ""}, {"tipo": "painel", "valor": "fechar"}]},
     ],
     # ferramentas extras liberadas para o Claude Code nas tarefas (MCPs de criação)
-    "agentes": {"codex_modelo": "gpt-5.6-sol", "claude_ferramentas": ["mcp__elevenlabs", "mcp__claude_ai_Google_Drive", "mcp__claude_ai_Canva", "mcp__claude_ai_Claude_Docs"]},
+    "agentes": {"codex_modelo": "gpt-5.6-sol", "claude_ferramentas": []},
     "alertas": {"ativo": True, "agenda_min": 10, "emails": True, "mercado_pct": 3.0, "falar": True,
                 "notificacao_mac": True, "silencio": ["22:00", "07:00"]},
     "notas": {"obsidian": "", "notion_token": ""},
@@ -67,6 +65,11 @@ def get(key: str) -> Any:
     if not row:
         return base
     val = json.loads(row[0])
+    if key == "briefing" and isinstance(val, dict):
+        # cidade e fuso agora vêm de um lugar só (configuração inicial e o relógio do computador); valores
+        # antigos guardados aqui (ex.: uma cidade de exemplo) não valem mais
+        val.pop("cidade", None)
+        val.pop("fuso", None)
     if isinstance(base, dict) and isinstance(val, dict):
         return {**base, **val}
     return val

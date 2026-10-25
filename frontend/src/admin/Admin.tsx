@@ -507,7 +507,7 @@ function FontesPage({ only }: { only?: 'gmail' | 'agendas' | 'radar' }) {
 
       )}
       {(!only || only === 'radar') && (
-      <Panel title="Radar e contexto" desc="Temas das notícias, fontes preferidas, cidade e ritmo de atualização.">
+      <Panel title="Radar e contexto" desc="Temas das notícias, fontes preferidas e ritmo de atualização. A cidade é a da configuração inicial (ícone → Configuração inicial); o fuso é o do computador.">
         <div className="form-grid">
           <label className="field-a span2">
             <span>Temas das notícias</span>
@@ -518,14 +518,6 @@ function FontesPage({ only }: { only?: 'gmail' | 'agendas' | 'radar' }) {
             <span>Fontes preferidas (sites)</span>
             <input value={(cfg.fontes ?? []).join(', ')} onChange={(e) => set('fontes', e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} placeholder="g1.globo.com, tecmundo.com.br" />
             <small>Opcional. Sem fontes, ele busca em toda a imprensa.</small>
-          </label>
-          <label className="field-a">
-            <span>Cidade</span>
-            <input value={cfg.cidade} onChange={(e) => set('cidade', e.target.value)} />
-          </label>
-          <label className="field-a">
-            <span>Fuso horário</span>
-            <input value={cfg.fuso} onChange={(e) => set('fuso', e.target.value)} />
           </label>
           <label className="field-a">
             <span>Atualizar a cada (min)</span>

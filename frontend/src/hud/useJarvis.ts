@@ -16,6 +16,8 @@ const STEP: Record<string, string> = {
   buscar_memorias: 'Consultando a memória',
   lembrar: 'Anotando',
   mostrar_memoria: 'Abrindo sua memória',
+  controlar_janela: 'Mexendo na janela',
+  espelhar_tela: 'Olhando sua tela',
   consultar_mercado: 'Lendo o mercado',
   ler_mensagens: 'Lendo suas mensagens',
   notas: 'Procurando nas notas',
@@ -59,6 +61,7 @@ export function useJarvis(role: 'hud' | 'overlay' | 'admin' = 'hud') {
   const [focusUntil, setFocusUntil] = useState(0)
   const [stoppedAt, setStoppedAt] = useState(0)
   const [camera, setCamera] = useState<{ ligada: boolean; erro?: string }>({ ligada: false })
+  const [tela, setTela] = useState<{ ligada: boolean; erro?: string }>({ ligada: false })
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null)
   const [last, setLast] = useState<ServerEvent | null>(null) // eventos que cada tela trata do seu jeito (olhar, gesto, janela…)
 
@@ -163,6 +166,9 @@ export function useJarvis(role: 'hud' | 'overlay' | 'admin' = 'hud') {
         case 'camera':
           setCamera({ ligada: e.ligada, erro: e.erro })
           break
+        case 'tela':
+          setTela({ ligada: e.ligada, erro: e.erro })
+          break
         case 'despertar':
           sfx('unlock')
           setLast(e)
@@ -207,6 +213,7 @@ export function useJarvis(role: 'hud' | 'overlay' | 'admin' = 'hud') {
     focusUntil,
     stoppedAt,
     camera,
+    tela,
     telemetry,
     last,
     send,

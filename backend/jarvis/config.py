@@ -112,6 +112,16 @@ class Settings:
         return self._cfg.get("tratamento") or self._cfg.get("user_name") or "Senhor"
 
     @property
+    def fuso(self) -> str:
+        """Fuso horário do computador (ex.: America/Fortaleza); serve para a agenda e o bom dia."""
+        try:
+            from tzlocal import get_localzone_name
+
+            return get_localzone_name() or "America/Sao_Paulo"
+        except Exception:  # noqa: BLE001
+            return "America/Sao_Paulo"
+
+    @property
     def web_dist(self) -> Path:
         return CODE_ROOT / ("web" if FROZEN else "frontend/dist")
 

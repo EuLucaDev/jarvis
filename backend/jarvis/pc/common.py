@@ -120,3 +120,49 @@ class PynputInput:
         self.kb.press(tecla)
         self.kb.release(tecla)
         return {"ok": True}
+
+
+# ---------- janelas dos outros apps, por voz ("minimiza o navegador", "fecha o Spotify") ----------
+
+ACOES_JANELA = {
+    "minimizar": "Minimizando",
+    "restaurar": "Trazendo de volta",
+    "focar": "Trazendo para a frente",
+    "maximizar": "Maximizando",
+    "tela_cheia": "Tela cheia",
+    "esquerda": "Metade da esquerda",
+    "direita": "Metade da direita",
+    "outro_monitor": "Para o outro monitor",
+    "fechar": "Fechando a janela",
+    "esconder": "Escondendo",
+    "sair": "Fechando o app",
+}
+NAVEGADORES = ["Google Chrome", "Safari", "Arc", "Firefox", "Microsoft Edge", "Brave Browser", "Opera", "Vivaldi", "Chromium",
+               "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "chromium"]
+SINONIMOS = {"navegador": NAVEGADORES, "browser": NAVEGADORES, "chrome": ["Google Chrome", "chrome"], "edge": ["Microsoft Edge", "msedge"],
+             "brave": ["Brave Browser", "brave"], "vscode": ["Code", "Visual Studio Code"], "vs code": ["Code", "Visual Studio Code"],
+             "terminal": ["Terminal", "iTerm2", "WindowsTerminal", "gnome-terminal"], "spotify": ["Spotify"],
+             "explorador": ["explorer"], "finder": ["Finder"], "zap": ["WhatsApp"], "whats": ["WhatsApp"]}
+SEM_ALVO = {"", "frente", "da frente", "atual", "essa", "esta", "isso", "janela"}
+
+
+def escolher_app(pedido: str, abertos: list[str], frente: str = "") -> str | None:
+    """Nome do app aberto que corresponde ao pedido ("navegador", "chrome", "o word"…). Vazio = o da frente."""
+    p = pedido.lower().strip().removeprefix("o ").removeprefix("a ").strip()
+    if p in SEM_ALVO:
+        return frente or None
+    baixos = {"".join(ch for ch in a if ch.isprintable() and ch not in "\u200e\u200f").lower().strip(): a for a in abertos}
+    for cand in SINONIMOS.get(p, []):
+        if cand.lower() in baixos:
+            if p in ("navegador", "browser") and frente.lower() in [n.lower() for n in NAVEGADORES]:
+                return frente  # o navegador da frente, se houver um
+            return baixos[cand.lower()]
+    if p in baixos:
+        return baixos[p]
+    parecidos = [a for lo, a in baixos.items() if p in lo or lo in p]
+    if parecidos:
+        return min(parecidos, key=len)
+    from difflib import get_close_matches
+
+    m = get_close_matches(p, list(baixos), n=1, cutoff=0.78)
+    return baixos[m[0]] if m else None

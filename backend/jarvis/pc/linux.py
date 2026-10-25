@@ -21,7 +21,7 @@ __all__ = [
     "clipboard_text", "front_app", "front_is_jarvis", "front_window_title", "keys_into", "lock_screen", "look_at",
     "main_bounds", "media", "move", "open_app", "open_link", "open_path", "pedir_permissao", "permitido", "position", "press",
     "replace_selection", "scroll", "selected_text", "set_clipboard", "snapshot", "type_into", "type_text", "volume",
-    "win_aim", "win_grab", "win_move", "win_release", "win_run", "win_scale", "win_throw",
+    "win_aim", "win_grab", "win_move", "win_release", "win_run", "win_scale", "win_throw", "apps_abertos", "janela_app",
 ]
 
 WAYLAND = os.getenv("XDG_SESSION_TYPE", "").lower() == "wayland"
@@ -443,3 +443,95 @@ def lock_screen() -> dict[str, Any]:
             _run(cmd)
             return {"ok": True}
     return {"erro": "Não achei como bloquear a tela neste Linux."}
+
+
+# ---------- janelas de qualquer app por voz (wmctrl/xdotool) ----------
+
+
+def _janelas_apps() -> list[tuple[str, str, str]]:
+    """(id, app, título) de todas as janelas, pela classe (WM_CLASS) de cada uma."""
+    if not _tem("wmctrl") or WAYLAND:
+        return []
+    out = []
+    for ln in _run(["wmctrl", "-lx"]).stdout.splitlines():
+        p = ln.split(None, 4)
+        if len(p) >= 5 and p[1] != "-1" and "j.a.r.v.i.s" not in p[4].lower():
+            classe = p[2].split(".")[-1] if "." in p[2] else p[2]
+            out.append((p[0], classe, p[4]))
+    return out
+
+
+def apps_abertos() -> list[str]:
+    return sorted({a for _, a, _ in _janelas_apps()})
+
+
+def _telas() -> list[tuple[int, int, int, int]]:
+    try:
+        import mss
+
+        with mss.mss() as s:
+            return sorted((m["left"], m["top"], m["width"], m["height"]) for m in s.monitors[1:])
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def janela_app(pedido: str, acao: str, confirmado: bool = False) -> dict[str, Any]:
+    """Minimizar, fechar, maximizar, metade da tela, outro monitor… numa janela do app pedido (ou do da frente)."""
+    from .. import overlay
+    from .common import ACOES_JANELA, escolher_app
+
+    if acao not in ACOES_JANELA:
+        return {"erro": f"Ação desconhecida: {acao}."}
+    if WAYLAND or not _tem("wmctrl"):
+        return {"erro": "Para mexer em janelas no Linux, use uma sessão X11 com wmctrl e xdotool (sudo apt install wmctrl xdotool)."}
+    janelas = _janelas_apps()
+    frente = ""
+    if _tem("xdotool"):
+        ativo = _run(["xdotool", "getactivewindow"]).stdout.strip()
+        frente = next((a for w, a, _ in janelas if ativo and int(w, 16) == int(ativo)), "")
+    nome = escolher_app(pedido, [a for _, a, _ in janelas], frente)
+    alvo = [j for j in janelas if j[1] == nome] or ([j for j in janelas if pedido and pedido.lower() in j[2].lower()])
+    if not alvo:
+        return {"erro": f"Não achei '{pedido}' aberto.", "apps_abertos": ", ".join(apps_abertos()[:25])}
+    nome = alvo[0][1]
+    wid = alvo[0][0]
+    if acao == "sair":
+        if not confirmado:
+            return {"precisa_confirmar": True, "instrucao": f"Pergunte se pode fechar o {nome} inteiro (algo não salvo pode pedir para salvar)."}
+        for w, _, _ in alvo:
+            _run(["wmctrl", "-i", "-c", w])
+        return {"ok": True, "app": nome, "feito": "fechado"}
+    geo = next((r for i, _, r in _windows() if i == wid), None)
+    if geo:
+        overlay.look(*geo, label=f"{ACOES_JANELA[acao]} · {nome}")
+        time.sleep(0.45)
+    if acao in ("minimizar", "esconder"):
+        _run(["xdotool", "windowminimize", str(int(wid, 16))])
+    elif acao in ("restaurar", "focar"):
+        _run(["wmctrl", "-i", "-a", wid])
+    elif acao == "maximizar":
+        _run(["wmctrl", "-i", "-r", wid, "-b", "add,maximized_vert,maximized_horz"])
+        _run(["wmctrl", "-i", "-a", wid])
+    elif acao == "tela_cheia":
+        _run(["wmctrl", "-i", "-r", wid, "-b", "toggle,fullscreen"])
+    elif acao == "fechar":
+        _run(["wmctrl", "-i", "-c", wid])
+    elif acao in ("esquerda", "direita", "outro_monitor"):
+        telas = _telas()
+        if not telas or not geo:
+            return {"erro": "Não consegui ler os monitores."}
+        cx = geo[0] + geo[2] / 2
+        i = next((k for k, t in enumerate(telas) if t[0] <= cx < t[0] + t[2]), 0)
+        if acao == "outro_monitor":
+            if len(telas) < 2:
+                return {"erro": "Só há um monitor."}
+            t = telas[(i + 1) % len(telas)]
+            x, y, w, h = t[0] + 40, t[1] + 40, min(geo[2], t[2] - 80), min(geo[3], t[3] - 80)
+        else:
+            t = telas[i]
+            x, y, w, h = (t[0] if acao == "esquerda" else t[0] + t[2] // 2), t[1], t[2] // 2, t[3]
+        _run(["wmctrl", "-i", "-r", wid, "-b", "remove,maximized_vert,maximized_horz"])
+        _run(["wmctrl", "-i", "-r", wid, "-e", f"0,{x},{y},{w},{h}"])
+        _run(["wmctrl", "-i", "-a", wid])
+    overlay.hide()
+    return {"ok": True, "app": nome, "feito": ACOES_JANELA[acao].lower()}

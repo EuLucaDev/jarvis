@@ -5,7 +5,8 @@ import { useSyncExternalStore } from 'react'
 
 export type Phase = 'espera' | 'ouvindo' | 'pensando' | 'falando'
 
-export type Hand = { key: string; x: number; y: number; pinch: boolean; spread: number; pose: string; palm: [number, number] }
+// ax/ay: onde o ponteiro estava logo antes da pinça (o clique cai ali, não onde os dedos se mexeram)
+export type Hand = { key: string; x: number; y: number; pinch: boolean; spread: number; pose: string; palm: [number, number]; ax?: number; ay?: number }
 
 function store<T>(initial: T) {
   let value = initial

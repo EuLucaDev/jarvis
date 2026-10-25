@@ -3,7 +3,9 @@
 Cada quadro vira, para as telas:
   {"type": "maos", "hands": [{x, y, pinch, spread, pose, palm}], "pts": [...]}   (pts = esqueleto, a cada 2 quadros)
   {"type": "gesto", "acao": "...", "rotulo": "..."}                             (deslizes e poses paradas)
-x/y: ponto da pinça (entre polegar e indicador), espelhado e esticado para a tela inteira (0..1).
+x/y: o ponteiro, pela base do indicador e do dedo médio (os nós dos dedos não se mexem ao fazer a pinça,
+então o ponteiro fica parado na hora do clique); espelhado e esticado para a tela inteira (0..1).
+ax/ay (só com pinça): onde o ponteiro estava logo ANTES da pinça começar, que é onde o clique deve cair.
 A pinça só conta firme (~100 ms, com histerese); mãos pequenas ou duvidosas são ignoradas.
 A câmera também serve para a Gemini "ver" (último quadro em JPEG).
 """
@@ -22,7 +24,7 @@ from .hub import hub
 log = logging.getLogger("jarvis.hands")
 
 MODELO = CODE_ROOT / "models" / "gesture_recognizer.task"
-AREA = (0.18, 0.82, 0.14, 0.70)  # miolo do quadro da câmera que vira a tela inteira (x0, x1, y0, y1)
+AREA = (0.18, 0.82, 0.22, 0.78)  # miolo do quadro da câmera que vira a tela inteira (x0, x1, y0, y1)
 
 POSES = {
     "Open_Palm": ("mostrar", 1.4, "Mão aberta parada · mostra o Jarvis"),
@@ -155,17 +157,19 @@ class Hands:
             if key in vistas or tamanho < 0.07 or (hd and hd.score < 0.7):
                 continue  # mão pequena (no fundo) ou duvidosa: era o que "pegava" do nada
             vistas.add(key)
-            bruto = _tela(((pts[4][0] + pts[8][0]) / 2, (pts[4][1] + pts[8][1]) / 2))
+            bruto = _tela(((pts[5][0] + pts[9][0]) / 2, (pts[5][1] + pts[9][1]) / 2))
             palma = _tela((sum(pts[j][0] for j in (0, 5, 9, 13, 17)) / 5, sum(pts[j][1] for j in (0, 5, 9, 13, 17)) / 5))
             s = self.state.get(key)
             if not s:
                 s = {"x": bruto[0], "y": bruto[1], "px": palma[0], "py": palma[1], "pinch": False, "raw": False, "since": agora,
-                     "spread": 1.0, "seen": agora, "trail": []}
+                     "spread": 1.0, "seen": agora, "trail": [], "hist": [], "ax": bruto[0], "ay": bruto[1]}
                 self.state[key] = s
             vel = math.hypot(bruto[0] - s["x"], bruto[1] - s["y"])
-            a = min(0.85, max(0.22, vel * 9))  # parado não treme, rápido não atrasa
-            s["x"] += (bruto[0] - s["x"]) * a
-            s["y"] += (bruto[1] - s["y"]) * a
+            if vel > 0.0025:  # zona morta: a mão parada não faz o ponteiro tremer
+                a = min(0.85, max(0.18, vel * 9))  # devagar = suave e preciso, rápido = sem atraso
+                s["x"] += (bruto[0] - s["x"]) * a
+                s["y"] += (bruto[1] - s["y"]) * a
+            s["hist"] = [p for p in s["hist"] if agora - p[0] < 0.5] + [(agora, s["x"], s["y"])]
             s["px"] += (palma[0] - s["px"]) * 0.5
             s["py"] += (palma[1] - s["py"]) * 0.5
             d = _dist(pts[4], pts[8]) / (tamanho or 1)
@@ -173,15 +177,21 @@ class Hands:
             quer = d < 0.4 if s["raw"] else d < 0.25  # histerese
             if quer != s["raw"]:
                 s["raw"], s["since"] = quer, agora
-            if s["raw"] != s["pinch"] and agora - s["since"] > (0.1 if s["raw"] else 0.07):
+            if s["raw"] != s["pinch"] and agora - s["since"] > (0.08 if s["raw"] else 0.07):
                 s["pinch"] = s["raw"]
+                if s["pinch"]:  # o clique vale onde o ponteiro estava antes dos dedos começarem a fechar
+                    antes = [p for p in s["hist"] if p[0] <= s["since"] - 0.06]
+                    _, s["ax"], s["ay"] = antes[-1] if antes else (0, s["x"], s["y"])
             pose = ""
             if res.gestures and i < len(res.gestures) and res.gestures[i] and res.gestures[i][0].score > 0.65:
                 pose = res.gestures[i][0].category_name
             s["trail"] = [t for t in s["trail"] if agora - t[2] < 0.32] + [(s["px"], s["py"], agora)]
             pinca = s["pinch"] and agora - s["seen"] > 0.25  # mão recém-chegada não clica
-            hands.append({"key": key, "x": round(s["x"], 4), "y": round(s["y"], 4), "pinch": pinca, "spread": round(s["spread"], 3),
-                          "pose": pose, "palm": [round(s["px"], 4), round(s["py"], 4)]})
+            mao = {"key": key, "x": round(s["x"], 4), "y": round(s["y"], 4), "pinch": pinca, "spread": round(s["spread"], 3),
+                   "pose": pose, "palm": [round(s["px"], 4), round(s["py"], 4)]}
+            if pinca:
+                mao["ax"], mao["ay"] = round(s["ax"], 4), round(s["ay"], 4)
+            hands.append(mao)
             pts_all.append([[round(x, 3), round(y, 3)] for x, y in pts])
         for k in list(self.state):
             if k not in vistas:

@@ -29,7 +29,7 @@ __all__ = [
     "clipboard_text", "front_app", "front_is_jarvis", "front_window_title", "keys_into", "lock_screen", "look_at",
     "main_bounds", "media", "move", "open_app", "open_link", "open_path", "pedir_permissao", "permitido", "position", "press",
     "replace_selection", "scroll", "selected_text", "set_clipboard", "snapshot", "type_into", "type_text", "volume",
-    "win_aim", "win_grab", "win_move", "win_release", "win_run", "win_scale", "win_throw",
+    "win_aim", "win_grab", "win_move", "win_release", "win_run", "win_scale", "win_throw", "apps_abertos", "janela_app",
 ]
 
 _in = PynputInput()
@@ -555,3 +555,102 @@ def brightness(nivel: int) -> dict[str, Any]:
 def lock_screen() -> dict[str, Any]:
     ctypes.windll.user32.LockWorkStation()
     return {"ok": True}
+
+
+# ---------- janelas de qualquer app por voz ----------
+
+
+def _todas_janelas() -> list[tuple[int, str, str]]:
+    """Janelas de apps (inclusive minimizadas), da frente para trás: (hwnd, app, título)."""
+    out: list[tuple[int, str, str]] = []
+
+    def cb(hwnd, _):
+        if not win32gui.IsWindowVisible(hwnd) or not win32gui.GetWindowText(hwnd):
+            return True
+        if win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) & win32con.WS_EX_TOOLWINDOW:
+            return True
+        app = _proc_name(hwnd)
+        if app.lower() not in ("jarvis", "jarvis-core", "applicationframehost", "textinputhost", "shellexperiencehost", "searchhost"):
+            out.append((hwnd, app, win32gui.GetWindowText(hwnd)))
+        return True
+
+    win32gui.EnumWindows(cb, None)
+    return out
+
+
+def apps_abertos() -> list[str]:
+    return sorted({app for _, app, _ in _todas_janelas() if app})
+
+
+def _frente(hwnd: int) -> None:
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        _in.press("alt")  # o Windows só deixa trocar o foco logo depois de uma tecla
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def janela_app(pedido: str, acao: str, confirmado: bool = False) -> dict[str, Any]:
+    """Minimizar, fechar, maximizar, metade da tela, outro monitor… numa janela do app pedido (ou do da frente)."""
+    from .. import overlay
+    from .common import ACOES_JANELA, escolher_app
+
+    if acao not in ACOES_JANELA:
+        return {"erro": f"Ação desconhecida: {acao}."}
+    janelas = _todas_janelas()
+    frente = front_app() if not front_is_jarvis() else ""
+    nome = escolher_app(pedido, [a for _, a, _ in janelas], frente)
+    alvo = [j for j in janelas if j[1] == nome]
+    if not nome or not alvo:
+        # pelo título também ("a janela do relatório")
+        alvo = [j for j in janelas if pedido.lower() in j[2].lower()] if pedido else []
+        if not alvo:
+            return {"erro": f"Não achei '{pedido}' aberto.", "apps_abertos": ", ".join(apps_abertos()[:25])}
+        nome = alvo[0][1]
+    hwnd = alvo[0][0]
+    if acao == "sair":
+        if not confirmado:
+            return {"precisa_confirmar": True, "instrucao": f"Pergunte se pode fechar o {nome} inteiro (algo não salvo pode pedir para salvar)."}
+        for h, _, _ in alvo:
+            win32gui.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+        return {"ok": True, "app": nome, "feito": "fechado"}
+    if not win32gui.IsIconic(hwnd):
+        l, t, r, b = win32gui.GetWindowRect(hwnd)
+        overlay.look(l / ESC, t / ESC, (r - l) / ESC, (b - t) / ESC, label=f"{ACOES_JANELA[acao]} · {nome}")
+        time.sleep(0.45)
+    if acao in ("minimizar", "esconder"):
+        win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+    elif acao == "restaurar":
+        for h, _, _ in alvo:
+            if win32gui.IsIconic(h):
+                win32gui.ShowWindow(h, win32con.SW_RESTORE)
+        _frente(hwnd)
+    elif acao == "focar":
+        _frente(hwnd)
+    elif acao == "maximizar":
+        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+        _frente(hwnd)
+    elif acao == "fechar":
+        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+    elif acao == "tela_cheia":
+        _frente(hwnd)
+        time.sleep(0.2)
+        _in.press("f11")
+    elif acao == "outro_monitor":
+        if len(_monitors()) < 2:
+            return {"erro": "Só há um monitor."}
+        _frente(hwnd)
+        time.sleep(0.2)
+        _in.press("win+shift+right")
+    elif acao in ("esquerda", "direita"):
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        l, t, r, b = win32gui.GetWindowRect(hwnd)
+        cx, cy = (l + r) // 2, (t + b) // 2
+        mx, my, mw, mh = next((m for m in _monitors() if m[0] <= cx < m[0] + m[2] and m[1] <= cy < m[1] + m[3]), _monitors()[0])
+        x = mx if acao == "esquerda" else mx + mw // 2
+        win32gui.SetWindowPos(hwnd, 0, x, my, mw // 2, mh, win32con.SWP_NOZORDER)
+        _frente(hwnd)
+    overlay.hide()
+    return {"ok": True, "app": nome, "feito": ACOES_JANELA[acao].lower()}

@@ -33,7 +33,8 @@ DEPOIS DE INSTALADO
     bandeja (Windows/Linux).
   - Para chamar: diga "Jarvis" (ou "Jarvis, bom dia") ou bata duas palmas. Também: Alt+Espaço.
   - Com a câmera ligada, a mão vira o ponteiro:
-      pinça e solta = clica · pinça e mexe = arrasta · pinça parada = ajusta o tamanho
+      o ponteiro segue os nós dos dedos (fica parado quando você faz a pinça)
+      pinça e solta = clica onde começou · pinça e mexe = arrasta · pinça parada = ajusta o tamanho
       (abra polegar e indicador em L; parado fixa; mão aberta cancela)
       dois dedos e mexe = rola · mão aberta para cima = mostra o HUD · para baixo = minimiza
   - Fechar a janela do Jarvis deixa ele no canto (esfera pequena com o vídeo da câmera); ele segue
@@ -42,7 +43,10 @@ DEPOIS DE INSTALADO
   - Memória: "Jarvis, mostre minha memória" abre o mapa (você no centro, temas e memórias ligadas).
     Ele aprende sozinho ao fim de cada conversa. A memória também vira notas em Markdown que abrem
     no Obsidian (no mapa: "Abrir como notas").
-  - Peça coisas no computador: "abre o Notas e escreve…", "olha essa planilha", "minimize sua tela".
+  - Peça coisas no computador: "abre o Notas e escreve…", "olha essa planilha", "minimiza o navegador",
+    "fecha essa janela", "põe o Chrome na metade da esquerda", "manda pro outro monitor".
+  - "Espelha minha tela": o Jarvis passa a ver a sua tela o tempo todo (aparece no HUD); "para de
+    espelhar" desliga. No Mac precisa da permissão Gravação de Tela.
 
 A chave da Gemini é grátis: https://aistudio.google.com/apikey
 Cada pessoa começa do zero: memória, ajustes e chave ficam só no computador dela.

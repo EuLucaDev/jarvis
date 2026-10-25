@@ -197,3 +197,126 @@ def release(cancel: bool = False) -> dict[str, Any] | None:
     out = _view(fr) if fr else None
     _grab = None
     return out
+
+
+# ---------- janelas de qualquer app por voz ----------
+
+def _apps_abertos():
+    from AppKit import NSApplicationActivationPolicyRegular, NSWorkspace
+
+    return [a for a in NSWorkspace.sharedWorkspace().runningApplications()
+            if a.activationPolicy() == NSApplicationActivationPolicyRegular and str(a.localizedName() or "") not in PROPRIOS]
+
+
+def _area_util(fr) -> tuple[float, float, float, float]:
+    """Área útil (sem barra de menus e Dock) do monitor onde está o centro do quadro, em pontos globais."""
+    from AppKit import NSScreen
+
+    telas = NSScreen.screens()
+    altura_principal = telas[0].frame().size.height
+    cx, cy = (fr[0] + fr[2] / 2, fr[1] + fr[3] / 2) if fr else (0, 0)
+    melhor = telas[0]
+    for t in telas:
+        f = t.frame()
+        top = altura_principal - (f.origin.y + f.size.height)
+        if f.origin.x <= cx < f.origin.x + f.size.width and top <= cy < top + f.size.height:
+            melhor = t
+    v = melhor.visibleFrame()
+    return v.origin.x, altura_principal - (v.origin.y + v.size.height), v.size.width, v.size.height
+
+
+def _janela_principal(ax_app):
+    for attr in ("AXFocusedWindow", "AXMainWindow"):
+        w = _get(ax_app, attr)
+        if w is not None:
+            return w
+    ws = _get(ax_app, "AXWindows") or []
+    return ws[0] if ws else None
+
+
+def controlar(pedido: str, acao: str, confirmado: bool = False) -> dict[str, Any]:
+    """Minimizar, fechar, maximizar, metade da tela, outro monitor… numa janela do app pedido (ou do da frente)."""
+    from AppKit import NSApplicationActivateIgnoringOtherApps, NSWorkspace
+
+    from .. import overlay
+    from .common import ACOES_JANELA, escolher_app
+
+    if acao not in ACOES_JANELA:
+        return {"erro": f"Ação desconhecida: {acao}."}
+    apps = _apps_abertos()
+    frente = NSWorkspace.sharedWorkspace().frontmostApplication()
+    nome_frente = str(frente.localizedName() or "") if frente else ""
+    if nome_frente in PROPRIOS:
+        nome_frente = ""
+    nome = escolher_app(pedido, [str(a.localizedName()) for a in apps], nome_frente)
+    if not nome:
+        abertos = ", ".join(sorted({str(a.localizedName()) for a in apps})[:25])
+        return {"erro": f"Não achei '{pedido}' aberto.", "apps_abertos": abertos}
+    app = next(a for a in apps if str(a.localizedName()) == nome)
+    if acao == "sair":
+        if not confirmado:
+            return {"precisa_confirmar": True, "instrucao": f"Pergunte se pode fechar o {nome} inteiro (algo não salvo pode pedir para salvar)."}
+        app.terminate()
+        return {"ok": True, "app": nome, "feito": "fechado"}
+    if acao == "esconder":
+        app.hide()
+        return {"ok": True, "app": nome, "feito": "escondido"}
+    ax = AXUIElementCreateApplication(app.processIdentifier())
+    if acao == "restaurar":
+        for w in _get(ax, "AXWindows") or []:
+            if _get(w, "AXMinimized"):
+                AXUIElementSetAttributeValue(w, "AXMinimized", False)
+        app.unhide()
+        app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+        return {"ok": True, "app": nome, "feito": "de volta"}
+    win = _janela_principal(ax)
+    if win is None:
+        if acao == "focar":
+            app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+            return {"ok": True, "app": nome}
+        return {"erro": f"O {nome} não tem janela aberta."}
+    fr = _frame(win)
+    if fr:  # a esfera vai até a janela antes de mexer, à vista
+        overlay.look(*fr, label=f"{ACOES_JANELA[acao]} · {nome}")
+        time.sleep(0.45)
+    if acao == "minimizar":
+        AXUIElementSetAttributeValue(win, "AXMinimized", True)
+    elif acao == "fechar":
+        botao = _get(win, "AXCloseButton")
+        if botao is None:
+            return {"erro": "Essa janela não tem botão de fechar."}
+        AXUIElementPerformAction(botao, "AXPress")
+    elif acao == "tela_cheia":
+        AXUIElementSetAttributeValue(win, "AXFullScreen", not bool(_get(win, "AXFullScreen")))
+    else:
+        app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+        AXUIElementPerformAction(win, "AXRaise")
+        if acao in ("maximizar", "esquerda", "direita"):
+            x, y, w, h = _area_util(fr)
+            if acao == "esquerda":
+                w = w / 2
+            elif acao == "direita":
+                x, w = x + w / 2, w / 2
+            _set_pos(win, x, y)
+            _set_size(win, w, h)
+        elif acao == "outro_monitor" and fr:
+            telas = sorted(displays(), key=lambda d: d[0])
+            if len(telas) < 2:
+                return {"erro": "Só há um monitor."}
+            cx = fr[0] + fr[2] / 2
+            atual = next((i for i, d in enumerate(telas) if d[0] <= cx < d[0] + d[2]), 0)
+            b = telas[(atual + 1) % len(telas)]
+            a = telas[atual]
+            w, h = min(fr[2], b[2]), min(fr[3], b[3] - 25)
+            _set_pos(win, b[0] + (fr[0] - a[0]) / a[2] * b[2], max(b[1] + 25, b[1] + (fr[1] - a[1]) / a[3] * b[3]))
+            _set_size(win, w, h)
+    novo = _frame(win)
+    if novo and acao not in ("minimizar", "fechar"):
+        overlay.look(*novo, label=f"{ACOES_JANELA[acao]} · {nome}")
+    else:
+        overlay.hide()
+    return {"ok": True, "app": nome, "feito": ACOES_JANELA[acao].lower()}
+
+
+def apps_abertos() -> list[str]:
+    return sorted({str(a.localizedName()).strip("\u200e\u200f") for a in _apps_abertos()})

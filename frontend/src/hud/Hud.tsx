@@ -2,7 +2,7 @@
 // serviços à esquerda; clima, tarefas e o canal de conversa à direita. Os cartões flutuam na camada sobre a
 // tela (overlay), onde você arruma com a mão ou o mouse.
 
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bell, Camera, CameraOff, Headphones, LayoutDashboard, LayoutGrid, Lightbulb, Mic, MicOff, Minus, Square, Timer, Volume2, VolumeX, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bell, Camera, CameraOff, Headphones, LayoutDashboard, LayoutGrid, Lightbulb, Mic, MicOff, Minus, MonitorOff, MonitorUp, Square, Timer, Volume2, VolumeX, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { app, isApp } from '../lib/app'
@@ -10,7 +10,7 @@ import { usePhase, type Phase } from '../lib/live'
 import { play, setSoundsOn, soundsOn } from '../lib/sfx'
 import { Aura } from '../ui/Aura'
 import { Deck, Tasks } from './Deck'
-import { CameraPanel, Channel, PANELS, Services, SignalIn, Spectrum, VoiceRead, Weather, type PanelId } from './Panels'
+import { CameraPanel, Channel, ScreenPanel, PANELS, Services, SignalIn, Spectrum, VoiceRead, Weather, type PanelId } from './Panels'
 import { useJarvis } from './useJarvis'
 import { useWidgetData } from './Widgets'
 
@@ -18,7 +18,7 @@ const PHASE_LABEL: Record<Phase, string> = { espera: 'Em espera', ouvindo: 'Ouvi
 
 type Layout = { left: PanelId[]; right: PanelId[]; hidden: PanelId[] }
 const LAYOUT_KEY = 'jarvis.hudLayout'
-const DEFAULT_LAYOUT: Layout = { left: ['entrada', 'espectro', 'leitura', 'servicos'], right: ['camera', 'clima', 'canal'], hidden: [] }
+const DEFAULT_LAYOUT: Layout = { left: ['entrada', 'espectro', 'leitura', 'servicos'], right: ['camera', 'tela', 'clima', 'canal'], hidden: [] }
 
 function loadLayout(): Layout {
   try {
@@ -131,6 +131,8 @@ export function Hud() {
     switch (id) {
       case 'camera':
         return <CameraPanel key={id} on={j.camera.ligada} />
+      case 'tela':
+        return <ScreenPanel key={id} on={j.tela.ligada} erro={j.tela.erro} onToggle={toggleTela} />
       case 'entrada':
         return <SignalIn key={id} />
       case 'espectro':
@@ -146,6 +148,7 @@ export function Hud() {
     }
   }
 
+  const toggleTela = useCallback(() => api(`/api/tela/${j.tela.ligada ? 'desligar' : 'ligar'}`, { method: 'POST' }), [j.tela.ligada])
   const toggleCamera = useCallback(() => api(`/api/camera/${j.camera.ligada ? 'desligar' : 'ligar'}`, { method: 'POST' }), [j.camera.ligada])
   const toggleBarge = async () => {
     const v = !barge
@@ -256,6 +259,7 @@ export function Hud() {
         </button>
 
         <div className="bottom-r">
+          <IconToggle on={j.tela.ligada} onClick={toggleTela} label={j.tela.ligada ? 'Espelhando a tela: o Jarvis vê o que você vê (parar)' : 'Espelhar a tela para o Jarvis'} icon={j.tela.ligada ? MonitorUp : MonitorOff} />
           <IconToggle on={j.camera.ligada} onClick={toggleCamera} label={j.camera.ligada ? 'Câmera ligada: mãos e visão (desligar)' : 'Ligar a câmera (mãos e visão)'} icon={j.camera.ligada ? Camera : CameraOff} />
           <IconToggle on={barge} onClick={toggleBarge} label="Interromper falando (use com fone)" icon={Headphones} />
           <IconToggle

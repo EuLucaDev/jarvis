@@ -38,3 +38,18 @@
   font: 500 11px/1 'JetBrains Mono', monospace;
   color: #6f8299;
 }
+.camview.tela {
+  aspect-ratio: 16 / 10;
+}
+.camview.tela img {
+  object-fit: contain;
+  opacity: 1;
+}
+button.camview-off {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+button.camview-off:hover {
+  color: #5fd4ff;
+}

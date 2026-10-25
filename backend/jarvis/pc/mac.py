@@ -35,6 +35,7 @@ from .mac_input import (
     type_text,
 )
 from .mac_windows import aim as win_aim
+from .mac_windows import apps_abertos, controlar as janela_app
 from .mac_windows import grab as win_grab
 from .mac_windows import move as win_move
 from .mac_windows import release as win_release
@@ -47,7 +48,7 @@ __all__ = [
     "clipboard_text", "front_app", "front_is_jarvis", "front_window_title", "keys_into", "lock_screen", "look_at",
     "main_bounds", "media", "move", "open_app", "open_link", "open_path", "pedir_permissao", "permitido", "position", "press",
     "replace_selection", "scroll", "selected_text", "snapshot", "type_into", "type_text", "volume", "win_aim", "win_grab",
-    "win_move", "win_release", "win_run", "win_scale", "win_throw",
+    "win_move", "win_release", "win_run", "win_scale", "win_throw", "apps_abertos", "janela_app",
 ]
 
 

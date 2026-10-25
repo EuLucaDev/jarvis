@@ -1,6 +1,6 @@
 // Mãos como ponteiro da tela inteira, sem modos: o gesto vale para o que estiver embaixo.
 //
-//   pinça e solta rápido   → clica (no cartão do Jarvis ou de verdade, em qualquer app)
+//   pinça e solta          → clica onde a pinça começou (no cartão do Jarvis ou de verdade, em qualquer app)
 //   pinça e mexe           → arrasta (o cartão do Jarvis, ou a janela do app embaixo)
 //                            arrastar uma janela até a borda e segurar → manda para o outro monitor
 //   pinça PARADA (o anel)  → ajuste de tamanho: polegar e indicador em L, abrir aumenta, fechar diminui;
@@ -32,6 +32,8 @@ type Mode =
   | { m: 'drag-win'; edge: number }
   | { m: 'resize'; card: string | null; z0: number; z: number; started: boolean; still: number; open: number }
 
+const CLIQUE_MS = 650 // pinça e solta até aqui = clique
+const MEXER = 0.03 // quanto (fração da largura) a mão anda com a pinça para virar arrasto
 const MIN_Z = 0.5
 const MAX_Z = 1.8
 const zFor = (spread: number) => MIN_Z + ((Math.min(1.25, Math.max(0.25, spread)) - 0.25) / 1.0) * (MAX_Z - MIN_Z)
@@ -110,9 +112,12 @@ export function useHandControl(ctx: Ctx, active: boolean) {
 
     // ---------- mão sem pinça ----------
     if (!h.pinch) {
-      if (md.m === 'press' && now - md.t < 420) {
-        // pinça rápida: clique (num botão do Jarvis, senão de verdade no app embaixo)
-        if (!k.clickAt(px, py)) k.send({ type: 'clique', x: h.x, y: h.y })
+      if (md.m === 'press' && now - md.t < CLIQUE_MS) {
+        // pinça e solta: clique onde a pinça COMEÇOU (soltar os dedos mexe a mão), num botão do Jarvis ou no app
+        if (!k.clickAt(md.x, md.y)) k.send({ type: 'clique', x: md.x / innerWidth, y: md.y / innerHeight })
+        play('ack', (md.x / innerWidth) * 2 - 1)
+        setTip('Clique')
+        setTimeout(() => setTip((t) => (t === 'Clique' ? '' : t)), 600)
       } else if (md.m === 'drag-card') {
         k.moveCard(md.id, px - md.x, py - md.y, true)
         play('close', h.x * 2 - 1)
@@ -144,11 +149,13 @@ export function useHandControl(ctx: Ctx, active: boolean) {
 
     // ---------- pinça fechada ----------
     if (md.m === 'idle') {
-      mode.current = { m: 'press', x: px, y: py, t: now, card: k.cardAt(px, py) }
+      const x = (h.ax ?? h.x) * innerWidth
+      const y = (h.ay ?? h.y) * innerHeight
+      mode.current = { m: 'press', x, y, t: now, card: k.cardAt(x, y) }
       return
     }
     if (md.m === 'press') {
-      if (Math.hypot(px - md.x, py - md.y) > 0.02 * innerWidth) {
+      if (Math.hypot(px - md.x, py - md.y) > MEXER * innerWidth) {
         // mexeu: arrastar, nunca ajuste
         if (md.card) mode.current = { m: 'drag-card', id: md.card, x: md.x, y: md.y }
         else {
@@ -160,7 +167,8 @@ export function useHandControl(ctx: Ctx, active: boolean) {
       }
       // parado: o anel enche e entra no ajuste
       const p = Math.min(1, (now - md.t) / k.hold)
-      setRing(p > 0.12 ? { x: h.x, y: h.y, p, kind: 'armar' } : null)
+      // o anel só aparece depois do tempo do clique, para não piscar a cada clique
+      setRing(now - md.t > CLIQUE_MS ? { x: md.x / innerWidth, y: md.y / innerHeight, p, kind: 'armar' } : null)
       if (p >= 1) {
         if (!md.card) k.send({ type: 'janela.pegar', x: md.x / innerWidth, y: md.y / innerHeight, modo: 'ajuste' })
         const z0 = md.card ? k.cardScale(md.card) : 1

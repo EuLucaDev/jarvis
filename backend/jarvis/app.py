@@ -26,6 +26,7 @@ from .hub import hub
 from .listener import estado as ouvido_estado
 from .listener import ouvido
 from .live import voice
+from .screen import espelho
 from .memory import TIPOS, VAULT as MEMORIA_PASTA, _db, memory
 
 # ---------- logs em memória (página Sistema) e em arquivo ----------
@@ -65,6 +66,7 @@ async def startup():
     from . import activity, alerts, overlay
 
     overlay.bind_loop(loop)
+    espelho.bind(loop)
     teste = bool(os.getenv("JARVIS_TESTE"))  # testes e compilação: sem microfone, câmera nem ouvido
     if not teste:
         audio.start()
@@ -82,6 +84,7 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    espelho.stop()
     hands.stop()
     audio.stop()
 
@@ -209,24 +212,48 @@ async def camera(acao: str):
     return {"ok": True, "camera": hands.on, "erro": hands.erro}
 
 
-@app.get("/api/camera/ao-vivo")
-async def camera_ao_vivo():
-    """Vídeo da câmera (MJPEG) para o HUD e o quadradinho do canto."""
+def _mjpeg(fonte, pegar, fps: float) -> StreamingResponse:
+    """Vídeo MJPEG a partir do último quadro de uma fonte (câmera ou espelho da tela)."""
 
     async def quadros():
-        hands.viewers += 1
+        fonte.viewers += 1
         ultimo = None
         try:
             while True:
-                q = hands.latest_jpeg()
+                q = pegar()
                 if q and q is not ultimo:
                     ultimo = q
                     yield b"--q\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(q)).encode() + b"\r\n\r\n" + q + b"\r\n"
-                await asyncio.sleep(1 / 15)
+                await asyncio.sleep(1 / fps)
         finally:
-            hands.viewers -= 1
+            fonte.viewers -= 1
 
     return StreamingResponse(quadros(), media_type="multipart/x-mixed-replace; boundary=q", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/camera/ao-vivo")
+async def camera_ao_vivo():
+    """Vídeo da câmera para o HUD e o quadradinho do canto."""
+    return _mjpeg(hands, hands.latest_jpeg, 15)
+
+
+@app.get("/api/tela/ao-vivo")
+async def tela_ao_vivo():
+    """O que o Jarvis está vendo da tela (espelho ligado)."""
+    return _mjpeg(espelho, espelho.latest, 4)
+
+
+@app.post("/api/tela/{acao}")
+async def tela(acao: str):
+    if acao not in ("ligar", "desligar"):
+        raise HTTPException(404)
+    if acao == "ligar":
+        espelho.start()
+        if voice.session:
+            await voice.send_text("[Aviso do sistema, não é o usuário falando.] O espelho da tela foi ligado: a partir de agora você vê a tela dele.")
+    else:
+        espelho.stop()
+    return espelho.estado()
 
 
 @app.get("/api/app/comandos")
@@ -339,7 +366,7 @@ async def testar_fontes():
             out.append({"fonte": acc.get("email"), "ok": False, "detalhe": str(exc)[:160]})
     for ag in cfg.get("agendas", []):
         try:
-            evs = await agenda_src.fetch([ag], cfg.get("fuso", "America/Sao_Paulo"))
+            evs = await agenda_src.fetch([ag], settings.fuso)
             out.append({"fonte": ag.get("nome") or "Agenda", "ok": True, "detalhe": f"{len(evs)} compromissos hoje"})
         except Exception as exc:  # noqa: BLE001
             out.append({"fonte": ag.get("nome") or "Agenda", "ok": False, "detalhe": str(exc)[:160]})
@@ -603,6 +630,7 @@ async def ws_endpoint(ws: WebSocket):
     await ws.accept()
     await hub.join(ws, {"role": ws.query_params.get("role", "hud")})
     await ws.send_json({"type": "camera", "ligada": hands.on, "erro": hands.erro})  # a câmera liga antes das telas
+    await ws.send_json(espelho.estado())
     aviso = [0.0]  # aviso de permissão: no máximo um a cada 15 s
     try:
         while True:

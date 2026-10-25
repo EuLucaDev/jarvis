@@ -25,7 +25,7 @@ async def _weather(cfg: dict) -> dict | None:
         return None
     from .tools import fetch_weather
 
-    return await fetch_weather(cfg.get("cidade") or settings.city)
+    return await fetch_weather(settings.city)
 
 
 async def _emails(cfg: dict) -> dict:
@@ -81,7 +81,7 @@ async def _agenda(cfg: dict) -> list[dict]:
     """Próximos 7 dias; o de hoje é filtrado no build."""
     if not cfg.get("agendas"):
         return []
-    return await agenda_src.fetch(cfg["agendas"], cfg.get("fuso", "America/Maceio"), dias=7)
+    return await agenda_src.fetch(cfg["agendas"], settings.fuso, dias=7)
 
 
 async def _news(cfg: dict) -> list[dict]:
@@ -175,9 +175,10 @@ Dados:
 async def build(force: bool = False) -> dict:
     cfg = store.get("briefing")
     last = store.get("briefing_ultimo")
-    if not force and last and time.time() - last.get("ts", 0) < cfg.get("atualizar_min", 15) * 60:
+    mesma_cidade = last and last.get("cidade_cfg") == settings.city  # trocou a cidade: monta de novo
+    if not force and mesma_cidade and time.time() - last.get("ts", 0) < cfg.get("atualizar_min", 15) * 60:
         return last
-    tz = ZoneInfo(cfg.get("fuso", "America/Maceio"))
+    tz = ZoneInfo(settings.fuso)
     erros: list[str] = []
 
     async def safe(name: str, coro, default):
@@ -212,6 +213,7 @@ async def build(force: bool = False) -> dict:
         "erros": erros,
     }
     data["roteiro"] = await _script(data)
+    data["cidade_cfg"] = settings.city
     store.put("briefing_ultimo", data)
     return data
 
