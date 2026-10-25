@@ -1,11 +1,15 @@
-"""Servidor do Jarvis: API do painel, WebSocket de eventos/voz e o frontend compilado."""
+"""Núcleo do Jarvis: API, WebSocket de eventos e as páginas da interface (HUD, camada, configuração, painel).
+
+O app (Tauri) abre este processo e as janelas apontam para ele. Aqui vivem a voz, o ouvido, as mãos e o
+controle do computador, então as permissões do sistema ficam com o app Jarvis.
+"""
 
 import asyncio
-import base64
 import collections
-import datetime as dt
 import json
 import logging
+import os
+import sys
 import time
 from typing import Any
 
@@ -13,82 +17,145 @@ from fastapi import Body, FastAPI, HTTPException, UploadFile, WebSocket, WebSock
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import briefing, chat, store, system
-from .config import settings
+from . import briefing, chat, pc, store, system
+from .audio import audio
+from .config import CODE_ROOT, DATA, HOME, settings
 from .demo import run_demo
+from .hands import hands
 from .hub import hub
-from .live import VoiceBridge
-from .memory import TIPOS, memory, _db
+from .listener import estado as ouvido_estado
+from .listener import ouvido
+from .live import voice
+from .memory import TIPOS, _db, memory
 
-# ---------- logs em memória para a página Logs ----------
+# ---------- logs em memória (página Sistema) e em arquivo ----------
 LOGS: collections.deque[dict[str, Any]] = collections.deque(maxlen=400)
 
 
 class _Ring(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         if record.name.startswith(("jarvis", "uvicorn.error")):
-            LOGS.append({"em": time.strftime("%H:%M:%S", time.localtime(record.created)), "nivel": record.levelname, "origem": record.name, "texto": record.getMessage()[:500]})
+            LOGS.append({"em": time.strftime("%H:%M:%S", time.localtime(record.created)), "nivel": record.levelname,
+                         "origem": record.name, "texto": record.getMessage()[:500]})
 
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s",
+                    handlers=[logging.StreamHandler(), logging.FileHandler(HOME / "jarvis.log", encoding="utf-8")])
 logging.getLogger().addHandler(_Ring())
-for noisy in ("httpx", "primp", "google_genai.models"):
+for noisy in ("httpx", "primp", "google_genai.models", "absl"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 log = logging.getLogger("jarvis")
 
+VERSION = (CODE_ROOT / "VERSION").read_text().strip() if (CODE_ROOT / "VERSION").exists() else "2.0.0"
 app = FastAPI(title="J.A.R.V.I.S.")
-voice: VoiceBridge | None = None  # só um navegador fica com o microfone por vez
 demo_task: asyncio.Task | None = None
 BOOT = time.time()
 
 
 async def telemetry_loop() -> None:
     while True:
-        if hub.count("tela") or hub.count("admin"):
+        if hub.count("admin") or hub.count("hud"):
             await hub.broadcast({"type": "telemetria", **await asyncio.to_thread(system.telemetry)})
         await asyncio.sleep(2)
 
 
 @app.on_event("startup")
 async def startup():
+    loop = asyncio.get_running_loop()
+    from . import activity, alerts, overlay
+
+    overlay.bind_loop(loop)
+    teste = bool(os.getenv("JARVIS_TESTE"))  # testes e compilação: sem microfone, câmera nem ouvido
+    if not teste:
+        audio.start()
+    voice.bind(loop)
+    if not teste:
+        ouvido.start(loop)
+        hands.bind(loop)
     asyncio.create_task(memory.reflect_pending())
     asyncio.create_task(briefing.refresh_loop())
     asyncio.create_task(telemetry_loop())
-    from . import activity, alerts, overlay
-
-    overlay.bind_loop(asyncio.get_running_loop())
     asyncio.create_task(alerts.loop())
     asyncio.create_task(activity.loop())
-    from . import listener
-
-    asyncio.create_task(listener.loop())
-    log.info("Jarvis no ar em http://localhost:%s", settings.port)
+    log.info("Jarvis %s no ar em http://127.0.0.1:%s (%s)", VERSION, settings.port, pc.SISTEMA)
 
 
-# ---------- estado ----------
+@app.on_event("shutdown")
+async def shutdown():
+    hands.stop()
+    audio.stop()
+
+
+# ---------- estado e configuração inicial ----------
 
 
 @app.get("/health")
 async def health():
-    return {"ok": True}
+    return {"ok": True, "versao": VERSION}
 
 
 @app.get("/api/status")
 async def status():
     return {
         **hub.status,
+        "versao": VERSION,
+        "sistema": pc.SISTEMA,
         "model": settings.live_model,
         "text_model": settings.text_model,
         "search": settings.search,
         "voice_name": settings.voice,
         "city": settings.city,
         "has_key": bool(settings.gemini_api_key),
-        "screens": hub.count("tela"),
+        "configurado": bool(settings.configurado),
+        "camera": hands.on,
+        "camera_erro": hands.erro,
+        "audio_erro": audio.erro,
+        "ouvido": ouvido_estado,
         "clients": len(hub.clients),
         "cards": len(hub.cards),
         "uptime_min": round((time.time() - BOOT) / 60),
         "memorias": len(memory.all()),
+        "pasta": str(HOME),
     }
+
+
+@app.get("/api/setup")
+async def setup_get():
+    return {**settings.public(), "sistema": pc.SISTEMA, "pasta": str(HOME)}
+
+
+@app.post("/api/setup/testar")
+async def setup_testar(body: dict = Body(...)):
+    """Confere a chave da Gemini antes de salvar (uma chamada pequena ao modelo de texto)."""
+    from google import genai
+
+    chave = (body.get("chave") or "").strip()
+    if not chave:
+        return {"ok": False, "erro": "Cole a chave."}
+    try:
+        c = genai.Client(api_key=chave)
+        await c.aio.models.generate_content(model=settings.text_model, contents="Responda só: ok")
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc)
+        if "API_KEY_INVALID" in msg or "API key not valid" in msg:
+            return {"ok": False, "erro": "Essa chave não é válida. Copie de novo no Google AI Studio."}
+        if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+            return {"ok": True, "aviso": "A chave funciona, mas a cota grátis do dia acabou; amanhã volta."}
+        return {"ok": False, "erro": f"Não consegui testar agora: {msg[:200]}"}
+
+
+@app.post("/api/setup")
+async def setup_salvar(body: dict = Body(...)):
+    campos = {k: v for k, v in body.items() if k in ("gemini_api_key", "user_name", "city", "voice", "camera_auto") and v is not None}
+    if "gemini_api_key" in campos:
+        campos["gemini_api_key"] = str(campos["gemini_api_key"]).strip()
+    settings.update(**campos, configurado=True)
+    store.put("camera", {**store.get("camera"), "ligada": bool(settings.camera_auto)})
+    if settings.camera_auto:
+        await asyncio.to_thread(hands.start)
+    await hub.broadcast({"type": "configurado"})
+    return settings.public()
 
 
 @app.get("/api/sistema")
@@ -110,15 +177,75 @@ async def demo():
     return {"ok": True}
 
 
-# ---------- chat ----------
+@app.post("/api/reiniciar")
+async def reiniciar():
+    """Sai; o app Jarvis sobe o núcleo de novo (já com permissões novas, se acabou de liberar)."""
+    asyncio.get_running_loop().call_later(0.8, os._exit, 0)
+    return {"ok": True}
+
+
+# ---------- voz, câmera, permissões ----------
+
+
+@app.post("/api/voz/{acao}")
+async def voz(acao: str, body: dict = Body(default={})):
+    if acao == "ligar":
+        await voice.start()
+    elif acao == "desligar":
+        await voice.stop()
+    elif acao == "perguntar" and body.get("texto"):
+        await voice.ask(body["texto"])
+    else:
+        raise HTTPException(404)
+    return {"ok": True}
+
+
+@app.post("/api/camera/{acao}")
+async def camera(acao: str):
+    if acao not in ("ligar", "desligar"):
+        raise HTTPException(404)
+    store.put("camera", {**store.get("camera"), "ligada": acao == "ligar"})
+    await asyncio.to_thread(hands.start if acao == "ligar" else hands.stop)
+    return {"ok": True, "camera": hands.on, "erro": hands.erro}
+
+
+@app.get("/api/permissoes")
+async def permissoes():
+    out: dict[str, Any] = {"sistema": pc.SISTEMA, "acessibilidade": pc.permitido(), "camera": hands.on and not hands.erro,
+                           "microfone": audio.erro is None}
+    if sys.platform == "darwin":
+        from .sources import imessage
+
+        out["mensagens"] = await asyncio.to_thread(imessage.has_access)
+    return out
+
+
+@app.post("/api/permissoes/acessibilidade")
+async def pedir_acessibilidade():
+    return {"ok": await asyncio.to_thread(pc.pedir_permissao)}
+
+
+@app.get("/api/despertar")
+async def despertar_estado():
+    return {**store.get("despertar"), **ouvido_estado}
+
+
+@app.post("/api/olhar")
+async def olhar_teste(body: dict = Body(...)):
+    """Manda a esfera até uma área da tela (teste da camada)."""
+    from . import overlay
+
+    overlay.look(float(body.get("x", 200)), float(body.get("y", 200)), float(body.get("w", 300)), float(body.get("h", 200)),
+                 body.get("label", "Estou vendo"), body.get("modo", "olhar"))
+    return {"ok": True}
+
+
+# ---------- chat e briefing ----------
 
 
 @app.post("/api/chat")
 async def api_chat(body: dict = Body(...)):
     return await chat.reply(body.get("historico", []), body.get("texto", ""))
-
-
-# ---------- briefing ----------
 
 
 @app.get("/api/briefing")
@@ -133,7 +260,7 @@ async def gerar_briefing():
 
 @app.post("/api/briefing/apresentar")
 async def apresentar_briefing():
-    """Mostra os cartões do último briefing no HUD, sem voz (botão do painel)."""
+    """Mostra os cartões do último briefing, sem voz (botão do painel)."""
     data = store.get("briefing_ultimo") or await briefing.build()
     await hub.clear_cards()
     _, fila = briefing.sequence(data)
@@ -144,7 +271,8 @@ async def apresentar_briefing():
 
 # ---------- ajustes ----------
 
-EDITABLE = {"despertar", "briefing", "telas", "cameras", "atalhos", "alexa", "mercado", "presenca", "monitores", "alertas", "notas", "protocolos", "agentes", "atividade", "ambiente"}
+EDITABLE = {"despertar", "briefing", "cameras", "atalhos", "alexa", "mercado", "presenca", "alertas", "notas", "protocolos",
+            "agentes", "atividade", "ambiente", "camera", "voz"}
 
 
 @app.get("/api/ajustes/{chave}")
@@ -159,8 +287,6 @@ async def put_ajuste(chave: str, valor: Any = Body(...)):
     if chave not in EDITABLE:
         raise HTTPException(404)
     store.put(chave, store.merge_secrets(valor, store.get(chave)))
-    if chave == "telas":
-        await hub.broadcast({"type": "telas.config", "telas": store.get("telas")})
     return store.masked(store.get(chave))
 
 
@@ -180,7 +306,7 @@ async def testar_fontes():
             out.append({"fonte": acc.get("email"), "ok": False, "detalhe": str(exc)[:160]})
     for ag in cfg.get("agendas", []):
         try:
-            evs = await agenda_src.fetch([ag], cfg.get("fuso", "America/Maceio"))
+            evs = await agenda_src.fetch([ag], cfg.get("fuso", "America/Sao_Paulo"))
             out.append({"fonte": ag.get("nome") or "Agenda", "ok": True, "detalhe": f"{len(evs)} compromissos hoje"})
         except Exception as exc:  # noqa: BLE001
             out.append({"fonte": ag.get("nome") or "Agenda", "ok": False, "detalhe": str(exc)[:160]})
@@ -192,7 +318,7 @@ async def atalhos_disponiveis():
     return await asyncio.to_thread(system.shortcuts_available)
 
 
-# ---------- saúde, notas, mensagens ----------
+# ---------- saúde, notas ----------
 
 
 @app.get("/api/saude")
@@ -205,10 +331,9 @@ async def saude():
 
 @app.post("/api/saude/importar")
 async def importar_saude(arquivo: UploadFile):
-    from .config import ROOT
     from .sources import health
 
-    dest = ROOT / "data" / "saude" / "exportacao"
+    dest = DATA / "saude" / "exportacao"
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("wb") as fh:
         while chunk := await arquivo.read(1 << 20):
@@ -230,92 +355,7 @@ async def cofres():
     return {"obsidian": notes.obsidian_vaults()}
 
 
-@app.get("/api/permissoes")
-async def permissoes():
-    import sys
-    from pathlib import Path
-
-    from .sources import imessage
-
-    from . import desktop
-
-    return {
-        "mensagens": await asyncio.to_thread(imessage.has_access),
-        "acessibilidade": desktop.permitido(),
-        "python": str(Path(sys.executable).resolve()),
-    }
-
-
-@app.post("/api/permissoes/acessibilidade")
-async def pedir_acessibilidade():
-    from . import desktop
-
-    return {"ok": await asyncio.to_thread(desktop.pedir_permissao)}
-
-
-@app.get("/api/versao")
-async def versao():
-    from . import updater
-
-    return await asyncio.to_thread(updater.version)
-
-
-@app.get("/api/atualizacao")
-async def atualizacao():
-    from . import updater
-
-    return await asyncio.to_thread(updater.check)
-
-
-@app.post("/api/atualizacao/aplicar")
-async def aplicar_atualizacao():
-    from . import updater
-
-    asyncio.create_task(updater.apply())
-    return {"ok": True}
-
-
-@app.get("/api/despertar")
-async def despertar_estado():
-    from . import listener
-
-    return {**store.get("despertar"), **listener.estado}
-
-
-@app.post("/api/olhar")
-async def olhar_teste(body: dict = Body(...)):
-    """Manda a esfera até uma área da tela (teste da camada do app; o Jarvis faz isso sozinho ao olhar/agir)."""
-    from . import overlay
-
-    overlay.look(float(body.get("x", 200)), float(body.get("y", 200)), float(body.get("w", 300)), float(body.get("h", 200)), body.get("label", "Estou vendo"), body.get("modo", "olhar"))
-    return {"ok": True}
-
-
-@app.post("/api/app/ping")
-async def app_ping():
-    """O app Jarvis instalado avisa que existe: o lançador do login deixa de abrir o HUD no Chrome."""
-    store.put("app", {"ultimo": time.time()})
-    return {"ok": True}
-
-
-@app.post("/api/reiniciar")
-async def reiniciar():
-    """Reinicia o serviço (necessário depois de dar permissões novas ao Python)."""
-    import os
-    import subprocess
-
-    if os.environ.get("JARVIS_APP_CHILD"):
-        # dentro do app Jarvis: sai e o app sobe o servidor de novo (já com as permissões novas)
-        asyncio.get_running_loop().call_later(0.8, os._exit, 0)
-        return {"ok": True}
-    subprocess.Popen(
-        ["/bin/sh", "-c", f"sleep 1; launchctl kickstart -k gui/{os.getuid()}/com.jarvis.servidor"],
-        start_new_session=True,
-    )
-    return {"ok": True}
-
-
-# ---------- alertas ----------
+# ---------- alertas, protocolos, tarefas, mercado ----------
 
 
 @app.get("/api/alertas")
@@ -330,37 +370,6 @@ async def alerta_teste():
     from . import alerts
 
     return await alerts.notify("Teste de alerta", "Assim chega um aviso do Jarvis.", "info")
-
-
-# ---------- monitores ----------
-
-
-@app.get("/api/monitores")
-async def monitores():
-    from . import launcher
-
-    return {"plano": await asyncio.to_thread(launcher.plan), "ajustes": store.get("monitores")}
-
-
-@app.post("/api/monitores/abrir")
-async def abrir_monitores(body: dict = Body(default={})):
-    from . import launcher
-
-    try:
-        return {"abertas": await asyncio.to_thread(launcher.open_all, body.get("tela_cheia"))}
-    except RuntimeError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.post("/api/monitores/fechar")
-async def fechar_monitores():
-    from . import launcher
-
-    await asyncio.to_thread(launcher.close_all)
-    return {"ok": True}
-
-
-# ---------- protocolos e tarefas ----------
 
 
 @app.get("/api/protocolos/tipos")
@@ -400,62 +409,11 @@ async def cancelar_tarefa(tid: str):
     return {"ok": await agents.cancelar(tid)}
 
 
-# ---------- mercado ----------
-
-
 @app.get("/api/mercado")
 async def mercado(periodo: str = "1mo"):
     from . import market
 
     return await market.quotes(None, periodo)
-
-
-# ---------- rosto e presença ----------
-
-
-@app.get("/api/rosto")
-async def rosto():
-    r = store.get("rosto")
-    return {"nome": r.get("nome"), "amostras": len(r.get("descritores", [])), "descritores": r.get("descritores", [])}
-
-
-@app.put("/api/rosto")
-async def salvar_rosto(body: dict = Body(...)):
-    descs = [d for d in body.get("descritores", []) if isinstance(d, list) and len(d) == 128]
-    if not descs:
-        raise HTTPException(400, "Nenhuma amostra válida.")
-    r = store.get("rosto")
-    r["descritores"] = (r.get("descritores", []) + descs)[-12:] if body.get("adicionar") else descs
-    if body.get("nome"):
-        r["nome"] = body["nome"]
-    store.put("rosto", r)
-    return {"ok": True, "amostras": len(r["descritores"])}
-
-
-@app.delete("/api/rosto")
-async def apagar_rosto():
-    store.put("rosto", {**store.get("rosto"), "descritores": []})
-    return {"ok": True}
-
-
-def _deve_briefing() -> bool:
-    p = store.get("presenca")
-    hoje = dt.date.today().isoformat()
-    return bool(p.get("briefing_auto")) and p.get("ultimo_briefing") != hoje and 5 <= dt.datetime.now().hour < 12
-
-
-@app.get("/api/presenca")
-async def presenca():
-    return {"briefing": _deve_briefing()}
-
-
-@app.post("/api/presenca/briefing")
-async def marcar_briefing():
-    store.put("presenca", {**store.get("presenca"), "ultimo_briefing": dt.date.today().isoformat()})
-    return {"ok": True}
-
-
-# ---------- câmeras ----------
 
 
 @app.get("/api/cameras/{cid}/foto")
@@ -470,7 +428,7 @@ async def camera_foto(cid: str):
     return Response(jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
-# ---------- memória ----------
+# ---------- memória e conversas ----------
 
 
 @app.get("/api/memorias")
@@ -499,126 +457,84 @@ async def conversas(limite: int = 20):
         for s in sess:
             turns = con.execute("select papel, texto, em from conversas where sessao = ? order by id", (s["id"],)).fetchall()
             if turns:
-                out.append({
-                    "id": s["id"],
-                    "inicio": time.strftime("%d/%m %H:%M", time.localtime(s["inicio"])),
-                    "refletida": bool(s["refletida"]),
-                    "turnos": [dict(t) for t in turns],
-                })
+                out.append({"id": s["id"], "inicio": time.strftime("%d/%m %H:%M", time.localtime(s["inicio"])),
+                            "refletida": bool(s["refletida"]), "turnos": [dict(t) for t in turns]})
     return out
 
 
 # ---------- WebSocket ----------
 
 
+async def _janela(ws: WebSocket, kind: str, data: dict[str, Any], aviso: list[float]) -> None:
+    """Mão nas janelas de qualquer app: mirar (borda azul), pegar, arrastar, ajustar, jogar para outro monitor."""
+    if kind != "janela.mira" and not pc.permitido():
+        if time.time() - aviso[0] > 15:
+            aviso[0] = time.time()
+            texto = ("Libere o Jarvis em Acessibilidade (Ajustes do Sistema → Privacidade e Segurança)." if pc.SISTEMA == "mac"
+                     else "O sistema não deixou o Jarvis controlar janelas.")
+            await ws.send_json({"type": "alerta", "id": "ax", "titulo": "Janelas com a mão", "texto": texto, "nivel": "alta",
+                                "at": time.strftime("%H:%M")})
+        return
+    x, y = float(data.get("x", 0.5)), float(data.get("y", 0.5))
+    estado, res = None, None
+    if kind == "janela.mira":
+        res, estado = await pc.win_run(pc.win_aim, x, y), "mira"
+    elif kind == "janela.pegar":
+        res = await pc.win_run(pc.win_grab, x, y)
+        estado = "ajuste" if data.get("modo") == "ajuste" else "pegou"
+        if res.get("erro"):
+            await ws.send_json({"type": "janela.erro", "texto": res["erro"]})
+            res = None
+    elif kind == "janela.mover":
+        res, estado = await pc.win_run(pc.win_move, x, y), "pegou"
+    elif kind == "janela.ajustar":
+        res, estado = await pc.win_run(pc.win_scale, float(data.get("escala", 1))), "ajuste"
+    elif kind == "janela.jogar":
+        res, estado = await pc.win_run(pc.win_throw, data.get("direcao", "direita")), "pegou"
+        if res.get("erro"):
+            res = None
+    elif kind == "janela.soltar":
+        res = await pc.win_run(pc.win_release, bool(data.get("cancelar")))
+        estado = "cancelou" if data.get("cancelar") else "solta"
+    await hub.broadcast({"type": "janela.realce", "estado": estado, "janela": res, "escala": data.get("escala")})
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
-    global voice
     await ws.accept()
-    await hub.join(ws, {"role": ws.query_params.get("role", "hud"), "tela": ws.query_params.get("tela")})
-    mine: VoiceBridge | None = None
-    aviso_ax = 0.0  # aviso de permissão do modo mouse: no máximo um a cada 15 s
+    await hub.join(ws, {"role": ws.query_params.get("role", "hud")})
+    aviso = [0.0]  # aviso de permissão: no máximo um a cada 15 s
     try:
         while True:
-            msg = await ws.receive()
-            if msg.get("type") == "websocket.disconnect":
-                break
-            if msg.get("bytes") is not None:
-                if mine:
-                    await mine.send_audio(msg["bytes"])
-                continue
-            data = json.loads(msg.get("text") or "{}")
-            kind = data.get("type")
+            data = json.loads(await ws.receive_text() or "{}")
+            kind = data.get("type", "")
             if kind == "voice.start":
-                if voice and voice is not mine:
-                    await voice.stop()
-                mine = voice = mine or VoiceBridge(ws)
-                hub.voice = mine
-                await mine.start()
-            elif kind == "voice.stop" and mine:
-                await mine.stop()
+                await voice.start()
+            elif kind == "voice.stop":
+                await voice.stop()
             elif kind == "text" and data.get("text"):
-                if mine and mine.session:
-                    await mine.send_text(data["text"])
+                await voice.ask(data["text"])
             elif kind == "card.close" and data.get("id"):
                 await hub.close_card(data["id"])
             elif kind == "cards.clear":
                 await hub.clear_cards()
+            elif kind.startswith("janela.") and kind != "janela.realce":
+                await _janela(ws, kind, data, aviso)
+            elif kind == "clique" and pc.permitido():
+                # pinça rápida fora do Jarvis: clique de verdade onde a mão aponta (0..1 do monitor principal)
+                x0, y0, w, h = pc.main_bounds()
+                await asyncio.to_thread(pc.click, x0 + float(data.get("x", 0.5)) * w, y0 + float(data.get("y", 0.5)) * h)
+            elif kind == "rolar" and pc.permitido():
+                await asyncio.to_thread(pc.scroll, max(-400, min(400, int(data.get("dy", 0)))))
             elif kind == "apontado":
-                # o que a mão aponta no HUD; o Jarvis usa quando ele diz "isso aqui"
                 hub.pointed = {**data["alvo"], "em": time.time()} if data.get("alvo") else None
             elif kind == "copiar" and isinstance(data.get("texto"), str):
-                import AppKit
-
-                pb = AppKit.NSPasteboard.generalPasteboard()
-                pb.clearContents()
-                pb.setString_forType_(data["texto"][:20000], AppKit.NSPasteboardTypeString)
-            elif kind == "fase" and data.get("fase"):
-                from . import ambient
-
-                asyncio.create_task(ambient.apply(data["fase"]))
+                await asyncio.to_thread(pc.set_clipboard, data["texto"][:20000])
             elif kind == "parar":
                 from . import overlay
 
                 overlay.stop("botão")
-            elif kind.startswith("janela.") and kind != "janela.realce":
-                # mão no Mac: mirar, pegar, arrastar, ajustar e jogar janelas de qualquer app
-                from . import desktop, windows
-
-                # mirar só lê a lista de janelas (sem Acessibilidade); pegar e mexer precisam dela
-                if kind != "janela.mira" and not desktop.permitido():
-                    if time.time() - aviso_ax > 15:
-                        aviso_ax = time.time()
-                        await ws.send_json({"type": "alerta", "id": "ax", "titulo": "Janelas com a mão", "texto": "Falta ligar o Jarvis em Acessibilidade.", "nivel": "alta", "at": time.strftime("%H:%M")})
-                    continue
-                x, y = float(data.get("x", 0.5)), float(data.get("y", 0.5))
-                estado, res = None, None
-                if kind == "janela.mira":
-                    res, estado = await windows.run(windows.aim, x, y), "mira"
-                elif kind == "janela.pegar":
-                    res = await windows.run(windows.grab, x, y)
-                    estado = "ajuste" if data.get("modo") == "ajuste" else "pegou"
-                    if res.get("erro"):
-                        await ws.send_json({"type": "janela.erro", "texto": res["erro"]})
-                        res = None
-                elif kind == "janela.mover":
-                    res, estado = await windows.run(windows.move, x, y), "pegou"
-                elif kind == "janela.ajustar":
-                    res, estado = await windows.run(windows.scale, float(data.get("escala", 1))), "ajuste"
-                elif kind == "janela.jogar":
-                    res, estado = await windows.run(windows.throw, data.get("direcao", "direita")), "pegou"
-                    if res.get("erro"):
-                        res = None
-                elif kind == "janela.soltar":
-                    res = await windows.run(windows.release, bool(data.get("cancelar")))
-                    estado = "cancelou" if data.get("cancelar") else "solta"
-                await hub.broadcast({"type": "janela.realce", "estado": estado, "janela": res, "escala": data.get("escala")})
-            elif kind == "mouse":
-                # modo mouse: a mão no HUD move o mouse do Mac (coordenadas 0..1 do monitor principal)
-                from . import desktop
-
-                if desktop.permitido():
-                    x0, y0, w, h = desktop.main_bounds()
-                    acao = data.get("acao")
-                    if acao == "move":
-                        desktop.move(x0 + float(data.get("x", 0.5)) * w, y0 + float(data.get("y", 0.5)) * h)
-                    elif acao == "down":
-                        desktop.button(True, x0 + float(data.get("x", 0.5)) * w, y0 + float(data.get("y", 0.5)) * h)
-                    elif acao == "up":
-                        desktop.button(False)
-                    elif acao == "click":
-                        desktop.click()
-                    elif acao == "click_em":
-                        # pinça rápida no modo janelas: clique de verdade onde a mão aponta
-                        x0, y0, w, h = desktop.main_bounds()
-                        desktop.click(x0 + float(data.get("x", 0.5)) * w, y0 + float(data.get("y", 0.5)) * h)
-                    elif acao == "scroll":
-                        desktop.scroll(max(-400, min(400, int(data.get("dy", 0)))))
-                elif time.time() - aviso_ax > 15:
-                    aviso_ax = time.time()
-                    await ws.send_json({"type": "alerta", "id": "ax", "titulo": "Modo mouse", "texto": "Falta a permissão de Acessibilidade para o Python do Jarvis.", "nivel": "alta", "at": time.strftime("%H:%M")})
             elif kind == "mercado.periodo" and data.get("periodo") in ("1d", "5d", "1mo", "6mo", "1y"):
-                # zoom com as mãos (ou clique) troca o período do gráfico do cartão de mercado
                 from . import market
 
                 card = next((c for c in hub.cards if c["id"] == data.get("id") and c["kind"] == "mercado"), None)
@@ -627,36 +543,38 @@ async def ws_endpoint(ws: WebSocket):
                     cot = await market.quotes(simbolos or None, data["periodo"])
                     if cot:
                         await hub.update_card(card["id"], {**card["data"], "periodo": data["periodo"], "ativos": cot})
-            elif kind == "sequence.show" and mine:
-                await mine.show_planned(int(data.get("index", -1)))
-            elif kind == "video.frame" and mine and data.get("jpeg"):
-                await mine.send_image(base64.b64decode(data["jpeg"]))
-            elif kind == "presenca":
-                # passos do reconhecimento vão para todas as telas; reconhecido desbloqueia
-                await hub.broadcast({"type": "presenca", "etapa": data.get("etapa")})
-                if data.get("etapa") == "reconhecido":
-                    await hub.set_screens("ativas")
-            elif kind == "telas" and data.get("estado") in ("ativas", "bloqueadas"):
-                await hub.set_screens(data["estado"])
     except WebSocketDisconnect:
         pass
+    except Exception as exc:  # noqa: BLE001
+        log.warning("WebSocket caiu: %s", exc)
     finally:
         hub.leave(ws)
-        if mine:
-            await mine.stop()
-            if voice is mine:
-                voice = None
-            if hub.voice is mine:
-                hub.voice = None
 
 
-if settings.frontend_dist.exists():
-    app.mount("/assets", StaticFiles(directory=settings.frontend_dist / "assets"), name="assets")
+# ---------- páginas (HUD, camada, configuração, painel) ----------
 
-    @app.get("/{path:path}")
-    async def spa(path: str):
-        file = settings.frontend_dist / path
-        if path and file.is_file():
-            return FileResponse(file)
-        # sem cache: depois de um build novo, as janelas do Jarvis pegam a versão nova ao recarregar
-        return FileResponse(settings.frontend_dist / "index.html", headers={"Cache-Control": "no-cache"})
+WEB = settings.web_dist
+if (WEB / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=WEB / "assets"), name="assets")
+
+
+@app.get("/{path:path}")
+async def spa(path: str):
+    file = (WEB / path).resolve()
+    if path and file.is_file() and WEB.resolve() in file.parents:
+        return FileResponse(file)
+    index = WEB / "index.html"
+    if not index.exists():
+        return JSONResponse({"erro": f"Interface não encontrada em {WEB}"}, status_code=500)
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})
+
+
+def main() -> None:
+    """Ponto de entrada do executável (o app Jarvis chama este)."""
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("JARVIS_PORT", settings.port)), log_level="warning")
+
+
+if __name__ == "__main__":
+    main()

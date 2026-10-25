@@ -12,16 +12,24 @@ from .config import settings
 log = logging.getLogger("jarvis.llm")
 FALLBACK = "gemini-3.5-flash-lite"
 
-_client = genai.Client(api_key=settings.gemini_api_key) if settings.gemini_api_key else None
+_cache: tuple[str, genai.Client] | None = None
 
 
 def client() -> genai.Client | None:
-    return _client
+    """Cliente da Gemini com a chave atual (a configuração inicial pode trocá-la com tudo rodando)."""
+    global _cache
+    key = settings.gemini_api_key
+    if not key:
+        return None
+    if not _cache or _cache[0] != key:
+        _cache = (key, genai.Client(api_key=key))
+    return _cache[1]
 
 
 async def generate_json(prompt: str, schema: dict[str, Any]) -> Any:
+    _client = client()
     if not _client:
-        raise RuntimeError("Sem GEMINI_API_KEY")
+        raise RuntimeError("Sem a chave da Gemini (configuração inicial)")
     last: Exception | None = None
     for model in (settings.text_model, FALLBACK):
         try:

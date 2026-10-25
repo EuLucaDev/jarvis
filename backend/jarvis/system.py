@@ -1,4 +1,4 @@
-"""Mac: telemetria, controle do computador por ações permitidas e câmeras.
+"""Telemetria, ações do computador por lista fechada, arquivos e câmeras (Mac, Windows e Linux).
 
 O controle do computador é uma lista fechada de ações (abrir app, abrir link, mídia, volume,
 rodar um Atalho do macOS). Não existe execução de comando livre. Atalhos são a ponte para o
@@ -7,6 +7,8 @@ celular, a Casa (HomeKit) e outros serviços: o Jarvis só roda os nomes liberad
 
 import asyncio
 import difflib
+import os
+import sys
 import logging
 import shutil
 import subprocess
@@ -17,7 +19,7 @@ from typing import Any
 import httpx
 import psutil
 
-from . import store
+from . import pc, store
 
 log = logging.getLogger("jarvis.system")
 
@@ -46,17 +48,7 @@ def telemetry() -> dict[str, Any]:
     }
 
 
-# ---------- computador ----------
-
-
-def _apps() -> dict[str, str]:
-    found: dict[str, str] = {}
-    for base in ("/Applications", "/System/Applications", "/System/Applications/Utilities", str(Path.home() / "Applications")):
-        p = Path(base)
-        if p.exists():
-            for app in p.glob("*.app"):
-                found[app.stem.lower()] = app.stem
-    return found
+# ---------- computador (cada sistema em pc/) ----------
 
 
 def _run(cmd: list[str], timeout: int = 15) -> subprocess.CompletedProcess:
@@ -64,51 +56,43 @@ def _run(cmd: list[str], timeout: int = 15) -> subprocess.CompletedProcess:
 
 
 def open_app(nome: str) -> dict[str, Any]:
-    apps = _apps()
-    key = nome.lower().strip()
-    match = apps.get(key) or next((v for k, v in apps.items() if key in k), None)
-    if not match:
-        close = difflib.get_close_matches(key, list(apps), n=1, cutoff=0.6)
-        match = apps[close[0]] if close else None
-    if not match:
-        return {"erro": f"Não encontrei o app {nome}."}
-    r = _run(["open", "-a", match])
-    return {"ok": r.returncode == 0, "app": match} if r.returncode == 0 else {"erro": r.stderr.strip()[:200]}
+    return pc.open_app(nome)
 
 
 def open_link(url: str) -> dict[str, Any]:
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url.lstrip("/")
-    r = _run(["open", url])
-    return {"ok": r.returncode == 0, "url": url}
+    return pc.open_link(url)
 
 
 def media(acao: str) -> dict[str, Any]:
-    cmd = {"tocar_pausar": "playpause", "proxima": "next track", "anterior": "previous track"}.get(acao)
-    if not cmd:
-        return {"erro": "Ação de mídia desconhecida."}
-    for app in ("Spotify", "Music"):
-        running = _run(["osascript", "-e", f'application "{app}" is running']).stdout.strip() == "true"
-        if running:
-            _run(["osascript", "-e", f'tell application "{app}" to {cmd}'])
-            return {"ok": True, "app": app}
-    return {"erro": "Nenhum player aberto (Spotify ou Música)."}
+    return pc.media(acao)
 
 
 def volume(nivel: int) -> dict[str, Any]:
-    nivel = max(0, min(100, int(nivel)))
-    _run(["osascript", "-e", f"set volume output volume {nivel}"])
-    return {"ok": True, "volume": nivel}
+    return pc.volume(nivel)
+
+
+def lock_screen() -> dict[str, Any]:
+    return pc.lock_screen()
+
+
+def brightness(nivel: int) -> dict[str, Any]:
+    return pc.brightness(nivel)
+
+
+def _so_mac(nome: str) -> dict[str, Any] | None:
+    return None if sys.platform == "darwin" else {"erro": f"{nome} só existe no Mac."}
 
 
 def shortcuts_available() -> list[str]:
-    if not shutil.which("shortcuts"):
+    if sys.platform != "darwin" or not shutil.which("shortcuts"):
         return []
     r = _run(["shortcuts", "list"])
     return [s.strip() for s in r.stdout.splitlines() if s.strip()]
 
 
 def run_shortcut(nome: str, entrada: str | None = None) -> dict[str, Any]:
+    if (e := _so_mac("Atalhos do macOS")):
+        return e
     allowed = store.get("atalhos") or []
     match = next((a for a in allowed if a.lower() == nome.lower()), None)
     if not match:
@@ -183,21 +167,14 @@ def _resolve(caminho: str, must_exist: bool = True) -> Path | None:
     return p if (p.exists() or not must_exist) else None
 
 
-def lock_screen() -> dict[str, Any]:
-    _run(["pmset", "displaysleepnow"])
-    return {"ok": True}
 
 
-def brightness(nivel: int) -> dict[str, Any]:
-    if not shutil.which("brightness"):
-        return {"erro": "Instale o utilitário: brew install brightness"}
-    nivel = max(5, min(100, int(nivel)))
-    r = _run(["brightness", f"{nivel / 100:.2f}"])
-    return {"ok": r.returncode == 0, "brilho": nivel}
 
 
 def create_reminder(texto: str, quando: str | None = None, lista: str | None = None) -> dict[str, Any]:
     """Lembrete no app Lembretes (sincroniza com o iPhone pelo iCloud). `quando` em ISO 2026-10-22T09:00."""
+    if (e := _so_mac("O app Lembretes")):
+        return e
     esc = texto.replace('"', "'")
     props = f'name:"{esc}"'
     script = []
@@ -234,17 +211,31 @@ def open_folder(caminho: str) -> dict[str, Any]:
     p = _resolve(caminho)
     if not p:
         return {"erro": f"Não encontrei '{caminho}'."}
-    _run(["open", str(p)])
+    pc.open_path(str(p))
     return {"ok": True, "aberto": str(p).replace(str(HOME), "~")}
 
 
+def _search_files(nome: str, limite: int = 8) -> list[str]:
+    """Mac: Spotlight. Windows e Linux: varre as pastas do usuário (sem pastas ocultas e de sistema)."""
+    if sys.platform == "darwin":
+        r = _run(["mdfind", "-onlyin", str(HOME), "-name", nome], timeout=20)
+        return [h for h in r.stdout.splitlines() if "/Library/" not in h and "/." not in h][:limite]
+    alvo, hits, fim = nome.lower(), [], time.time() + 15
+    for base in (HOME / "Desktop", HOME / "Documents", HOME / "Downloads", HOME / "Pictures", HOME):
+        for raiz, pastas, arquivos in os.walk(base):
+            pastas[:] = [p for p in pastas if not p.startswith(".") and p not in ("AppData", "node_modules", "Library")]
+            hits += [os.path.join(raiz, a) for a in arquivos if alvo in a.lower()]
+            if len(hits) >= limite or time.time() > fim:
+                return hits[:limite]
+    return hits[:limite]
+
+
 def find_file(nome: str, abrir: bool = True) -> dict[str, Any]:
-    r = _run(["mdfind", "-onlyin", str(HOME), "-name", nome], timeout=20)
-    hits = [h for h in r.stdout.splitlines() if "/Library/" not in h and "/." not in h][:8]
+    hits = _search_files(nome)
     if not hits:
         return {"erro": f"Nenhum arquivo com '{nome}' no nome."}
     if abrir:
-        _run(["open", hits[0]])
+        pc.open_path(hits[0])
     return {"ok": True, "aberto": hits[0].replace(str(HOME), "~") if abrir else None, "encontrados": [h.replace(str(HOME), "~") for h in hits]}
 
 
@@ -299,9 +290,12 @@ def trash_item(caminho: str, confirmado: bool = False) -> dict[str, Any]:
     if not confirmado:
         return {"precisa_confirmar": True, "item": str(p).replace(str(HOME), "~"),
                 "instrucao": "Pergunte se pode mandar para a Lixeira. Só chame de novo com confirmado=true se ele disser sim."}
-    r = _run(["osascript", "-e", f'tell application "Finder" to delete (POSIX file "{p}" as alias)'])
-    if r.returncode != 0:
-        return {"erro": r.stderr.strip()[:200]}
+    try:
+        from send2trash import send2trash
+
+        send2trash(str(p))  # Lixeira do sistema (recuperável) no Mac, Windows e Linux
+    except Exception as exc:  # noqa: BLE001
+        return {"erro": f"Não consegui mandar para a Lixeira: {exc}"}
     return {"ok": True, "na_lixeira": str(p).replace(str(HOME), "~")}
 
 

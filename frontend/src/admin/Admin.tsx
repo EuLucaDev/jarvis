@@ -4,7 +4,6 @@ import {
   CalendarDays,
   Cpu,
   LineChart,
-  ScanFace,
   Camera,
   Home,
   BellRing,
@@ -34,12 +33,11 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api'
-import { distance, loadFace, MATCH, openCamera, readFace } from '../lib/face'
-import type { ScreenConfig, Telemetry } from '../lib/socket'
+import type { Telemetry } from '../lib/socket'
 import { useJarvis } from '../hud/useJarvis'
 import './admin.css'
 
-type Page = 'chat' | 'briefing' | 'conexoes' | 'operacoes' | 'memorias' | 'financeiro' | 'saude' | 'presenca' | 'conversas' | 'telas' | 'sistema'
+type Page = 'chat' | 'briefing' | 'conexoes' | 'operacoes' | 'memorias' | 'financeiro' | 'saude' | 'conversas' | 'sistema'
 
 const NAV: { group: string; items: { id: Page; label: string; desc: string; icon: typeof Bot }[] }[] = [
   {
@@ -57,13 +55,11 @@ const NAV: { group: string; items: { id: Page; label: string; desc: string; icon
       { id: 'memorias', label: 'Memórias', desc: 'O que ele sabe sobre você', icon: BrainCircuit },
       { id: 'financeiro', label: 'Financeiro', desc: 'Bolsa, câmbio e cripto', icon: LineChart },
       { id: 'saude', label: 'Saúde', desc: 'Passos, sono e treinos', icon: HeartPulse },
-      { id: 'presenca', label: 'Presença', desc: 'Reconhecimento facial', icon: ScanFace },
     ],
   },
   {
     group: 'Sistema',
     items: [
-      { id: 'telas', label: 'Telas', desc: 'Segundo monitor (opcional)', icon: Monitor },
       { id: 'conversas', label: 'Conversas', desc: 'Histórico e aprendizado', icon: ScrollText },
       { id: 'sistema', label: 'Sistema', desc: 'Modelos, saúde e logs', icon: Cpu },
     ],
@@ -139,11 +135,9 @@ export function Admin() {
           {page === 'conexoes' && <ConexoesPage />}
           {page === 'operacoes' && <OperacoesPage tasks={j.tasks} />}
           {page === 'financeiro' && <FinanceiroPage />}
-          {page === 'presenca' && <PresencaPage />}
           {page === 'saude' && <SaudePage />}
           {page === 'memorias' && <MemoriasPage />}
           {page === 'conversas' && <ConversasPage />}
-          {page === 'telas' && <TelasPage screensLive={j.screens} />}
           {page === 'sistema' && <SistemaPage t={j.telemetry} />}
         </div>
       </main>
@@ -688,66 +682,6 @@ function ConversasPage() {
 
 /* ---------- telas ---------- */
 
-function TelasPage({ screensLive }: { screensLive: ScreenConfig[] | null }) {
-  const [telas, setTelas] = useState<ScreenConfig[] | null>(null)
-  const [nome, setNome] = useState('')
-  useEffect(() => {
-    api('/api/ajustes/telas').then(setTelas)
-  }, [])
-  useEffect(() => {
-    if (screensLive) setTelas(screensLive)
-  }, [screensLive])
-  if (!telas) return <p className="muted">Carregando…</p>
-  const save = async (list: ScreenConfig[]) => setTelas(await api('/api/ajustes/telas', { method: 'PUT', json: list }))
-  const add = (e: FormEvent) => {
-    e.preventDefault()
-    const id = nome.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `tela-${telas.length + 1}`
-    save([...telas, { id, nome: nome.trim(), widgets: ['relogio', 'cartoes'] }])
-    setNome('')
-  }
-  return (
-    <div className="stack">
-      <Panel title="Como usar" desc="Com uma tela só, você não precisa disto: os mesmos widgets abrem no próprio HUD pelo botão Painéis (ou “Jarvis, mostra a agenda”). Se tiver um segundo monitor, escolha abaixo qual tela vai nele; sem escolha, só o HUD abre e a tela do notebook fica livre.">
-        <form className="form-row" onSubmit={add}>
-          <label className="field-a">
-            <span>Nova tela</span>
-            <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Monitor da esquerda" />
-          </label>
-          <button className="btn primary" disabled={!nome.trim()}>
-            <Plus size={14} /> Criar tela
-          </button>
-        </form>
-      </Panel>
-      <MonitoresPanel telas={telas} />
-      <div className="cards-grid">
-        {telas.map((t) => (
-          <section className="panel-a screen-card" key={t.id}>
-            <header>
-              <div>
-                <h2>{t.nome}</h2>
-                <p>/tela/{t.id}</p>
-              </div>
-              <button className="icon" onClick={() => save(telas.filter((x) => x.id !== t.id))} aria-label={`Remover ${t.nome}`}>
-                <X size={15} />
-              </button>
-            </header>
-            <div className="chips">
-              {t.widgets.map((w) => (
-                <em className="tag" key={w}>
-                  {w.replace(':', ' · ')}
-                </em>
-              ))}
-            </div>
-            <a className="btn" href={`/tela/${t.id}`} target="_blank" rel="noreferrer">
-              <ExternalLink size={14} /> Abrir tela
-            </a>
-          </section>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 /* ---------- integrações ---------- */
 
 function IntegracoesPage({ only }: { only?: 'computador' | 'atalhos' | 'cameras' }) {
@@ -867,7 +801,7 @@ function SistemaPage({ t }: { t: Telemetry | null }) {
         <Kpi icon={Cpu} label="CPU" value={t ? `${t.cpu}%` : '—'} sub={t ? `memória ${t.ram}% · disco ${t.disco}%` : 'aguardando'} />
         <Kpi icon={Bot} label="Voz" value={s.voice === 'live' ? 'Ao vivo' : s.voice === 'off' ? 'Desligada' : (s.voice ?? '—')} sub={s.model ?? ''} accent={s.voice === 'live'} />
         <Kpi icon={BrainCircuit} label="Memórias" value={String(s.memorias ?? '—')} sub="guardadas no Mac" />
-        <Kpi icon={Monitor} label="Telas" value={String(s.screens ?? '—')} sub={s.telas === 'ativas' ? 'desbloqueadas' : 'bloqueadas'} />
+        <Kpi icon={Monitor} label="Câmera" value={s.camera ? 'Ligada' : 'Desligada'} sub={s.camera_erro ?? 'mãos e visão'} />
       </div>
       <Panel title="Configuração" desc="Definida no arquivo .env na pasta do projeto.">
         <dl className="kv-a">
@@ -1202,118 +1136,6 @@ function LineMini({ serie }: { serie: number[] }) {
 
 /* ---------- presença ---------- */
 
-function PresencaPage() {
-  const [info, setInfo] = useState<{ nome: string; amostras: number } | null>(null)
-  const [cfg, setCfg] = useState<{ briefing_auto: boolean } | null>(null)
-  const [cam, setCam] = useState(false)
-  const [status, setStatus] = useState<string>('')
-  const [busy, setBusy] = useState(false)
-  const video = useRef<HTMLVideoElement>(null)
-  const stream = useRef<MediaStream | null>(null)
-  const load = useCallback(() => {
-    api('/api/rosto').then(setInfo)
-    api('/api/ajustes/presenca').then(setCfg)
-  }, [])
-  useEffect(() => {
-    load()
-    return () => stream.current?.getTracks().forEach((t) => t.stop())
-  }, [load])
-
-  const startCam = async () => {
-    try {
-      setStatus('Carregando o modelo de rosto…')
-      await loadFace()
-      stream.current = await openCamera(640)
-      video.current!.srcObject = stream.current
-      await video.current!.play()
-      setCam(true)
-      setStatus('Olhe para a câmera, com o rosto bem iluminado.')
-    } catch {
-      setStatus('Não consegui abrir a câmera. Libere o acesso no navegador.')
-    }
-  }
-
-  const enroll = async () => {
-    if (!video.current) return
-    setBusy(true)
-    const got: number[][] = []
-    for (let i = 0; i < 12 && got.length < 6; i++) {
-      setStatus(`Capturando amostra ${got.length + 1} de 6… mexa a cabeça devagar.`)
-      const f = await readFace(video.current)
-      if (f && f.score > 0.7) got.push(f.descriptor)
-      await new Promise((r) => setTimeout(r, 450))
-    }
-    if (got.length < 3) {
-      setStatus('Não vi seu rosto com clareza. Chegue mais perto da luz e tente de novo.')
-    } else {
-      await api('/api/rosto', { method: 'PUT', json: { descritores: got } })
-      setStatus(`Pronto: ${got.length} amostras salvas. Ligue a Presença no HUD (ícone de rosto).`)
-      load()
-    }
-    setBusy(false)
-  }
-
-  const test = async () => {
-    if (!video.current) return
-    const r = await api<{ descritores: number[][] }>('/api/rosto')
-    const f = await readFace(video.current)
-    if (!f) return setStatus('Nenhum rosto na imagem.')
-    const d = distance(f.descriptor, r.descritores)
-    setStatus(d < MATCH ? `Reconhecido (distância ${d.toFixed(2)}).` : `Não reconhecido (distância ${d.toFixed(2)}; precisa ser menor que ${MATCH}).`)
-  }
-
-  return (
-    <div className="stack">
-      <Panel title="Reconhecimento facial" desc="O HUD procura um rosto pela câmera. Se for você, desbloqueia as telas e, de manhã, abre o briefing sozinho. Roda no navegador; só os números do rosto ficam salvos neste Mac.">
-        <div className="face-enroll">
-          <video ref={video} muted playsInline className={cam ? 'on' : ''} />
-          {!cam && <div className="face-ph">Câmera desligada</div>}
-        </div>
-        <p className="muted">{status || (info?.amostras ? `${info.amostras} amostras cadastradas para ${info.nome}.` : 'Nenhum rosto cadastrado ainda.')}</p>
-        <div className="row">
-          {!cam ? (
-            <button className="btn primary" onClick={startCam}>
-              <Camera size={14} /> Ligar câmera
-            </button>
-          ) : (
-            <>
-              <button className="btn primary" onClick={enroll} disabled={busy}>
-                <ScanFace size={14} /> {info?.amostras ? 'Cadastrar de novo' : 'Cadastrar meu rosto'}
-              </button>
-              {!!info?.amostras && (
-                <button className="btn" onClick={test} disabled={busy}>
-                  Testar reconhecimento
-                </button>
-              )}
-            </>
-          )}
-          {!!info?.amostras && (
-            <button
-              className="btn"
-              onClick={async () => {
-                await api('/api/rosto', { method: 'DELETE' })
-                load()
-                setStatus('Rosto apagado.')
-              }}
-            >
-              <Trash2 size={14} /> Apagar rosto
-            </button>
-          )}
-        </div>
-      </Panel>
-      {cfg && (
-        <Panel title="Ao reconhecer você">
-          <Switch
-            on={!!cfg.briefing_auto}
-            onChange={async (v) => setCfg(await api('/api/ajustes/presenca', { method: 'PUT', json: { ...cfg, briefing_auto: v } }))}
-            label="Abrir o briefing de bom dia sozinho (uma vez por dia, entre 5h e 12h)"
-          />
-        </Panel>
-      )}
-    </div>
-  )
-}
-
 
 /* ---------- operações: protocolos e tarefas ---------- */
 
@@ -1569,81 +1391,6 @@ function ControleMac() {
 
 /* ---------- monitores ---------- */
 
-type Monitor = { nome: string; principal: boolean; w: number; h: number; tela: string }
-
-function MonitoresPanel({ telas }: { telas: ScreenConfig[] }) {
-  const [plano, setPlano] = useState<Monitor[] | null>(null)
-  const [cfg, setCfg] = useState<{ mapa: Record<string, string>; abrir_no_login: boolean; tela_cheia: boolean } | null>(null)
-  const [msg, setMsg] = useState('')
-  const load = useCallback(() => {
-    api('/api/monitores').then((r) => {
-      setPlano(r.plano)
-      setCfg(r.ajustes)
-    })
-  }, [])
-  useEffect(() => {
-    load()
-  }, [load])
-  if (!plano || !cfg) return null
-  const save = async (next: typeof cfg) => {
-    setCfg(await api('/api/ajustes/monitores', { method: 'PUT', json: next }))
-    load()
-  }
-  const opcoes = [{ id: 'hud', nome: 'HUD' }, ...telas.map((t) => ({ id: t.id, nome: t.nome })), { id: 'nada', nome: 'Nada' }]
-  const abrir = async () => {
-    setMsg('Abrindo…')
-    try {
-      const r = await api<{ abertas: { monitor: string; tela: string }[] }>('/api/monitores/abrir', { method: 'POST' })
-      setMsg(`Aberto em ${r.abertas.length} monitor(es). Para sair da tela cheia, Cmd+Q na janela.`)
-    } catch (e) {
-      setMsg(String(e))
-    }
-  }
-  return (
-    <Panel
-      title="Monitores"
-      desc="O que abre em cada monitor quando o Mac liga (ou ao clicar em Abrir telas). Cada tela vai em tela cheia no monitor certo."
-      actions={
-        <div className="row">
-          <button className="btn" onClick={() => api('/api/monitores/fechar', { method: 'POST' }).then(() => setMsg('Telas fechadas.'))}>
-            Fechar telas
-          </button>
-          <button className="btn primary" onClick={abrir}>
-            Abrir telas agora
-          </button>
-        </div>
-      }
-    >
-      <ul className="rows">
-        {plano.map((m) => (
-          <li key={m.nome}>
-            <span>
-              <b>
-                {m.nome}
-                {m.principal ? ' · principal' : ''}
-              </b>
-              <small>
-                {m.w}×{m.h} {m.h > m.w ? '· em pé' : ''}
-              </small>
-            </span>
-            <div className="seg">
-              {opcoes.map((o) => (
-                <button key={o.id} className={m.tela === o.id ? 'on' : ''} onClick={() => save({ ...cfg, mapa: { ...cfg.mapa, [m.nome]: o.id } })}>
-                  {o.nome}
-                </button>
-              ))}
-            </div>
-          </li>
-        ))}
-      </ul>
-      <div className="row">
-        <Switch on={cfg.abrir_no_login} onChange={(v) => save({ ...cfg, abrir_no_login: v })} label="Abrir sozinho quando eu entrar no Mac" />
-        <Switch on={cfg.tela_cheia} onChange={(v) => save({ ...cfg, tela_cheia: v })} label="Tela cheia" />
-      </div>
-      {msg && <p className="muted">{msg}</p>}
-    </Panel>
-  )
-}
 
 
 /* ---------- iMessage, notas, alertas ---------- */

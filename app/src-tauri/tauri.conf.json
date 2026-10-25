@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Jarvis",
+  "version": "2.0.0",
+  "identifier": "com.lpc.jarvis",
+  "build": {
+    "frontendDist": "../splash"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "nsis", "appimage", "deb"],
+    "category": "Productivity",
+    "shortDescription": "Assistente de voz com mãos e controle do computador",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": {
+      "../../backend/dist/jarvis-core/": "core/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-"
+    },
+    "windows": {
+      "nsis": {
+        "languages": ["PortugueseBR"],
+        "installMode": "currentUser"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libportaudio2", "wmctrl", "xdotool", "xclip"]
+      }
+    }
+  }
+}

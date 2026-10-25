@@ -1,7 +1,8 @@
 import { Activity, AudioLines, Cpu, MessageSquare, SendHorizontal, Thermometer, Waves } from 'lucide-react'
-import { useEffect, useRef, useState, type FormEvent, type MutableRefObject, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api'
-import type { Live, LogLine } from './useJarvis'
+import { usePhase, voiceStore } from '../lib/live'
+import type { LogLine } from './useJarvis'
 
 export type PanelId = 'entrada' | 'espectro' | 'leitura' | 'servicos' | 'clima' | 'canal'
 
@@ -27,14 +28,15 @@ function Frame({ icon: Icon, title, tag, children, grow }: { icon: typeof Activi
   )
 }
 
-/** Canvas que redesenha a cada quadro a partir do analisador de áudio atual. */
-function useScope(draw: (ctx: CanvasRenderingContext2D, w: number, h: number, an: AnalyserNode | null) => void, getAn: () => AnalyserNode | null) {
+/** Canvas que redesenha a cada quadro lendo o nível da voz do núcleo (sem passar pelo React). */
+function useScope(draw: (ctx: CanvasRenderingContext2D, w: number, h: number, hist: number[]) => void) {
   const ref = useRef<HTMLCanvasElement>(null)
   const drawRef = useRef(draw)
   drawRef.current = draw
   useEffect(() => {
     const cv = ref.current!
     const ctx = cv.getContext('2d')!
+    const hist: number[] = Array(120).fill(0)
     let raf = 0
     const loop = () => {
       const dpr = Math.min(2, devicePixelRatio || 1)
@@ -45,58 +47,59 @@ function useScope(draw: (ctx: CanvasRenderingContext2D, w: number, h: number, an
         cv.height = Math.round(h * dpr)
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       }
+      hist.push(voiceStore.get().nivel)
+      hist.shift()
       ctx.clearRect(0, 0, w, h)
-      drawRef.current(ctx, w, h, getAn())
+      drawRef.current(ctx, w, h, hist)
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [getAn])
+  }, [])
   return ref
 }
 
-const wave = new Float32Array(1024)
-const bins = new Uint8Array(256)
-
-export function SignalIn({ scope, live }: { scope: () => AnalyserNode | null; live: MutableRefObject<Live> }) {
-  const ref = useScope((ctx, w, h, an) => {
+export function SignalIn() {
+  const fase = usePhase()
+  const ref = useScope((ctx, w, h, hist) => {
     ctx.strokeStyle = 'rgb(95 212 255 / 0.9)'
     ctx.lineWidth = 1.4
     ctx.shadowColor = 'rgb(95 212 255 / 0.7)'
     ctx.shadowBlur = 6
     ctx.beginPath()
-    const n = 160
-    if (an) an.getFloatTimeDomainData(wave)
-    for (let i = 0; i < n; i++) {
-      const v = an ? wave[Math.floor((i / n) * an.fftSize)] * 3 : Math.sin(i / 6 + performance.now() / 400) * 0.02
-      const y = h / 2 + Math.max(-1, Math.min(1, v)) * (h / 2 - 2)
+    const t = performance.now() / 120
+    for (let i = 0; i < hist.length; i++) {
+      // onda: o nível de cada instante vira amplitude de uma senoide que corre
+      const v = Math.sin(i / 3 + t) * Math.max(0.03, hist[i]) * 0.9
+      const y = h / 2 + v * (h / 2 - 2)
       if (i === 0) ctx.moveTo(0, y)
-      else ctx.lineTo((i / (n - 1)) * w, y)
+      else ctx.lineTo((i / (hist.length - 1)) * w, y)
     }
     ctx.stroke()
-  }, scope)
+  })
   return (
-    <Frame icon={Activity} title="Sinal · Entrada" tag={live.current.phase === 'espera' ? 'em espera' : 'ao vivo'}>
+    <Frame icon={Activity} title="Sinal · Entrada" tag={fase === 'espera' ? 'em espera' : 'ao vivo'}>
       <canvas ref={ref} className="scope" aria-hidden="true" />
     </Frame>
   )
 }
 
-export function Spectrum({ scope }: { scope: () => AnalyserNode | null }) {
-  const ref = useScope((ctx, w, h, an) => {
+export function Spectrum() {
+  const ref = useScope((ctx, w, h, hist) => {
     const bars = 30
-    if (an) an.getByteFrequencyData(bins)
     const gap = 2
     const bw = (w - gap * (bars - 1)) / bars
+    const lvl = hist[hist.length - 1]
+    const t = performance.now() / 260
     for (let i = 0; i < bars; i++) {
-      // escala logarítmica: mais barras nas frequências da voz
-      const idx = Math.min(bins.length - 1, Math.floor(Math.pow(i / bars, 1.7) * 120) + 1)
-      const v = an ? bins[idx] / 255 : 0.04 + 0.03 * Math.abs(Math.sin(i * 1.3 + performance.now() / 700))
+      // espectro aproximado pelo nível: mais forte nas frequências da voz (meio), variando no tempo
+      const voz = Math.exp(-((i - bars * 0.35) ** 2) / 60)
+      const v = Math.min(1, 0.04 + lvl * (0.5 + voz) * (0.6 + 0.4 * Math.abs(Math.sin(i * 1.7 + t))))
       const bh = Math.max(2, v * h)
       ctx.fillStyle = `rgb(${70 + v * 40} ${150 + v * 70} 255 / ${0.45 + v * 0.55})`
       ctx.fillRect(i * (bw + gap), h - bh, bw, bh)
     }
-  }, scope)
+  })
   return (
     <Frame icon={AudioLines} title="Sinal · Espectro" tag="20Hz–20kHz">
       <canvas ref={ref} className="scope tall" aria-hidden="true" />
@@ -104,12 +107,12 @@ export function Spectrum({ scope }: { scope: () => AnalyserNode | null }) {
   )
 }
 
-export function VoiceRead({ live }: { live: MutableRefObject<Live> }) {
+export function VoiceRead() {
   const [v, setV] = useState(0)
   useEffect(() => {
-    const t = setInterval(() => setV(Math.round(live.current.level * 100)), 120)
+    const t = setInterval(() => setV(Math.round(voiceStore.get().nivel * 100)), 150)
     return () => clearInterval(t)
-  }, [live])
+  }, [])
   return (
     <Frame icon={Waves} title="Voz · Leitura" tag={`${v}%`}>
       <div className="meter">

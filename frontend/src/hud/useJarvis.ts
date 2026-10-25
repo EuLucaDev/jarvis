@@ -1,29 +1,13 @@
+// Estado de uma tela do Jarvis (HUD, camada ou painel), montado a partir dos eventos do núcleo.
+// A voz, a câmera e as mãos rodam no núcleo; aqui só chega o que mostrar.
+
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Mic, Player } from '../lib/audio'
-import { JarvisSocket, type Task, type Alert, type Card, type ScreenConfig, type ServerEvent, type Telemetry, type VoiceStatus } from '../lib/socket'
-import { frameJpeg } from '../lib/face'
 import { play } from '../lib/sfx'
-import { WakeWord } from '../lib/wake'
-
-export type Phase = 'espera' | 'ouvindo' | 'pensando' | 'falando'
-
-// Sinais que mudam a cada quadro ficam em ref; o React só re-renderiza quando a fase muda.
-export type Live = {
-  phase: Phase
-  level: number // 0..1, volume que move a esfera
-  lastUser: number
-  lastModel: number
-  tool: boolean
-  turnDone: boolean
-}
-
-const BARGE_KEY = 'jarvis.bargeIn'
-const WAKE_KEY = 'jarvis.wake'
-const IDLE_MS = 45000 // com a palavra de ativação ligada, a sessão volta a dormir após esse silêncio
+import { JarvisSocket, type Alert, type Card, type ServerEvent, type Task, type Telemetry, type VoiceStatus } from '../lib/socket'
 
 export type LogLine = { quem: 'voce' | 'jarvis'; texto: string }
 
-// Frase de etapa mostrada enquanto uma ferramenta trabalha ("Lendo o radar de notícias…").
+// frase de etapa enquanto uma ferramenta trabalha ("Pesquisando na web…")
 const STEP: Record<string, string> = {
   pesquisar_web: 'Pesquisando na web',
   mostrar_pesquisa: 'Montando o cartão',
@@ -33,17 +17,15 @@ const STEP: Record<string, string> = {
   lembrar: 'Anotando',
   consultar_mercado: 'Lendo o mercado',
   ler_mensagens: 'Lendo suas mensagens',
-  enviar_mensagem: 'Preparando a mensagem',
   notas: 'Procurando nas notas',
   consultar_saude: 'Lendo seus dados de saúde',
   ver_camera: 'Abrindo a câmera',
-  executar_atalho: 'Executando o atalho',
   executar_protocolo: 'Executando o protocolo',
   delegar_tarefa: 'Passando a tarefa adiante',
-  consultar_tarefas: 'Conferindo as tarefas',
   abrir_painel: 'Abrindo o painel',
   arquivos: 'Mexendo nos arquivos',
   contexto_atual: 'Olhando o que você está fazendo',
+  olhar: 'Olhando',
   substituir_selecao: 'Trocando o texto',
   clicar: 'Clicando',
   digitar: 'Escrevendo',
@@ -51,524 +33,190 @@ const STEP: Record<string, string> = {
   navegador: 'Mexendo no navegador',
   mostrar_plano: 'Montando o plano',
   onde_parei: 'Lembrando onde você parou',
+  camera: 'Mexendo na câmera',
 }
-export type Vision = 'off' | 'camera' | 'tela'
 
-export function useJarvis(role = 'hud', query = '') {
-  const [log, setLog] = useState<LogLine[]>([])
-  const [presence, setPresence] = useState<string | null>(null)
-  const [alerts, setAlerts] = useState<Alert[]>([])
-  const [vision, setVision] = useState<Vision>('off')
-  const visionStream = useRef<MediaStream | null>(null)
-  const visionVideo = useRef<HTMLVideoElement | null>(null)
-  const [status, setStatus] = useState<VoiceStatus>({ voice: 'off' })
-  const [telemetry, setTelemetry] = useState<Telemetry | null>(null)
-  const [screens, setScreens] = useState<ScreenConfig[] | null>(null)
-  const [wake, setWake] = useState(() => {
-    try {
-      const saved = localStorage.getItem(WAKE_KEY)
-      // aberto pelo lançador no login: sem preferência salva, já começa escutando "Jarvis"
-      if (saved === null && role === 'hud' && new URLSearchParams(location.search).has('inicio')) return true
-      return saved === '1'
-    } catch {
-      return false
-    }
-  })
-  const [wakeError, setWakeError] = useState<string | null>(null)
+function lastWords(text: string, n: number) {
+  const words = text.trim().split(/\s+/)
+  // legenda em blocos: troca o bloco inteiro a cada n palavras
+  const start = Math.max(0, Math.floor((words.length - 1) / n) * n)
+  return words.slice(start, start + n).join(' ')
+}
+
+export function useJarvis(role: 'hud' | 'overlay' | 'admin' = 'hud') {
   const [online, setOnline] = useState(false)
+  const [status, setStatus] = useState<VoiceStatus>({ voice: 'off' })
   const [cards, setCards] = useState<Card[]>([])
-  const [focusId, setFocusId] = useState<string | null>(null)
   const [caption, setCaption] = useState('')
   const [userLine, setUserLine] = useState('')
-  const [phase, setPhase] = useState<Phase>('espera')
-  const [micError, setMicError] = useState<string | null>(null)
+  const [log, setLog] = useState<LogLine[]>([])
+  const [alerts, setAlerts] = useState<Alert[]>([])
   const [step, setStep] = useState<string | null>(null)
   const [panel, setPanel] = useState<string | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [suggestions, setSuggestions] = useState<{ id: string; texto: string; pedido: string }[]>([])
   const [focusUntil, setFocusUntil] = useState(0)
   const [stoppedAt, setStoppedAt] = useState(0)
-  const [update, setUpdate] = useState<{ etapa: string; pct: number; erro?: string; reiniciar?: boolean; app_muda?: boolean } | null>(null)
-  const [wakeCall, setWakeCall] = useState<{ n: number; comando: string; bomDia: boolean; origem: string } | null>(null)
-  const [mouseMode, setMouseMode] = useState<{ on: boolean; n: number } | null>(null)
-  const [bargeIn, setBargeIn] = useState(() => {
-    try {
-      return localStorage.getItem(BARGE_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
+  const [camera, setCamera] = useState<{ ligada: boolean; erro?: string }>({ ligada: false })
+  const [telemetry, setTelemetry] = useState<Telemetry | null>(null)
+  const [last, setLast] = useState<ServerEvent | null>(null) // eventos que cada tela trata do seu jeito (olhar, gesto, janela…)
 
-  const live = useRef<Live>({ phase: 'espera', level: 0, lastUser: 0, lastModel: 0, tool: false, turnDone: true })
   const sock = useRef<JarvisSocket | null>(null)
-  const mic = useRef<Mic | null>(null)
-  const player = useRef<Player | null>(null)
-  const statusRef = useRef(status)
-  statusRef.current = status
-  const bargeRef = useRef(bargeIn)
-  bargeRef.current = bargeIn
   const modelBuf = useRef('')
-  // pedaços da fala ainda não mostrados, com o instante do áudio em que devem aparecer
-  const pending = useRef<{ t: string; at: number }[]>([])
-  const plan = useRef<{ offsets: number[]; next: number; spoken: number }>({ offsets: [], next: 0, spoken: 0 })
-  const lastAudioAt = useRef(0)
-  const lastActive = useRef(0)
-  const wakeRef = useRef(wake)
-  wakeRef.current = wake
-  const stopRef = useRef<() => void>(() => {})
-  const wakeWord = useRef<WakeWord | null>(null)
-  const quietAt = useRef(0)
-  const pendingAsk = useRef<string | null>(null) // texto que espera a voz ficar ao vivo
-  const pendingFrame = useRef<string | null>(null) // imagem (quadro) que vai junto com o texto
-  const sound = role === 'hud' // só o HUD toca efeitos (várias janelas no mesmo Mac soariam juntas)
+  const userNew = useRef(true)
+  const sound = role === 'hud' // só uma janela toca os efeitos
   const sfx = useCallback((k: Parameters<typeof play>[0], pan = 0) => sound && play(k, pan), [sound])
 
   const pushLog = useCallback((quem: LogLine['quem'], texto: string, novo: boolean) => {
     setLog((l) => {
-      const last = l.at(-1)
-      if (!novo && last && last.quem === quem) return [...l.slice(0, -1), { quem, texto: (last.texto + texto).slice(-600) }]
+      const ult = l.at(-1)
+      if (!novo && ult && ult.quem === quem) return [...l.slice(0, -1), { quem, texto: (ult.texto + texto).slice(-600) }]
       return [...l, { quem, texto }].slice(-30)
     })
   }, [])
 
-  const onEvent = useCallback((e: ServerEvent) => {
-    const L = live.current
-    const now = performance.now()
-    switch (e.type) {
-      case 'sync':
-        setCards(e.cards)
-        setStatus(e.status)
-        if (e.tarefas) setTasks(e.tarefas)
-        setFocusId(e.cards.at(-1)?.id ?? null)
-        break
-      case 'status':
-        setStatus((prev) => {
-          if (e.voice === 'live' && prev.voice !== 'live') sfx('listen')
-          if (e.voice === 'error' && prev.voice !== 'error') sfx('error')
-          if (e.telas === 'ativas' && prev.telas !== 'ativas') sfx('unlock')
-          return { voice: e.voice, model: e.model, error: e.error, telas: e.telas }
-        })
-        if (e.voice === 'live' && pendingAsk.current) {
-          if (pendingFrame.current) sock.current?.send({ type: 'video.frame', jpeg: pendingFrame.current })
-          pendingFrame.current = null
-          sock.current?.send({ type: 'text', text: pendingAsk.current })
-          pendingAsk.current = null
-        }
-        break
-      case 'telemetria':
-        setTelemetry(e)
-        break
-      case 'telas.config':
-        setScreens(e.telas)
-        break
-      case 'user.text': {
-        const novo = L.turnDone || L.lastModel > L.lastUser
-        if (novo) {
-          setUserLine('')
+  const onEvent = useCallback(
+    (e: ServerEvent) => {
+      switch (e.type) {
+        case 'sync':
+          setCards(e.cards)
+          setStatus(e.status)
+          if (e.tarefas) setTasks(e.tarefas)
+          break
+        case 'status':
+          setStatus((prev) => {
+            if (e.voice === 'live' && prev.voice !== 'live') sfx('listen')
+            if (e.voice === 'error' && prev.voice !== 'error') sfx('error')
+            return { voice: e.voice, model: e.model, error: e.error }
+          })
+          if (e.voice !== 'live') setStep(null)
+          break
+        case 'user.text': {
+          const novo = !!e.typed || !!e.novo || userNew.current
+          userNew.current = false
           modelBuf.current = ''
+          setUserLine((s) => (novo ? e.text : s + e.text).slice(-160))
+          pushLog('voce', e.text, novo)
+          break
         }
-        pushLog('voce', e.text, novo || !!e.typed)
-        L.turnDone = false
-        L.lastUser = now
-        setUserLine((s) => (e.typed ? e.text : s + e.text).slice(-160))
-        break
-      }
-      case 'presenca':
-        setPresence(e.etapa)
-        break
-      case 'alerta': {
-        const { type: _t, ...a } = e
-        setAlerts((l) => [...l.filter((x) => x.id !== a.id), a].slice(-4))
-        if (!a.silencioso) sfx('alert', 0.6)
-        setTimeout(() => setAlerts((l) => l.filter((x) => x.id !== a.id)), 14000)
-        break
-      }
-      case 'model.text':
-        setStep(null)
-        if (L.turnDone) {
-          modelBuf.current = ''
-          pending.current = []
-        }
-        L.turnDone = false
-        L.lastModel = now
-        {
-          const at = player.current?.queuedUntil() ?? 0
-          pending.current.push(...e.text.split(/(?<=\s)/).map((t) => ({ t, at })))
-        }
-        break
-      case 'sequence.plan':
-        plan.current = { offsets: e.palavras, next: 0, spoken: 0 }
-        sfx('start')
-        break
-      case 'turn':
-        L.turnDone = true
-        setStep(null)
-        if (e.phase === 'interrupted') player.current?.flush()
-        break
-      case 'tool':
-        L.tool = e.phase === 'start'
-        if (e.phase === 'start') {
-          setStep(STEP[e.name] ?? 'Trabalhando nisso')
-          sfx('step')
-        }
-        break
-      case 'card':
-        setCards((c) => [...c.filter((x) => x.id !== e.card.id), e.card].slice(-8))
-        setFocusId(e.card.id)
-        if (e.card.kind !== 'carregando') sfx('card')
-        break
-      case 'card.update':
-        setCards((c) => c.map((x) => (x.id === e.card.id ? e.card : x)))
-        break
-      case 'card.close':
-        setCards((c) => c.filter((x) => x.id !== e.id))
-        setFocusId((f) => (f === e.id ? null : f))
-        break
-      case 'cards.clear':
-        setCards((c) => {
-          if (c.length) sfx('close')
-          return []
-        })
-        setFocusId(null)
-        break
-      case 'painel':
-        setPanel(e.visao || null)
-        break
-      case 'sugestao':
-        setSuggestions((l) => [{ id: e.id, texto: e.texto, pedido: e.pedido }, ...l].slice(0, 3))
-        sfx('step', 0.7)
-        break
-      case 'parado':
-        setStoppedAt(Date.now())
-        setStep(null)
-        sfx('close')
-        break
-      case 'foco':
-        setFocusUntil(e.ate ? e.ate * 1000 : 0)
-        break
-      case 'janela': {
-        // app Jarvis instalado: minimiza (vira a esfera do canto) ou volta
-        const bridge = (window as unknown as { jarvisApp?: { minimize: () => void; showHud: () => void; hide: () => void } }).jarvisApp
-        if (role === 'hud') e.acao === 'minimizar' ? bridge?.minimize() : e.acao === 'esconder' ? bridge?.hide() : bridge?.showHud()
-        break
-      }
-      case 'despertar':
-        setWakeCall((w) => ({ n: (w?.n ?? 0) + 1, comando: e.comando, bomDia: e.bom_dia, origem: e.origem }))
-        break
-      case 'atualizacao':
-        setUpdate({ etapa: e.etapa, pct: e.pct, erro: e.erro, reiniciar: e.reiniciar, app_muda: e.app_muda })
-        break
-      case 'modo_mouse':
-        setMouseMode((m) => ({ on: e.ligado, n: (m?.n ?? 0) + 1 })) // conta: o mesmo pedido duas vezes também vale
-        break
-      case 'tarefa':
-        setTasks((l) => [e.tarefa, ...l.filter((x) => x.id !== e.tarefa.id)].slice(0, 12))
-        if (e.tarefa.estado !== 'rodando') sfx(e.tarefa.estado === 'feito' ? 'alert' : 'error')
-        break
-      case 'audio.flush':
-        player.current?.flush()
-        break
-    }
-  }, [pushLog, sfx, role])
-
-  useEffect(() => {
-    player.current = new Player()
-    const s = new JarvisSocket(role + query, {
-      onEvent,
-      onOpen: setOnline,
-      onAudio: (pcm) => {
-        live.current.lastModel = performance.now()
-        lastAudioAt.current = performance.now()
-        player.current?.enqueue(pcm)
-      },
-    })
-    sock.current = s
-    return () => {
-      s.close()
-      mic.current?.stop()
-    }
-  }, [role, query, onEvent])
-
-  // Relógio da fase: decide a cada quadro o que a esfera está fazendo.
-  useEffect(() => {
-    let raf = 0
-    let frame = 0
-    const live_ch = role === 'hud' && 'BroadcastChannel' in window ? new BroadcastChannel('jarvis-live') : null
-    const tick = () => {
-      const L = live.current
-      const now = performance.now()
-      const v = statusRef.current.voice
-      const speaking = !!player.current?.playing() || now - L.lastModel < 700
-      let next: Phase
-      if (v === 'off' || v === 'error') next = speaking ? 'falando' : 'espera'
-      else if (v === 'connecting') next = 'pensando'
-      else if (speaking) next = 'falando'
-      else if (L.tool || (!L.turnDone && L.lastUser > L.lastModel && now - L.lastUser < 12000)) next = 'pensando'
-      else next = 'ouvindo'
-
-      const raw =
-        next === 'falando'
-          ? player.current?.playing()
-            ? player.current.level()
-            : 0.35 + 0.3 * Math.abs(Math.sin(now / 140)) * Math.random() // demo sem áudio
-          : next === 'ouvindo'
-            ? (mic.current?.level() ?? 0)
-            : next === 'pensando'
-              ? 0.18
-              : 0.04
-      // um valor inválido do áudio contaminaria o nível para sempre
-      if (Number.isFinite(raw)) L.level += (raw - L.level) * (raw > L.level ? 0.35 : 0.08)
-      if (!Number.isFinite(L.level)) L.level = 0
-      if (speaking) quietAt.current = now
-
-      // Legenda no ritmo da voz: cada pedaço aparece quando o áudio chega ao ponto em que ele veio.
-      if (pending.current.length) {
-        const p = player.current
-        const audioRecent = now - lastAudioAt.current < 1500
-        let n = 0
-        if (!audioRecent && now - L.lastModel > 250) n = pending.current.length // sem áudio: direto
-        else if (p) {
-          const clock = p.now()
-          while (n < pending.current.length && pending.current[n].at <= clock + 0.08) n++
-        }
-        if (n > 0) {
-          const chunk = pending.current.splice(0, n).map((x) => x.t).join('')
-          pushLog('jarvis', chunk, modelBuf.current === '')
-          modelBuf.current += chunk
+        case 'legenda': {
+          const novo = modelBuf.current === ''
+          modelBuf.current += e.texto
+          userNew.current = true
+          setStep(null)
           setCaption(lastWords(modelBuf.current, 8))
-          // briefing: pede o próximo cartão quando a fala chega no trecho dele
-          const pl = plan.current
-          if (pl.next < pl.offsets.length) {
-            pl.spoken += chunk.trim().split(/\s+/).filter(Boolean).length
-            while (pl.next < pl.offsets.length && pl.spoken >= pl.offsets[pl.next]) {
-              sock.current?.send({ type: 'sequence.show', index: pl.next })
-              pl.next++
-            }
-          }
+          pushLog('jarvis', e.texto, novo)
+          break
         }
-      }
-      if (next !== 'ouvindo' || L.level > 0.12) lastActive.current = now
-      if (wakeRef.current && mic.current && next === 'ouvindo' && now - lastActive.current > IDLE_MS) {
-        lastActive.current = now
-        stopRef.current()
-      }
-      if (L.phase !== next) {
-        L.phase = next
-        setPhase(next)
-      }
-      // a esfera mini do app (outra janela) acompanha a voz por este canal
-      if (live_ch && (frame = (frame + 1) % 2) === 0) live_ch.postMessage({ level: L.level, phase: L.phase })
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => {
-      cancelAnimationFrame(raf)
-      live_ch?.close()
-    }
-  }, [pushLog, role])
-
-  // Visão: câmera ou tela vão para a Gemini a 1 quadro por segundo, enquanto a voz está ao vivo.
-  useEffect(() => {
-    if (vision === 'off' || status.voice !== 'live') return
-    const t = setInterval(() => {
-      const v = visionVideo.current
-      const jpeg = v && frameJpeg(v)
-      if (jpeg) sock.current?.send({ type: 'video.frame', jpeg })
-    }, 1000)
-    return () => clearInterval(t)
-  }, [vision, status.voice])
-
-  const stopVision = useCallback(() => {
-    visionStream.current?.getTracks().forEach((t) => t.stop())
-    visionStream.current = null
-    setVision('off')
-  }, [])
-
-  const startVision = useCallback(
-    async (kind: Exclude<Vision, 'off'>) => {
-      stopVision()
-      try {
-        const stream =
-          kind === 'camera'
-            ? await navigator.mediaDevices.getUserMedia({ video: { width: 960 }, audio: false })
-            : await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 2 }, audio: false })
-        stream.getVideoTracks()[0].onended = () => setVision('off')
-        visionStream.current = stream
-        const v = visionVideo.current ?? document.createElement('video')
-        v.muted = true
-        v.playsInline = true
-        v.srcObject = stream
-        await v.play()
-        visionVideo.current = v
-        setVision(kind)
-      } catch {
-        setVision('off')
+        case 'tool':
+          if (e.phase === 'start') {
+            setStep(STEP[e.name] ?? 'Trabalhando nisso')
+            sfx(e.name === 'briefing_bom_dia' ? 'start' : 'step')
+          }
+          break
+        case 'card':
+          setCards((c) => [...c.filter((x) => x.id !== e.card.id), e.card].slice(-8))
+          if (e.card.kind !== 'carregando') sfx('card')
+          break
+        case 'card.update':
+          setCards((c) => c.map((x) => (x.id === e.card.id ? e.card : x)))
+          break
+        case 'card.close':
+          setCards((c) => c.filter((x) => x.id !== e.id))
+          break
+        case 'cards.clear':
+          setCards((c) => {
+            if (c.length) sfx('close')
+            return []
+          })
+          break
+        case 'alerta': {
+          const { type: _t, ...a } = e
+          setAlerts((l) => [...l.filter((x) => x.id !== a.id), a].slice(-4))
+          if (!a.silencioso) sfx('alert', 0.6)
+          setTimeout(() => setAlerts((l) => l.filter((x) => x.id !== a.id)), 14000)
+          break
+        }
+        case 'telemetria':
+          setTelemetry(e)
+          break
+        case 'painel':
+          setPanel(e.visao || null)
+          break
+        case 'tarefa':
+          setTasks((l) => [e.tarefa, ...l.filter((x) => x.id !== e.tarefa.id)].slice(0, 12))
+          if (e.tarefa.estado !== 'rodando') sfx(e.tarefa.estado === 'feito' ? 'alert' : 'error')
+          break
+        case 'sugestao':
+          setSuggestions((l) => [{ id: e.id, texto: e.texto, pedido: e.pedido }, ...l].slice(0, 3))
+          sfx('step', 0.7)
+          break
+        case 'parado':
+          setStoppedAt(Date.now())
+          setStep(null)
+          sfx('close')
+          break
+        case 'foco':
+          setFocusUntil(e.ate ? e.ate * 1000 : 0)
+          break
+        case 'camera':
+          setCamera({ ligada: e.ligada, erro: e.erro })
+          break
+        case 'despertar':
+          sfx('unlock')
+          setLast(e)
+          break
+        default:
+          setLast(e)
       }
     },
-    [stopVision],
+    [pushLog, sfx],
   )
 
-  // A legenda some um tempo depois que ele termina de falar.
   useEffect(() => {
-    if (phase === 'falando' || !caption) return
-    const t = setTimeout(() => setCaption(''), 3200)
+    const s = new JarvisSocket(role, { onEvent, onOpen: setOnline })
+    sock.current = s
+    return () => s.close()
+  }, [role, onEvent])
+
+  // a legenda some um tempo depois do fim da fala
+  useEffect(() => {
+    if (!caption) return
+    const t = setTimeout(() => {
+      setCaption('')
+      modelBuf.current = ''
+    }, 3600)
     return () => clearTimeout(t)
-  }, [phase, caption])
+  }, [caption])
 
-  const startVoice = useCallback(async () => {
-    setMicError(null)
-    await player.current?.resume()
-    try {
-      const m = new Mic()
-      await m.start((pcm) => {
-        // Sem fone, a voz do Jarvis volta pelo microfone; por padrão o mic fica mudo enquanto ele fala.
-        const now = performance.now()
-        if (!bargeRef.current && (player.current?.playing() || now - quietAt.current < 300)) return
-        sock.current?.sendAudio(pcm)
-      })
-      mic.current = m
-      lastActive.current = performance.now()
-      wakeWord.current?.pause()
-      sock.current?.send({ type: 'voice.start' })
-    } catch (err) {
-      // Sem microfone a conversa continua por texto, com a resposta em voz.
-      setMicError(err instanceof Error && err.name === 'NotAllowedError'
-        ? 'Microfone bloqueado: libere no ícone ao lado do endereço. Por enquanto, escreva abaixo.'
-        : 'Microfone indisponível. Por enquanto, escreva abaixo.')
-      sock.current?.send({ type: 'voice.start' })
-    }
-  }, [])
-
-  const stopVoice = useCallback(() => {
-    mic.current?.stop()
-    mic.current = null
-    sock.current?.send({ type: 'voice.stop' })
-    if (wakeRef.current) setTimeout(() => wakeWord.current?.resume(), 400)
-  }, [])
-  stopRef.current = stopVoice
-
-  // Palavra de ativação: o navegador escuta "Jarvis" e só então abre a sessão de voz.
-  useEffect(() => {
-    // no app instalado quem escuta "Jarvis" é o ouvido do macOS (servidor); o do Chrome não existe lá
-    if (!wake || role !== 'hud' || (window as unknown as { jarvisApp?: unknown }).jarvisApp) return
-    const w = new WakeWord(
-      (cmd) => {
-        if (mic.current) return
-        // "Jarvis, bom dia" de uma vez: o resto da frase vira o pedido
-        if (cmd) askRef.current(cmd)
-        else startVoice()
-      },
-      setWakeError,
-      () => sfx('ack'),
-    )
-    wakeWord.current = w
-    if (!mic.current) w.resume()
-    return () => {
-      w.stop()
-      wakeWord.current = null
-    }
-  }, [wake, role, startVoice, sfx])
-
-  const toggleWake = useCallback(() => {
-    setWakeError(null)
-    setWake((v) => {
-      try {
-        localStorage.setItem(WAKE_KEY, v ? '0' : '1')
-      } catch {
-        /* só nesta aba */
-      }
-      return !v
-    })
-  }, [])
-
-  const toggleBarge = useCallback(() => {
-    setBargeIn((b) => {
-      try {
-        localStorage.setItem(BARGE_KEY, b ? '0' : '1')
-      } catch {
-        /* sem armazenamento: vale só nesta aba */
-      }
-      return !b
-    })
-  }, [])
-
-  /** Pergunta por texto (com uma imagem opcional); se a voz estiver desligada, liga e envia ao conectar. */
-  const ask = useCallback(
-    async (text: string, jpeg?: string) => {
-      if (statusRef.current.voice === 'live') {
-        if (jpeg) sock.current?.send({ type: 'video.frame', jpeg })
-        sock.current?.send({ type: 'text', text })
-        return
-      }
-      pendingAsk.current = text
-      pendingFrame.current = jpeg ?? null
-      await startVoice()
-    },
-    [startVoice],
-  )
-  const askRef = useRef(ask)
-  askRef.current = ask
-
-  /** Analisador do que está soando agora: a voz do Jarvis falando, senão o microfone. */
-  const scope = useCallback(() => {
-    if (player.current?.playing()) return player.current.analyser()
-    return mic.current?.analyser() ?? null
-  }, [])
-
+  const send = useCallback((msg: object) => sock.current?.send(msg), [])
   return {
-    alerts,
-    dismissAlert: (id: string) => setAlerts((l) => l.filter((x) => x.id !== id)),
-    ask,
-    send: (msg: object) => sock.current?.send(msg),
-    log,
-    presence,
-    vision,
-    visionVideo,
-    visionStream,
-    startVision,
-    stopVision,
-    scope,
-    micOn: () => !!mic.current,
-    status,
-    telemetry,
-    screens,
-    wake,
-    wakeError,
-    toggleWake,
-    setScreensState: (estado: 'ativas' | 'bloqueadas') => sock.current?.send({ type: 'telas', estado }),
     online,
+    status,
     cards,
-    focusId,
-    setFocusId,
     caption,
     userLine,
-    phase,
-    live,
-    micError,
+    log,
+    alerts,
     step,
     panel,
     setPanel,
     tasks,
-    mouseMode,
-    wakeCall,
-    update,
     suggestions,
-    dismissSuggestion: (id: string) => setSuggestions((l) => l.filter((x) => x.id !== id)),
     focusUntil,
     stoppedAt,
-    bargeIn,
-    toggleBarge,
-    startVoice,
-    stopVoice,
-    sendText: (text: string) => sock.current?.send({ type: 'text', text }),
-    closeCard: (id: string) => sock.current?.send({ type: 'card.close', id }),
-    clearCards: () => sock.current?.send({ type: 'cards.clear' }),
+    camera,
+    telemetry,
+    last,
+    send,
+    ask: (text: string) => send({ type: 'text', text }),
+    startVoice: () => send({ type: 'voice.start' }),
+    stopVoice: () => send({ type: 'voice.stop' }),
+    closeCard: (id: string) => send({ type: 'card.close', id }),
+    clearCards: () => send({ type: 'cards.clear' }),
+    dismissAlert: (id: string) => setAlerts((l) => l.filter((x) => x.id !== id)),
+    dismissSuggestion: (id: string) => setSuggestions((l) => l.filter((x) => x.id !== id)),
   }
 }
 
-function lastWords(text: string, n: number) {
-  const words = text.trim().split(/\s+/)
-  // Mostra a frase em blocos, como legenda: troca o bloco inteiro a cada n palavras.
-  const start = Math.max(0, Math.floor((words.length - 1) / n) * n)
-  return words.slice(start, start + n).join(' ')
-}
+export type Jarvis = ReturnType<typeof useJarvis>

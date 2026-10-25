@@ -21,25 +21,18 @@ DEFAULTS: dict[str, Any] = {
         "clima": True,
         "noticias_por_tema": 3,
     },
-    "telas": [
-        {"id": "centro", "nome": "Centro de Comando", "widgets": ["orbe", "agenda", "emails", "cartoes", "sistema"]},
-        {"id": "radar", "nome": "Radar de Notícias", "widgets": ["noticias:tecnologia", "noticias:novos modelos de IA", "transcricao", "sessao"]},
-    ],
     "cameras": [],  # [{"id": "garagem", "nome": "Garagem", "url": "rtsp://... ou http://.../snapshot.jpg"}]
     "atalhos": [],  # nomes de Atalhos do macOS que o Jarvis pode rodar
     "alexa": {"token": "", "dispositivos": []},  # [{"nome": "luz da sala", "ligar": "luz-on", "desligar": "luz-off"}]
     "mercado": {"ativos": ["^BVSP", "BRL=X", "BTC-USD", "PETR4.SA", "VALE3.SA"]},
     "rosto": {"descritores": [], "nome": "Luca"},  # reconhecimento facial local
     "presenca": {"briefing_auto": True, "ultimo_briefing": ""},
-    # mapa: nome do monitor -> "hud" | id de tela | "nada". Sem mapa, só o HUD abre (no principal):
-    # telas extras são opcionais e nunca tomam a tela do notebook sem o Luca escolher.
-    "monitores": {"mapa": {}, "abrir_no_login": True, "tela_cheia": True},
     # rotinas com nome; passos usam a lista fechada de protocols.TIPOS
     "protocolos": [
         {"id": "foco", "nome": "Modo foco", "frases": ["foco", "hora de focar"], "fala": "Modo foco ativo, Senhor.",
          "passos": [{"tipo": "limpar", "valor": ""}, {"tipo": "volume", "valor": "25"}, {"tipo": "painel", "valor": "agenda"}]},
         {"id": "encerrar", "nome": "Encerrar o dia", "frases": ["fim do dia", "boa noite"], "fala": "",
-         "passos": [{"tipo": "limpar", "valor": ""}, {"tipo": "painel", "valor": "fechar"}, {"tipo": "telas", "valor": "bloquear"}]},
+         "passos": [{"tipo": "limpar", "valor": ""}, {"tipo": "painel", "valor": "fechar"}]},
     ],
     # ferramentas extras liberadas para o Claude Code nas tarefas (MCPs de criação)
     "agentes": {"codex_modelo": "gpt-5.6-sol", "claude_ferramentas": ["mcp__elevenlabs", "mcp__claude_ai_Google_Drive", "mcp__claude_ai_Canva", "mcp__claude_ai_Claude_Docs"]},
@@ -49,7 +42,10 @@ DEFAULTS: dict[str, Any] = {
     # memória de trabalho (o que esteve na frente, 7 dias, só local) e sugestões discretas no HUD
     "atividade": {"registrar": True, "sugestoes": True},
     # app instalado: acordar o Jarvis escondido dizendo "Jarvis" ou com duas palmas; de manhã abre com o bom dia
-    "despertar": {"palavra": True, "palmas": True, "bom_dia": True},
+    "despertar": {"palavra": True, "palmas": True, "bom_dia": True, "sensibilidade": 0.7},
+    # câmera (mãos e visão) ligada junto com o app; voz: interromper falando (só com fone)
+    "camera": {"ligada": True},
+    "voz": {"interromper": False},
     # luz ambiente pelo estado do Jarvis: dispositivo/rotina da Alexa (Voice Monkey) por fase; vazio = nada
     "ambiente": {"ativo": False, "espera": "", "ouvindo": "", "pensando": "", "falando": ""},
 }

@@ -34,14 +34,14 @@ def _table() -> None:
 
 def log_front() -> None:
     global _last, _since
-    from . import context, desktop
+    from . import pc
 
     try:
-        app, _ = context.front()
-        janela = desktop.front_window_title()
+        app = pc.front_app()
+        janela = pc.front_window_title()
     except Exception:  # noqa: BLE001
         return
-    if desktop.front_is_jarvis() or app in ("loginwindow", "ScreenSaverEngine"):
+    if not app or pc.front_is_jarvis() or app in ("loginwindow", "ScreenSaverEngine"):
         return
     chave = (app, janela)
     if chave == _last:
@@ -49,7 +49,7 @@ def log_front() -> None:
     _last, _since = chave, time.time()
     url = None
     try:
-        url = context.browser_url(app)
+        url = pc.browser_url(app)
     except Exception:  # noqa: BLE001
         pass
     with _db() as con:
@@ -95,16 +95,16 @@ URL = re.compile(r"^https?://\S+$")
 
 
 async def _check_clipboard() -> None:
+    """Olha o que foi copiado (só o texto curto, nada é guardado) para sugerir algo útil."""
     global _clip_count
-    import AppKit
+    from . import pc
 
-    pb = AppKit.NSPasteboard.generalPasteboard()
-    n = pb.changeCount()
-    if _clip_count < 0 or n == _clip_count:
-        _clip_count = n
+    texto = (await asyncio.to_thread(pc.clipboard_text)).strip()
+    marca = hash(texto)
+    if _clip_count == -1 or marca == _clip_count:
+        _clip_count = marca
         return
-    _clip_count = n
-    texto = str(pb.stringForType_(AppKit.NSPasteboardTypeString) or "").strip()
+    _clip_count = marca
     if not texto or len(texto) > 300:
         return
     curto = texto if len(texto) < 60 else texto[:57] + "…"
@@ -147,9 +147,9 @@ async def loop() -> None:
     while True:
         cfg = store.get("atividade")
         try:
-            from . import desktop
+            from . import pc
 
-            if desktop.permitido():
+            if pc.permitido():
                 if cfg.get("registrar", True):
                     await asyncio.to_thread(log_front)
                 if cfg.get("sugestoes", True):

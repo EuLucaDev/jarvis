@@ -1,18 +1,15 @@
 {
-  "name": "frontend",
+  "name": "jarvis-ui",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview",
-    "modelos": "node scripts/modelos.mjs"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "^1.1.1",
-    "@vladmandic/face-api": "^1.7.15",
     "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

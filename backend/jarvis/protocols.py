@@ -24,7 +24,6 @@ TIPOS = {
     "midia": "Música (tocar_pausar, proxima, anterior)",
     "casa": "Alexa (dispositivo:ligar ou dispositivo:desligar)",
     "painel": "Painel do HUD (agenda, comunicacoes, radar, nucleo, cameras, fechar)",
-    "telas": "Telas extras (ativar ou bloquear)",
     "limpar": "Limpar cartões",
 }
 
@@ -66,9 +65,6 @@ async def _step(tipo: str, valor: str) -> dict[str, Any]:
         return await asyncio.to_thread(system.alexa, disp.strip(), (acao or "ligar").strip())
     if tipo == "painel":
         await hub.broadcast({"type": "painel", "visao": None if v in ("", "fechar") else v})
-        return {"ok": True}
-    if tipo == "telas":
-        await hub.set_screens("ativas" if v != "bloquear" else "bloqueadas")
         return {"ok": True}
     if tipo == "limpar":
         await hub.clear_cards()

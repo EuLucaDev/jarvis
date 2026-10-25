@@ -1,0 +1,162 @@
+# Compila o Jarvis para Mac (Apple Silicon), Windows e Linux e junta tudo num zip só, publicado como versão.
+# Roda quando uma tag v* é enviada (ex.: v2.0.0) ou à mão (Actions → Compilar o Jarvis → Run workflow).
+name: Compilar o Jarvis
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            nome: mac
+            bundles: app
+          - os: windows-latest
+            nome: windows
+            bundles: nsis
+          - os: ubuntu-22.04
+            nome: linux
+            bundles: appimage,deb
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependências do sistema (Linux)
+        if: matrix.nome == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            libportaudio2 portaudio19-dev libgtk-3-dev libxdo-dev file
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Modelos (voz offline e mãos)
+        run: scripts/modelos.sh
+
+      - name: Interface (React)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Núcleo (Python → executável)
+        working-directory: backend
+        run: |
+          uv sync --group build --python 3.12
+          uv run --group build pyinstaller jarvis-core.spec --noconfirm --log-level WARN
+
+      - name: Teste rápido do núcleo empacotado
+        working-directory: backend
+        run: |
+          EXE=dist/jarvis-core/jarvis-core
+          [ "${{ matrix.nome }}" = "windows" ] && EXE=dist/jarvis-core/jarvis-core.exe
+          export JARVIS_HOME="$RUNNER_TEMP/jarvis-teste"
+          "$EXE" --verificar
+          export JARVIS_TESTE=1 JARVIS_PORT=8765
+          "$EXE" > "$RUNNER_TEMP/core.log" 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8765/health && break; sleep 2; done
+          curl -sf http://127.0.0.1:8765/health || (cat "$RUNNER_TEMP/core.log"; exit 1)
+          curl -sf http://127.0.0.1:8765/ | grep -q '<div id="root">' || (echo "interface não veio"; exit 1)
+          curl -sf http://127.0.0.1:8765/api/setup
+          python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/reiniciar', data=b'')" || true
+
+      - name: App (Tauri)
+        working-directory: app
+        run: |
+          npm ci
+          npx tauri build --bundles ${{ matrix.bundles }}
+
+      - name: Separar o pacote
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASS: ${{ secrets.MAC_CERT_PASS }}
+        run: |
+          mkdir -p out
+          B=app/src-tauri/target/release/bundle
+          case "${{ matrix.nome }}" in
+            mac)
+              # assinatura com o certificado próprio "Jarvis Local" (sem conta da Apple): sempre o mesmo, então
+              # as permissões do macOS (microfone, câmera, Acessibilidade) não caem a cada versão nova
+              if [ -n "$MAC_CERT_P12" ]; then
+                echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/c.p12"
+                KC="$RUNNER_TEMP/assinatura.keychain-db"
+                security create-keychain -p ci "$KC"
+                security set-keychain-settings "$KC"
+                security unlock-keychain -p ci "$KC"
+                security import "$RUNNER_TEMP/c.p12" -k "$KC" -P "$MAC_CERT_PASS" -T /usr/bin/codesign
+                security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+                security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KC" > /dev/null
+                openssl pkcs12 -in "$RUNNER_TEMP/c.p12" -clcerts -nokeys -passin pass:"$MAC_CERT_PASS" -legacy -out "$RUNNER_TEMP/c.pem" 2>/dev/null \
+                  || openssl pkcs12 -in "$RUNNER_TEMP/c.p12" -clcerts -nokeys -passin pass:"$MAC_CERT_PASS" -out "$RUNNER_TEMP/c.pem"
+                sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$RUNNER_TEMP/c.pem"
+                codesign --force --deep --keychain "$KC" --sign "Jarvis Local" "$B/macos/Jarvis.app"
+              else
+                codesign --force --deep --sign - "$B/macos/Jarvis.app"
+              fi
+              codesign --verify --deep "$B/macos/Jarvis.app"
+              codesign -dvv "$B/macos/Jarvis.app" 2>&1 | grep -E "Authority|Signature" || true
+              ditto -c -k --keepParent "$B/macos/Jarvis.app" out/Jarvis-mac.zip ;;
+            windows)
+              cp $B/nsis/*-setup.exe out/Jarvis-Instalador-Windows.exe ;;
+            linux)
+              cp $B/appimage/*.AppImage out/Jarvis-Linux.AppImage
+              cp $B/deb/*.deb out/Jarvis-Linux.deb ;;
+          esac
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-${{ matrix.nome }}
+          path: out/*
+          retention-days: 14
+
+  zip:
+    needs: build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: Montar o zip único
+        run: |
+          V=$(cat VERSION)
+          D="Jarvis-$V"
+          mkdir -p "$D/Mac" "$D/Windows" "$D/Linux"
+          ditto -x -k art/jarvis-mac/Jarvis-mac.zip "$D/Mac/"
+          cp art/jarvis-windows/Jarvis-Instalador-Windows.exe "$D/Windows/"
+          cp art/jarvis-linux/Jarvis-Linux.AppImage art/jarvis-linux/Jarvis-Linux.deb "$D/Linux/"
+          chmod +x "$D/Linux/Jarvis-Linux.AppImage"
+          cp docs/LEIA-ME.txt "$D/LEIA-ME.txt"
+          ditto -c -k --keepParent "$D" "$D.zip"
+          ls -la "$D.zip"
+          echo "ZIP=$D.zip" >> $GITHUB_ENV
+          echo "V=$V" >> $GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-zip
+          path: ${{ env.ZIP }}
+      - name: Publicar a versão
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "v$V" -y 2>/dev/null || true
+          gh release create "v$V" "$ZIP" --title "Jarvis $V" --notes-file docs/LEIA-ME.txt

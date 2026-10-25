@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hud-estado"
+description = "Enables the hud_estado command without any pre-configured scope."
+commands.allow = ["hud_estado"]
+
+[[permission]]
+identifier = "deny-hud-estado"
+description = "Denies the hud_estado command without any pre-configured scope."
+commands.deny = ["hud_estado"]

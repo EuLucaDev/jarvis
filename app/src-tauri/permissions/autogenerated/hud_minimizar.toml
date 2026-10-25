@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hud-minimizar"
+description = "Enables the hud_minimizar command without any pre-configured scope."
+commands.allow = ["hud_minimizar"]
+
+[[permission]]
+identifier = "deny-hud-minimizar"
+description = "Denies the hud_minimizar command without any pre-configured scope."
+commands.deny = ["hud_minimizar"]

@@ -1,21 +1,41 @@
 [project]
-name = "jarvis-backend"
-version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.13"
+name = "jarvis-core"
+version = "2.0.0"
+description = "Núcleo do Jarvis: voz, mãos, ouvido, controle do PC e dados (Mac, Windows e Linux)"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-    "ddgs>=9.16.0",
+    # servidor e IA
     "fastapi>=0.156.8",
+    "uvicorn[standard]>=0.54.0",
+    "python-multipart>=0.0.32",
     "google-genai>=2.32.0",
     "httpx>=0.28.1",
+    # dados
+    "ddgs>=9.16.0",
     "icalendar>=7.3.0",
-    "psutil>=7.2.2",
-    "pyobjc-framework-applicationservices>=12.2.2",
-    "pyobjc-framework-avfoundation>=12.2.2",
-    "pyobjc-framework-quartz>=12.2.2",
-    "pyobjc-framework-speech>=12.2.2",
-    "python-dotenv>=1.2.4",
-    "python-multipart>=0.0.32",
     "recurring-ical-events>=3.8.2",
-    "uvicorn[standard]>=0.54.0",
+    "psutil>=7.2.2",
+    "send2trash>=1.8.3",
+    # voz, ouvido, mãos e tela (iguais nos três sistemas)
+    "numpy>=2.0",
+    "sounddevice>=0.5.6",
+    "vosk==0.3.44",  # a 0.3.45 não tem versão para Mac com chip Apple
+    "mediapipe>=1.1.1",
+    "opencv-python-headless>=5.0.0",
+    "pynput>=1.8.2",
+    "mss>=10.2.0",
+    "pillow>=11.0",
+    # Mac
+    "pyobjc-framework-applicationservices>=12.2.2; sys_platform == 'darwin'",
+    "pyobjc-framework-quartz>=12.2.2; sys_platform == 'darwin'",
+    "pyobjc-framework-cocoa>=12.2.2; sys_platform == 'darwin'",
+    # Windows
+    "pywin32>=310; sys_platform == 'win32'",
+    "pycaw>=20240316; sys_platform == 'win32'",
+    "comtypes>=1.4; sys_platform == 'win32'",
+    "screen-brightness-control>=0.24; sys_platform == 'win32'",
+    "uiautomation>=2.0.20; sys_platform == 'win32'",
 ]
+
+[dependency-groups]
+build = ["pyinstaller>=6.11"]

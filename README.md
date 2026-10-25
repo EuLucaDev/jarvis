@@ -1,55 +1,21 @@
-# J.A.R.V.I.S.
+# J.A.R.V.I.S. 2
 
-Assistente de voz pessoal que roda no seu Mac. Você fala, ele responde em voz e projeta cartões na tela com pesquisas, clima e listas. Ele guarda o que aprende sobre você e melhora a cada conversa.
+Assistente de voz para Mac, Windows e Linux: diga "Jarvis" (ou bata duas palmas), converse por voz, veja as respostas em cartões flutuando na tela e use a mão pela câmera como ponteiro, inclusive para arrastar e redimensionar as janelas de qualquer app.
 
-## Rodar
+## Instalar
 
-Precisa de Node 22+, [uv](https://docs.astral.sh/uv/) e uma chave da Gemini API (aistudio.google.com/apikey).
+Baixe o `Jarvis-<versão>.zip` em **Releases**, extraia e siga o `LEIA-ME.txt` da pasta do seu sistema. Na primeira vez abre a configuração inicial (chave grátis da Gemini, nome, cidade, voz e permissões).
 
-```bash
-cp .env.example .env        # cole a chave em GEMINI_API_KEY
-cd frontend && npm install && npm run modelos && npm run build && cd ..
-uv run --directory backend uvicorn jarvis.app:app --port 8000
-```
+## Como funciona
 
-Abra http://localhost:8000 no Chrome, clique no microfone (ou aperte espaço) e permita o acesso ao microfone.
+- **App** (`app/`, Tauri): ícone na barra de menus/bandeja, HUD, camada transparente sobre a tela, Alt+Espaço, abre com o computador.
+- **Núcleo** (`backend/`, Python): voz (Gemini Live), ouvido offline ("Jarvis" e palmas), mãos (MediaPipe), controle do computador e dados (memória, briefing, e-mail, agenda, notícias, mercado).
+- **Interface** (`frontend/`, React): HUD com a esfera Aura, cartões, configuração inicial e painel.
 
-- Sem fone de ouvido, o microfone fica mudo enquanto ele fala, para ele não ouvir a própria voz. Com fone, ligue "Interromper falando".
-- Sem chave, o botão "Ver demonstração" mostra os estados e os cartões.
-- Sem microfone, dá para conversar pelo campo de texto e ouvir a resposta.
+## Compilar
 
-## Ligar sozinho com o Mac
+A compilação dos três sistemas roda no GitHub Actions (`.github/workflows/build.yml`) ao enviar uma tag `v*`; o zip final sai como versão. Detalhes para desenvolver estão no `CLAUDE.md`.
 
-```bash
-bash scripts/instalar.sh
-```
+## Créditos
 
-Cria dois serviços de login (o servidor, que volta sozinho se cair, e a abertura das telas) e o app **Jarvis** em `~/Applications`, que reabre as telas com um clique. No login, o HUD abre em tela cheia no monitor principal e as telas extras nos outros; troque em Painel → Telas → Monitores. Sair da tela cheia: Cmd+Q na janela. Logs em `~/Library/Logs/Jarvis`. Para remover: `bash scripts/desinstalar.sh`.
-
-Depois de mudar o código: `cd frontend && npm run build` e `launchctl kickstart -k gui/$(id -u)/com.jarvis.servidor`.
-
-## O que tem
-
-- **HUD** (`/`): esfera de voz, legenda, cartões de pesquisa, clima, listas, e-mails, agenda, notícias e câmeras.
-- **Bom dia**: diga "bom dia" e ele lê o resumo do dia enquanto os cartões entram em sequência.
-- **Telas extras** (`/tela/centro`, `/tela/radar`…): abra em outro monitor em tela cheia; "Jarvis, ativar monitores" desbloqueia todas. A engrenagem monta os widgets.
-- **Painel** (`/admin`): chat por texto, briefing, fontes de dados (Gmail, agendas, radar), memórias, conversas, telas, integrações e sistema.
-- **Computador e casa**: abrir apps e sites, música, volume e Atalhos do macOS liberados no painel (ponte para iPhone, HomeKit e Alexa).
-- **Palavra de ativação**: ícone de ouvido no HUD (Chrome).
-- **Presença**: cadastre seu rosto em Painel → Presença e ligue o ícone de rosto no HUD. Ele reconhece você, desbloqueia as telas e, de manhã, abre o bom dia sozinho.
-- **Visão**: ícones de câmera e de tela no HUD; o Jarvis passa a ver você ou a sua tela durante a conversa.
-- **Alexa**: Painel → Conexões → Alexa (precisa de conta grátis no Voice Monkey).
-- **Mercado**: "como está o mercado?" e Painel → Financeiro.
-- **Alertas**: avisos de compromisso, e-mail urgente e mercado (Conexões → Alertas proativos).
-- **iMessage**: "tenho mensagens novas?", "manda para a Clara…" (sempre confirma). Precisa de Acesso Total ao Disco; o painel mostra o caminho.
-- **Notas**: Obsidian e Notion ("procura nas minhas notas…", "anota que…").
-- **Saúde**: exporte do app Saúde do iPhone e importe em Painel → Saúde.
-- **Gestos**: ícone de mão no HUD — mão aberta liga a voz, punho fecha cartões, dois dedos passa o cartão, polegar sim/não.
-
-## Variáveis
-
-Veja `.env.example`: `GEMINI_API_KEY`, `GEMINI_LIVE_MODEL`, `GEMINI_TEXT_MODEL`, `JARVIS_SEARCH`, `JARVIS_VOICE`, `JARVIS_CITY`, `JARVIS_USER_NAME`, `PORT`.
-
-## Memória
-
-Fica em `data/jarvis.db` (SQLite, local). Para ver o que ele sabe: http://localhost:8000/api/memorias. Por voz: "lembra que…", "o que você sabe sobre…", "esquece que…".
+A esfera "Aura" vem dos componentes de agente da LiveKit (licença MIT, © 2025 LiveKit, Inc.).

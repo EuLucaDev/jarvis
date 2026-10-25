@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-regioes"
+description = "Enables the regioes command without any pre-configured scope."
+commands.allow = ["regioes"]
+
+[[permission]]
+identifier = "deny-regioes"
+description = "Denies the regioes command without any pre-configured scope."
+commands.deny = ["regioes"]

@@ -11,3 +11,6 @@ __pycache__/
 data/
 frontend/public/models/
 frontend/public/mediapipe/
+build/
+backend/models/
+backend/dist/

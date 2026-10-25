@@ -63,7 +63,8 @@ async def notify(titulo: str, texto: str, nivel: str = "info", falar: bool = Tru
             ["osascript", "-e", f'display notification "{safe(texto)}" with title "Jarvis" subtitle "{safe(titulo)}"'],
             capture_output=True,
         )
-    bridge = hub.voice
+    from .live import voice as bridge
+
     if falar and cfg.get("falar", True) and bridge and bridge.session:
         await bridge.send_text(
             f"[Aviso do sistema, não é o usuário falando. Anuncie em uma frase curta e natural, sem perguntar nada.] {titulo}: {texto}"

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hud-mostrar"
+description = "Enables the hud_mostrar command without any pre-configured scope."
+commands.allow = ["hud_mostrar"]
+
+[[permission]]
+identifier = "deny-hud-mostrar"
+description = "Denies the hud_mostrar command without any pre-configured scope."
+commands.deny = ["hud_mostrar"]

@@ -151,7 +151,8 @@ async def _avisar(t: dict[str, Any], agente: str, saida: str, erro: str) -> None
             "resumo": saida[:1500],
             "referencia": f"Pasta: {t['pasta']}" if agente != "chatgpt" else f"Resposta do {nome}",
         })
-    bridge = hub.voice
+    from .live import voice as bridge
+
     if bridge and bridge.session:
         if saida:
             texto = (

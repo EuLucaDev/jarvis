@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "jarvis",
+  "description": "As páginas do Jarvis (servidas pelo núcleo local) falam com o app.",
+  "windows": ["*"],
+  "remote": { "urls": ["http://127.0.0.1:8765/*", "http://127.0.0.1:8765"] },
+  "permissions": [
+    "core:event:default",
+    "allow-hud-mostrar",
+    "allow-hud-minimizar",
+    "allow-hud-esconder",
+    "allow-hud-estado",
+    "allow-painel-abrir",
+    "allow-configuracao-pronta",
+    "allow-regioes"
+  ]
+}

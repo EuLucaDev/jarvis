@@ -1,36 +1,6 @@
-// Conexão única com o backend: eventos em JSON e áudio em frames binários.
+// Conexão única com o núcleo: eventos em JSON (a voz, a câmera e as mãos rodam no núcleo, não aqui).
 
-export type ServerEvent =
-  | { type: 'sync'; cards: Card[]; status: VoiceStatus; tarefas?: Task[] }
-  | ({ type: 'status' } & VoiceStatus)
-  | { type: 'user.text'; text: string; typed?: boolean }
-  | { type: 'model.text'; text: string }
-  | { type: 'turn'; phase: 'complete' | 'interrupted' }
-  | { type: 'tool'; name: string; phase: 'start' | 'end' }
-  | { type: 'card'; card: Card }
-  | { type: 'card.close'; id: string }
-  | { type: 'card.update'; card: Card }
-  | { type: 'cards.clear' }
-  | { type: 'audio.flush' }
-  | { type: 'sequence.plan'; palavras: number[] }
-  | { type: 'presenca'; etapa: string }
-  | ({ type: 'alerta' } & Alert)
-  | ({ type: 'telemetria' } & Telemetry)
-  | { type: 'telas.config'; telas: ScreenConfig[] }
-  | { type: 'painel'; visao: string | null }
-  | { type: 'modo_mouse'; ligado: boolean }
-  | { type: 'sugestao'; id: string; texto: string; pedido: string }
-  | { type: 'parado'; origem: string }
-  | { type: 'foco'; ate: number }
-  | { type: 'janela'; acao: 'minimizar' | 'mostrar' | 'esconder' }
-  | { type: 'despertar'; origem: string; comando: string; bom_dia: boolean }
-  | { type: 'atualizacao'; etapa: string; pct: number; erro?: string; reiniciar?: boolean; app_muda?: boolean }
-  | { type: 'olhar'; x: number; y: number; w: number; h: number; label: string; modo: string }
-  | { type: 'olhar.rotulo'; label: string }
-  | { type: 'olhar.fim' }
-  | { type: 'tarefa'; tarefa: Task }
-
-export type Task = { id: string; agente: string; titulo: string; estado: 'rodando' | 'feito' | 'erro'; resumo?: string; pasta?: string; inicio: string }
+import { handStore, voiceStore, type Phase } from './live'
 
 export type Alert = { id: string; titulo: string; texto: string; nivel: string; at: string; silencioso?: boolean }
 
@@ -44,11 +14,8 @@ export type Telemetry = {
   uptime_h: number
 }
 
-export type ScreenConfig = { id: string; nome: string; widgets: string[] }
-
 export type VoiceStatus = {
   voice: 'off' | 'connecting' | 'live' | 'error' | 'demo'
-  telas?: 'ativas' | 'bloqueadas'
   model?: string
   error?: string | null
 }
@@ -60,11 +27,37 @@ export type Card = {
   data: Record<string, any>
 }
 
-type Handlers = {
-  onEvent: (e: ServerEvent) => void
-  onAudio: (pcm: ArrayBuffer) => void
-  onOpen: (open: boolean) => void
-}
+export type Task = { id: string; agente: string; titulo: string; estado: 'rodando' | 'feito' | 'erro'; resumo?: string; pasta?: string; inicio: string }
+
+export type ServerEvent =
+  | { type: 'sync'; cards: Card[]; status: VoiceStatus; tarefas?: Task[] }
+  | ({ type: 'status' } & VoiceStatus)
+  | { type: 'user.text'; text: string; typed?: boolean; novo?: boolean }
+  | { type: 'legenda'; texto: string }
+  | { type: 'tool'; name: string; phase: 'start' | 'end' }
+  | { type: 'card'; card: Card }
+  | { type: 'card.update'; card: Card }
+  | { type: 'card.close'; id: string }
+  | { type: 'cards.clear' }
+  | ({ type: 'alerta' } & Alert)
+  | ({ type: 'telemetria' } & Telemetry)
+  | { type: 'painel'; visao: string | null }
+  | { type: 'tarefa'; tarefa: Task }
+  | { type: 'sugestao'; id: string; texto: string; pedido: string }
+  | { type: 'parado'; origem: string }
+  | { type: 'foco'; ate: number }
+  | { type: 'janela'; acao: 'minimizar' | 'mostrar' | 'esconder' }
+  | { type: 'despertar'; origem: string; bom_dia: boolean }
+  | { type: 'camera'; ligada: boolean; erro?: string }
+  | { type: 'gesto'; acao: string; rotulo: string }
+  | { type: 'olhar'; x: number; y: number; w: number; h: number; label: string; modo: string }
+  | { type: 'olhar.rotulo'; label: string }
+  | { type: 'olhar.fim' }
+  | { type: 'janela.realce'; estado: string | null; janela: any; escala?: number }
+  | { type: 'janela.erro'; texto: string }
+  | { type: 'configurado' }
+
+type Handlers = { onEvent: (e: ServerEvent) => void; onOpen: (open: boolean) => void }
 
 export class JarvisSocket {
   private ws?: WebSocket
@@ -81,15 +74,18 @@ export class JarvisSocket {
 
   private connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}/ws?role=${this.role}`)
-    ws.binaryType = 'arraybuffer'
+    const ws = new WebSocket(`${proto}://${location.host}/ws?role=${encodeURIComponent(this.role)}`)
+    this.ws = ws
     ws.onopen = () => {
       this.retry = 0
       this.h.onOpen(true)
     }
     ws.onmessage = (m) => {
-      if (typeof m.data === 'string') this.h.onEvent(JSON.parse(m.data))
-      else this.h.onAudio(m.data as ArrayBuffer)
+      const e = JSON.parse(m.data)
+      // os sinais rápidos vão direto para os stores (sem passar pelo React)
+      if (e.type === 'vivo') voiceStore.set({ fase: e.fase as Phase, nivel: e.nivel, ouvindo: e.ouvindo })
+      else if (e.type === 'maos') handStore.set({ hands: e.hands, pts: e.pts ?? handStore.get().pts })
+      else this.h.onEvent(e as ServerEvent)
     }
     ws.onclose = () => {
       this.h.onOpen(false)
@@ -97,15 +93,10 @@ export class JarvisSocket {
       const wait = Math.min(8000, 500 * 2 ** this.retry++)
       setTimeout(() => this.connect(), wait)
     }
-    this.ws = ws
   }
 
   send(msg: object) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg))
-  }
-
-  sendAudio(pcm: ArrayBuffer) {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(pcm)
   }
 
   close() {

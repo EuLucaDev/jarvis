@@ -1,0 +1,39 @@
+J.A.R.V.I.S. 2 — como instalar
+================================
+
+Este pacote tem o Jarvis para os três sistemas. Use só a pasta do seu.
+
+MAC (Apple Silicon: M1, M2, M3, M4…)
+  1. Abra a pasta Mac e arraste o Jarvis para a pasta Aplicativos.
+  2. Na primeira vez: clique com o botão direito no Jarvis → Abrir → Abrir.
+     (o app não tem assinatura paga da Apple; esse passo é só uma vez)
+  3. A configuração inicial abre sozinha: cole a chave da Gemini, seu nome e sua cidade.
+  4. Quando o macOS perguntar, permita para o "Jarvis": Microfone, Câmera, Acessibilidade e
+     Gravação de Tela. Depois de ligar a Acessibilidade, saia do Jarvis (ícone na barra de menus →
+     Sair) e abra de novo.
+
+WINDOWS (10 ou 11, 64 bits)
+  1. Abra a pasta Windows e execute "Jarvis-Instalador-Windows.exe".
+  2. Se aparecer "O Windows protegeu o computador": Mais informações → Executar assim mesmo.
+     (o app não tem certificado pago; o aviso é só no instalador)
+  3. A configuração inicial abre sozinha.
+
+LINUX (Ubuntu, Debian, Mint… sessão X11)
+  - Ubuntu/Debian: sudo apt install ./Jarvis-Linux.deb
+  - Outros: chmod +x Jarvis-Linux.AppImage e abra.
+  - Precisa de: libportaudio2, wmctrl, xdotool, xclip (o .deb já instala).
+  - No Wayland, mexer nas janelas dos outros apps é bloqueado pelo sistema.
+
+DEPOIS DE INSTALADO
+  - O Jarvis liga com o computador, escondido: só o ícone na barra de menus (Mac) ou na
+    bandeja (Windows/Linux).
+  - Para chamar: diga "Jarvis" (ou "Jarvis, bom dia") ou bata duas palmas. Também: Alt+Espaço.
+  - Com a câmera ligada, a mão vira o ponteiro:
+      pinça e solta = clica · pinça e mexe = arrasta · pinça parada = ajusta o tamanho
+      (abra polegar e indicador em L; parado fixa; mão aberta cancela)
+      dois dedos e mexe = rola · mão aberta para cima = mostra o HUD · para baixo = minimiza
+  - Os cartões aparecem flutuando na tela; dá para arrastar, aumentar e fechar.
+  - Peça coisas no computador: "abre o Notas e escreve…", "olha essa planilha", "minimize sua tela".
+
+A chave da Gemini é grátis: https://aistudio.google.com/apikey
+Seus dados (memória, ajustes, chave) ficam só no seu computador.

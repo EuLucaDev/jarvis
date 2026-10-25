@@ -18,11 +18,11 @@ import uuid
 from google import genai
 from google.genai import types
 
-from .config import ROOT, settings
+from .config import DATA, settings
 
 log = logging.getLogger("jarvis.memory")
 
-DB_PATH = ROOT / "data" / "jarvis.db"
+DB_PATH = DATA / "jarvis.db"
 EMBED_MODEL = "gemini-embedding-001"
 EMBED_DIM = 768
 SAME_THRESHOLD = 0.9  # acima disso é a mesma memória: atualiza em vez de duplicar
@@ -90,8 +90,11 @@ def _cos(a: list[float], b: list[float]) -> float:
 
 
 class Memory:
-    def __init__(self) -> None:
-        self.client = genai.Client(api_key=settings.gemini_api_key) if settings.gemini_api_key else None
+    @property
+    def client(self) -> genai.Client | None:
+        from .llm import client
+
+        return client()
 
     async def _embed(self, text: str, task: str) -> list[float] | None:
         if not self.client:

@@ -136,13 +136,8 @@ DECLARATIONS = [
         parameters={"type": "OBJECT", "properties": {"atualizar": {"type": "BOOLEAN", "description": "true para buscar tudo de novo."}}},
     ),
     types.FunctionDeclaration(
-        name="ativar_telas",
-        description="Desbloqueia (ativar) ou bloqueia as telas adicionais. Ex.: 'ativar monitores', 'bloquear telas'.",
-        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["ativar", "bloquear"]}}, "required": ["acao"]},
-    ),
-    types.FunctionDeclaration(
         name="abrir_app",
-        description="Abre um aplicativo do Mac pelo nome.",
+        description="Abre um aplicativo do computador pelo nome.",
         parameters={"type": "OBJECT", "properties": {"nome": {"type": S}}, "required": ["nome"]},
     ),
     types.FunctionDeclaration(
@@ -434,9 +429,12 @@ DECLARATIONS = [
         parameters={"type": "OBJECT", "properties": {"minutos": {"type": N}}, "required": ["minutos"]},
     ),
     types.FunctionDeclaration(
-        name="modo_mouse",
-        description="Liga ou desliga o modo em que a mão dele, pela câmera, controla o mouse do Mac.",
-        parameters={"type": "OBJECT", "properties": {"ligar": {"type": "BOOLEAN"}}, "required": ["ligar"]},
+        name="camera",
+        description=(
+            "Câmera do computador: ligar (ele passa a usar as mãos como ponteiro e você pode ver), desligar, "
+            "ou ver (você recebe a imagem de agora para descrever)."
+        ),
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["ligar", "desligar", "ver"]}}, "required": ["acao"]},
     ),
     types.FunctionDeclaration(
         name="fechar_cartoes",
@@ -595,10 +593,6 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             if not data["configurado"]["agenda"]:
                 avisos.append("Agenda ainda não configurada no painel.")
             return {"roteiro": texto, "avisos": avisos, "instrucao": "Leia o roteiro inteiro em voz, sem resumir nem pular."}
-        if name == "ativar_telas":
-            estado = "ativas" if args.get("acao") == "ativar" else "bloqueadas"
-            await hub.set_screens(estado)
-            return {"ok": True, "telas": estado, "conectadas": hub.count("tela")}
         if name in ("abrir_app", "abrir_link", "controlar_midia", "ajustar_volume", "executar_atalho"):
             from . import system
 
@@ -688,35 +682,33 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             await hub.clear_cards()
             return {"ok": True}
         if name in ("digitar", "teclas", "navegador"):
-            from . import desktop
+            from . import pc
 
             if name == "digitar":
-                return await asyncio.to_thread(desktop.type_into, args.get("texto", ""), args.get("app"), bool(args.get("enter")))
+                return await asyncio.to_thread(pc.type_into, args.get("texto", ""), args.get("app"), bool(args.get("enter")))
             if name == "teclas":
-                return await asyncio.to_thread(desktop.keys_into, args.get("atalho", ""), args.get("app"), bool(args.get("confirmado")))
-            return await asyncio.to_thread(desktop.browser, args.get("acao", ""), args.get("valor", ""))
+                return await asyncio.to_thread(pc.keys_into, args.get("atalho", ""), args.get("app"), bool(args.get("confirmado")))
+            return await asyncio.to_thread(pc.browser, args.get("acao", ""), args.get("valor", ""))
         if name == "olhar":
-            from . import context
+            from . import pc
 
-            return await asyncio.to_thread(context.look_at, args.get("regiao"), args.get("alvo"))
+            return await asyncio.to_thread(pc.look_at, args.get("regiao"), args.get("alvo"))
         if name == "janela_jarvis":
-            if not hub.count("overlay"):
-                return {"erro": "Isso funciona no app Jarvis instalado; no navegador, minimize a janela à mão."}
             await hub.broadcast({"type": "janela", "acao": args.get("acao", "minimizar")})
             return {"ok": True, "instrucao": "Confirme numa frase curta."}
         if name in ("contexto_atual", "substituir_selecao", "clicar"):
-            from . import context, desktop
+            from . import pc
 
             if name == "contexto_atual":
                 p = hub.pointed if hub.pointed and time.time() - hub.pointed.get("em", 0) < 15 else None
-                return await asyncio.to_thread(context.snapshot, p, args.get("com_selecao", True) is not False)
+                return await asyncio.to_thread(pc.snapshot, p, args.get("com_selecao", True) is not False)
             if name == "substituir_selecao":
-                return await asyncio.to_thread(context.replace_selection, args.get("texto", ""))
+                return await asyncio.to_thread(pc.replace_selection, args.get("texto", ""))
             if args.get("app"):
-                r = await asyncio.to_thread(desktop.activate, args["app"])
+                r = await asyncio.to_thread(pc.activate, args["app"])
                 if r.get("erro"):
                     return r
-            return await asyncio.to_thread(context.click, args.get("alvo", ""))
+            return await asyncio.to_thread(pc.click_named, args.get("alvo", ""))
         if name == "mostrar_plano":
             passos = [{"texto": str(p), "estado": "pendente"} for p in (args.get("passos") or [])][:12]
             card = await hub.show_card("plano", {"titulo": args.get("titulo", "Plano"), "categoria": "Trabalhando junto", "passos": passos})
@@ -756,9 +748,22 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             hub.focus_until = time.time() + minutos * 60 if minutos > 0 else time.time() - 1
             await hub.broadcast({"type": "foco", "ate": hub.focus_until if minutos > 0 else 0})
             return {"ok": True, "instrucao": "Confirme numa frase. Avisos não urgentes ficam para o fim do foco."}
-        if name == "modo_mouse":
-            await hub.broadcast({"type": "modo_mouse", "ligado": bool(args.get("ligar"))})
-            return {"ok": True, "instrucao": "Confirme em uma frase. Para sair: punho fechado ou 'desliga o modo mouse'."}
+        if name == "camera":
+            from .hands import hands
+
+            acao = args.get("acao")
+            if acao == "ligar":
+                store.put("camera", {**store.get("camera"), "ligada": True})
+                await asyncio.to_thread(hands.start)
+                return {"ok": True, "instrucao": "Confirme numa frase. As mãos já funcionam como ponteiro."}
+            if acao == "desligar":
+                store.put("camera", {**store.get("camera"), "ligada": False})
+                await asyncio.to_thread(hands.stop)
+                return {"ok": True}
+            img = hands.latest_jpeg()
+            if not img:
+                return {"erro": "A câmera está desligada. Peça para ligar a câmera."}
+            return {"ok": True, "_imagem": img, "instrucao": "Você recebeu a imagem da câmera. Descreva o que vê em uma ou duas frases."}
         if name == "abrir_painel":
             visao = args.get("visao")
             await hub.broadcast({"type": "painel", "visao": None if visao == "fechar" else visao})

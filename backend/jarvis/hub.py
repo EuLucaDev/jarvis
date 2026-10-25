@@ -17,11 +17,10 @@ class Hub:
     def __init__(self) -> None:
         self.clients: dict[WebSocket, dict[str, Any]] = {}
         self.cards: list[dict[str, Any]] = []
-        self.status: dict[str, Any] = {"voice": "off", "telas": "bloqueadas"}
+        self.status: dict[str, Any] = {"voice": "off"}
         self._lock = asyncio.Lock()
         # cartões do briefing que entram durante a fala: (palavras antes do cartão, tipo, dados)
         self.pending_sequence: list[tuple[int, str, dict[str, Any]]] = []
-        self.voice: Any = None  # VoiceBridge ao vivo, para avisos falados
         self.tasks: list[dict[str, Any]] = []  # tarefas passadas a outras IAs (agents.py)
         self.pointed: dict[str, Any] | None = None  # o que a mão está apontando no HUD ("isso aqui")
         self.focus_until = 0.0  # modo foco a dois: avisos esperam até aqui
@@ -47,9 +46,6 @@ class Hub:
 
     def count(self, role: str) -> int:
         return sum(1 for info in self.clients.values() if info.get("role") == role)
-
-    async def set_screens(self, estado: str) -> None:
-        await self.set_status(telas=estado)
 
     async def play_sequence(self, wps: float = 3.0) -> None:
         """Sem HUD para marcar o ritmo (chat, painel): solta os cartões por tempo estimado."""
