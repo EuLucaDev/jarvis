@@ -64,6 +64,8 @@ jobs:
         run: |
           # o better-sqlite3 já traz o binário pronto de cada sistema (prebuilds/): sem compilar (no Windows exigiria o Visual Studio)
           npm ci --omit=dev --ignore-scripts
+          # fica só o binário deste sistema (os outros incham o pacote e o gerador de AppImage trava neles)
+          node -e "const fs=require('fs'),p='node_modules/better-sqlite3/prebuilds',k=process.platform+'-'+process.arch+'.node';for(const f of fs.readdirSync(p))if(f!==k)fs.rmSync(p+'/'+f);console.log(fs.readdirSync(p))"
           npm test
           # o Node vai junto com o Jarvis: quem instala não precisa ter nada
           mkdir -p ../../backend/node-bin
@@ -99,7 +101,7 @@ jobs:
           NO_STRIP: "true" # o linuxdeploy (AppImage) não sabe "afinar" o Node empacotado e falharia
         run: |
           npm ci
-          npx tauri build --bundles ${{ matrix.bundles }}
+          npx tauri build --bundles ${{ matrix.bundles }} --verbose
 
       - name: Separar o pacote
         env:
