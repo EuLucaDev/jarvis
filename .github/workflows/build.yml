@@ -62,7 +62,8 @@ jobs:
       - name: Motor financeiro (Node) e testes
         working-directory: financeiro/motor
         run: |
-          npm ci --omit=dev
+          # o better-sqlite3 já traz o binário pronto de cada sistema (prebuilds/): sem compilar (no Windows exigiria o Visual Studio)
+          npm ci --omit=dev --ignore-scripts
           npm test
           # o Node vai junto com o Jarvis: quem instala não precisa ter nada
           mkdir -p ../../backend/node-bin
@@ -94,6 +95,8 @@ jobs:
 
       - name: App (Tauri)
         working-directory: app
+        env:
+          NO_STRIP: "true" # o linuxdeploy (AppImage) não sabe "afinar" o Node empacotado e falharia
         run: |
           npm ci
           npx tauri build --bundles ${{ matrix.bundles }}
