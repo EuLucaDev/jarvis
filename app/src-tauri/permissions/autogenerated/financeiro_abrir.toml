@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-financeiro-abrir"
+description = "Enables the financeiro_abrir command without any pre-configured scope."
+commands.allow = ["financeiro_abrir"]
+
+[[permission]]
+identifier = "deny-financeiro-abrir"
+description = "Denies the financeiro_abrir command without any pre-configured scope."
+commands.deny = ["financeiro_abrir"]

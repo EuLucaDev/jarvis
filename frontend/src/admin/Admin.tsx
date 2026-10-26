@@ -32,6 +32,7 @@ import {
   Check,
   ScrollText,
   Sparkles,
+  Wallet,
   Workflow,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
@@ -58,7 +59,7 @@ const NAV: { group: string; items: { id: Page; label: string; desc: string; icon
       { id: 'operacoes', label: 'Operações', desc: 'Rotinas, horários e tarefas para outras IAs', icon: Workflow },
       { id: 'gestos', label: 'Gestos', desc: 'O que cada gesto da mão faz', icon: Hand },
       { id: 'memorias', label: 'Memórias', desc: 'O que ele sabe sobre você', icon: BrainCircuit },
-      { id: 'financeiro', label: 'Financeiro', desc: 'Bolsa, câmbio e cripto', icon: LineChart },
+      { id: 'financeiro', label: 'Mercado', desc: 'Bolsa, câmbio e cripto', icon: LineChart },
       { id: 'saude', label: 'Saúde', desc: 'Passos, sono e treinos', icon: HeartPulse },
     ],
   },
@@ -115,6 +116,22 @@ export function Admin() {
             ))}
           </nav>
         ))}
+        <a
+          className="hud-open"
+          href="/financeiro/"
+          onClick={(e) => {
+            if (isApp) {
+              e.preventDefault()
+              app.openFinance()
+            }
+          }}
+        >
+          <Wallet size={16} strokeWidth={1.75} />
+          <span>
+            Abrir o financeiro
+            <small>Contas, cartões, metas e relatórios</small>
+          </span>
+        </a>
         <a className="hud-open" href="/">
           <Bot size={16} strokeWidth={1.75} />
           <span>

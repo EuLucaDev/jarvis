@@ -98,6 +98,27 @@ async def _news(cfg: dict) -> list[dict]:
     ]
 
 
+async def _financas() -> dict | None:
+    """O que vence hoje e na semana, saldo das contas e o orçamento do mês (só se o financeiro tiver conta)."""
+    from . import finance
+
+    if not finance.motor.disponivel():
+        return None
+    contas = [c for c in await finance.chamar("accounts:list") or [] if c.get("status", "ATIVA") == "ATIVA"]
+    if not contas:
+        return None
+    vence = await finance.chamar("payables:list", 7) or []
+    ritmo = await finance.chamar("insights:budgetPace", dt.date.today().strftime("%Y-%m")) or []
+    return {
+        "saldo_total": round(sum(float(c.get("currentBalance") or 0) for c in contas), 2),
+        "contas": {c["name"]: c.get("currentBalance") for c in contas},
+        "vence_hoje": [{"o_que": i["title"], "valor": i["amount"]} for i in vence if i["days"] <= 0],
+        "vence_semana": [{"o_que": i["title"], "valor": i["amount"], "em_dias": i["days"]} for i in vence if i["days"] > 0],
+        "orcamento_apertado": [{"categoria": r["category"], "usado_pct": round(r["pct"]), "vai_estourar": r.get("willExceed")}
+                               for r in ritmo if r["pct"] >= 70 or r.get("willExceed")],
+    }
+
+
 def _health() -> dict | None:
     from .sources import health
 
@@ -113,6 +134,9 @@ def _fallback_script(data: dict) -> dict:
     e = data["emails"]
     if e["total"]:
         segs.append({"cartao": "emails", "fala": f"Há {e['total']} e-mails não lidos; {len(e['atencao'])} pedem sua atenção."})
+    f = data.get("financas")
+    if f and (f["vence_hoje"] or f["vence_semana"]):
+        segs.append({"cartao": "financas", "fala": f"Nas finanças, {len(f['vence_hoje'])} contas vencem hoje e {len(f['vence_semana'])} nesta semana."})
     ag = data["agenda"]
     segs.append({"cartao": "agenda", "fala": f"Você tem {len(ag)} compromissos hoje." if ag else "Sua agenda de hoje está livre."})
     for n in data["noticias"]:
@@ -121,7 +145,7 @@ def _fallback_script(data: dict) -> dict:
 
 
 async def _script(data: dict) -> dict:
-    keys = ["clima", "emails", "agenda"] + (["saude"] if data.get("saude") else []) + [f"noticia:{n['tema']}" for n in data["noticias"]]
+    keys = ["clima", "emails", "agenda"] + (["financas"] if data.get("financas") else []) + (["saude"] if data.get("saude") else []) + [f"noticia:{n['tema']}" for n in data["noticias"]]
     schema = {
         "type": "OBJECT",
         "properties": {
@@ -149,13 +173,15 @@ async def _script(data: dict) -> dict:
         "noticias": [{"tema": n["tema"], "itens": [{k: i.get(k) for k in ("titulo", "fonte", "trecho")} for i in n["itens"]]} for n in data["noticias"]],
         "configurado": data["configurado"],
         "saude": data.get("saude"),
+        "financas": data.get("financas"),
     }
     try:
         return await llm.generate_json(
             f"""Você é J.A.R.V.I.S. e vai ler em voz alta o briefing da manhã de {settings.user_name}.
 Hoje é {data['hoje']}. Escreva em português do Brasil, falado, natural, com um toque de humor seco.
 Duração total de 60 a 90 segundos. Números por extenso só quando ficar mais natural.
-Ordem: comece pelo que exige ação (e-mails importantes, compromissos), depois clima, depois saúde (sono e passos de ontem, se houver), depois notícias.
+Ordem: comece pelo que exige ação (e-mails importantes, compromissos, contas que vencem hoje ou na semana e orçamento
+apertado, num segmento "financas" com valores em reais), depois clima, depois saúde (sono e passos de ontem, se houver), depois notícias.
 Um segmento por cartão; cada segmento com 1 a 3 frases. Não cite links. Não invente nada além dos dados.
 Se e-mails ou agenda não estiverem configurados, não crie segmento para eles.
 Feche com uma frase curta de foco para o dia.
@@ -189,11 +215,12 @@ async def build(force: bool = False) -> dict:
             erros.append(f"{name}: {str(exc)[:140]}")
             return default
 
-    clima, emails, semana, noticias = await asyncio.gather(
+    clima, emails, semana, noticias, financas = await asyncio.gather(
         safe("clima", _weather(cfg), None),
         safe("e-mails", _emails(cfg), {"total": 0, "atencao": [], "relevantes": [], "outros": 0}),
         safe("agenda", _agenda(cfg), []),
         safe("notícias", _news(cfg), []),
+        safe("finanças", _financas(), None),
     )
     now = dt.datetime.now(tz)
     hoje_iso = now.strftime("%Y-%m-%d")
@@ -210,6 +237,7 @@ async def build(force: bool = False) -> dict:
         "noticias": noticias,
         "configurado": {"gmail": bool(cfg.get("gmail")), "agenda": bool(cfg.get("agendas"))},
         "saude": _health(),
+        "financas": financas,
         "erros": erros,
     }
     data["roteiro"] = await _script(data)
@@ -227,6 +255,15 @@ def card_for(key: str, data: dict) -> tuple[str, dict] | None:
         return "emails", {"titulo": "Pedem sua atenção", "total": e["total"], "itens": e["atencao"], "outros": e["outros"], "configurado": data["configurado"]["gmail"]}
     if key == "agenda":
         return "agenda", {"titulo": "Agenda de hoje", "eventos": data["agenda"], "hoje": data["hoje"], "configurado": data["configurado"]["agenda"]}
+    if key == "financas" and data.get("financas"):
+        f = data["financas"]
+        brl = lambda v: f"R$ {float(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")  # noqa: E731
+        linhas = [{"rotulo": i["o_que"], "valor": brl(i["valor"]), "detalhe": "vence hoje", "tom": "perigo"} for i in f["vence_hoje"]]
+        linhas += [{"rotulo": i["o_que"], "valor": brl(i["valor"]), "detalhe": f"em {i['em_dias']} dias", "tom": "aviso" if i["em_dias"] <= 3 else ""}
+                   for i in f["vence_semana"]]
+        linhas += [{"rotulo": f"Orçamento · {o['categoria']}", "valor": f"{o['usado_pct']}%", "tom": "aviso"} for o in f["orcamento_apertado"]]
+        return "financeiro", {"modo": "lista", "titulo": "Suas finanças hoje", "valor": f["saldo_total"], "sinal": "saldo",
+                              "linhas": linhas or [{"rotulo": "Nada vencendo esta semana", "valor": ""}]}
     if key == "saude" and data.get("saude"):
         return "saude", data["saude"]
     if key.startswith("noticia:"):

@@ -2566,3 +2566,123 @@ button.orb-wrap:focus-visible {
   outline-offset: 6px;
 }
 
+
+/* cartão do financeiro */
+.fin-valor {
+  margin: 0;
+  font: 600 30px/1.1 var(--font-mono);
+  color: var(--fg);
+}
+.fin-valor.saida {
+  color: #ff9a8a;
+}
+.fin-valor.entrada {
+  color: #7cf29a;
+}
+.fin-valor.riscado {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+.fin-linhas,
+.fin-barras {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.fin-linhas li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.fin-linhas li b {
+  color: var(--fg);
+  font-weight: 600;
+  text-align: right;
+}
+.fin-linhas li small {
+  grid-column: 1 / -1;
+  font: 500 11px/1.2 var(--font-mono);
+  color: var(--fg-subtle);
+}
+.fin-linhas li.aviso small {
+  color: var(--think);
+}
+.fin-linhas li.perigo small,
+.fin-linhas li.perigo b {
+  color: #ff8a7a;
+}
+.fin-barras li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.fin-barras li b {
+  color: var(--fg);
+  font: 600 12px/1.2 var(--font-mono);
+}
+.fin-barras li b small {
+  color: var(--fg-subtle);
+  font-weight: 500;
+}
+.fin-barras li i {
+  grid-column: 1 / -1;
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--signal);
+  box-shadow: 0 0 10px -2px var(--signal);
+}
+.fin-barras li i.alto {
+  background: var(--think);
+  box-shadow: 0 0 10px -2px var(--think);
+}
+.fin-aviso {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgb(255 211 107 / 0.1);
+  color: var(--think);
+  font-size: 12.5px;
+}
+.fin-desfazer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: rgb(63 211 232 / 0.12);
+  color: var(--signal);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+
+/* arrastando arquivos para o HUD */
+.hud-soltar {
+  position: fixed;
+  inset: 16px;
+  z-index: 60;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  text-align: center;
+  border-radius: 18px;
+  border: 2px dashed var(--signal);
+  background: rgb(3 10 26 / 0.82);
+  pointer-events: none;
+}
+.hud-soltar b {
+  font: 600 22px/1.2 var(--font-display);
+  color: var(--fg);
+}
+.hud-soltar span {
+  color: var(--fg-muted);
+  font-size: 14px;
+}

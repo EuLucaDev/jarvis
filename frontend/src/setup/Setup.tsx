@@ -17,7 +17,7 @@ const VOZES = [
   ['Aoede', 'feminina, suave'],
 ] as const
 
-type Cfg = { tem_chave: boolean; user_name: string; tratamento: string; city: string; voice: string; camera_auto: boolean; sistema: string; configurado: boolean }
+type Cfg = { financeiro?: boolean; tem_chave: boolean; user_name: string; tratamento: string; city: string; voice: string; camera_auto: boolean; sistema: string; configurado: boolean }
 
 export function Setup() {
   const [passo, setPasso] = useState(0)
@@ -28,6 +28,7 @@ export function Setup() {
   const [nome, setNome] = useState('')
   const [cidade, setCidade] = useState('')
   const [trato, setTrato] = useState('Senhor')
+  const [fin, setFin] = useState(true)
   const [voz, setVoz] = useState('Charon')
   const [camera, setCamera] = useState(true)
   const [salvando, setSalvando] = useState(false)
@@ -38,6 +39,7 @@ export function Setup() {
       setCfg(c)
       setNome(c.user_name || '')
       setTrato(c.tratamento ?? 'Senhor')
+      setFin(c.financeiro !== false)
       setCidade(c.city || '')
       setVoz(c.voice || 'Charon')
       setCamera(c.camera_auto)
@@ -56,7 +58,7 @@ export function Setup() {
     setSalvando(true)
     await api('/api/setup', {
       method: 'POST',
-      json: { ...(chave.trim() ? { gemini_api_key: chave.trim() } : {}), user_name: nome.trim(), tratamento: trato, city: cidade.trim(), voice: voz, camera_auto: camera },
+      json: { ...(chave.trim() ? { gemini_api_key: chave.trim() } : {}), user_name: nome.trim(), tratamento: trato, financeiro: fin, city: cidade.trim(), voice: voz, camera_auto: camera },
     })
     setSalvando(false)
     await app.setupDone()
@@ -166,6 +168,10 @@ export function Setup() {
                 </button>
               ))}
             </div>
+            <label className="check">
+              <input type="checkbox" checked={fin} onChange={(e) => setFin(e.target.checked)} />
+              <span>Usar o financeiro (contas, cartões, faturas e metas, comandados por voz; tudo fica neste computador)</span>
+            </label>
             <label className="check">
               <input type="checkbox" checked={camera} onChange={(e) => setCamera(e.target.checked)} />
               <span>Ligar a câmera junto com o Jarvis (as mãos viram o ponteiro; nada sai do computador)</span>

@@ -43,7 +43,8 @@ DEFAULTS: dict[str, Any] = {
     "live_model": "gemini-3.8-live",
     "text_model": "gemini-3.8-flash",
     "search": "duckduckgo",  # "google" usa a busca embutida da Gemini (exige faturamento)
-    "camera_auto": True,  # câmera (gestos) liga junto com o app
+    "camera_auto": True,
+    "financeiro": True,  # motor financeiro (contas, cartões, metas) ligado  # câmera (gestos) liga junto com o app
     "port": 8765,
 }
 

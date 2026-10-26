@@ -154,6 +154,12 @@ PLACES = {
 
 def _resolve(caminho: str, must_exist: bool = True) -> Path | None:
     """Converte 'Downloads/relatórios' ou 'Projetos' (na Mesa) em um caminho dentro da pasta pessoal."""
+    bruto = Path(caminho.strip()).expanduser()
+    if bruto.is_absolute():  # caminho completo (ex.: arquivo arrastado): vale se estiver na pasta pessoal
+        p = bruto.resolve()
+        if HOME.resolve() not in p.parents and p != HOME.resolve():
+            return None
+        return p if (p.exists() or not must_exist) else None
     raw = caminho.strip().strip("/").replace("~/", "")
     first, _, rest = raw.partition("/")
     base = PLACES.get(first.lower())

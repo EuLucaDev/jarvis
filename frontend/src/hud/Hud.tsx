@@ -104,6 +104,40 @@ export function Hud() {
     return () => clearTimeout(t)
   }, [j.stoppedAt])
 
+  // extratos, faturas ou comprovantes arrastados para o HUD: sobem para a pasta do financeiro e o Jarvis decide
+  const [soltando, setSoltando] = useState(false)
+  useEffect(() => {
+    const sobre = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return
+      e.preventDefault()
+      setSoltando(true)
+    }
+    const sai = (e: DragEvent) => {
+      if (e.relatedTarget === null) setSoltando(false)
+    }
+    const solta = async (e: DragEvent) => {
+      if (!e.dataTransfer?.files.length) return
+      e.preventDefault()
+      setSoltando(false)
+      const caminhos: string[] = []
+      for (const f of Array.from(e.dataTransfer.files)) {
+        const r = await fetch(`/api/fin/arquivo?nome=${encodeURIComponent(f.name)}`, { method: 'POST', body: f }).then((x) => x.json()).catch(() => null)
+        if (r?.ok) caminhos.push(r.data)
+      }
+      if (caminhos.length)
+        j.ask(`[Arquivos arrastados para o HUD] ${caminhos.join(' | ')} — se forem extratos ou faturas, use financeiro_importar com esses arquivos; se não, diga o que são e pergunte o que fazer.`)
+    }
+    window.addEventListener('dragover', sobre)
+    window.addEventListener('dragleave', sai)
+    window.addEventListener('drop', solta)
+    return () => {
+      window.removeEventListener('dragover', sobre)
+      window.removeEventListener('dragleave', sai)
+      window.removeEventListener('drop', solta)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Espaço liga e desliga a conversa (fora de campos de texto)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -320,6 +354,12 @@ export function Hud() {
         </p>
       )}
 
+      {soltando && (
+        <div className="hud-soltar" aria-hidden="true">
+          <b>Solte para o Jarvis ler</b>
+          <span>Extratos e faturas (PDF, CSV, OFX ou foto) vão para o financeiro</span>
+        </div>
+      )}
       {intro && (
         <div className="boot-intro" aria-live="polite">
           <div className="bi-rings" aria-hidden="true">

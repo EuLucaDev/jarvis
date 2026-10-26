@@ -22,7 +22,7 @@ export type VoiceStatus = {
 
 export type Card = {
   id: string
-  kind: 'pesquisa' | 'clima' | 'lista' | 'emails' | 'agenda' | 'noticia' | 'carregando' | 'camera' | 'mercado' | 'mensagens' | 'saude' | 'plano'
+  kind: 'pesquisa' | 'clima' | 'lista' | 'emails' | 'agenda' | 'noticia' | 'carregando' | 'camera' | 'mercado' | 'mensagens' | 'saude' | 'plano' | 'financeiro'
   at: string
   data: Record<string, any>
 }

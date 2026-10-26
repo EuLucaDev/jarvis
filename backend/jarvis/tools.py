@@ -302,6 +302,104 @@ DECLARATIONS = [
         parameters={"type": "OBJECT", "properties": {"nome": {"type": S}}, "required": ["nome"]},
     ),
     types.FunctionDeclaration(
+        name="financeiro_lancar",
+        description=(
+            "Lança um gasto ou uma entrada no financeiro e mostra o cartão com Desfazer (salva na hora). frase = o que "
+            "ele disse, inteiro ('paguei 80 no mercado ontem no crédito do Nubank em 2x'); o leitor tira valor, data, "
+            "forma, parcelas, conta/cartão e categoria. Os outros campos só se ele disser algo que a frase não tem ou "
+            "corrigir (categoria dita vira regra para as próximas vezes)."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "frase": {"type": S},
+                "tipo": {"type": S, "enum": ["gasto", "entrada"]},
+                "valor": {"type": N},
+                "conta": {"type": S, "description": "Conta bancária pelo nome (Inter, Itaú…)."},
+                "cartao": {"type": S, "description": "Cartão pelo nome (Nubank…)."},
+                "forma": {"type": S, "enum": ["pix", "debito", "dinheiro", "credito", "vale"]},
+                "parcelas": {"type": "INTEGER"},
+                "data": {"type": S, "description": "AAAA-MM-DD."},
+                "categoria": {"type": S},
+                "descricao": {"type": S},
+            },
+            "required": ["frase"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_consultar",
+        description=(
+            "Consulta o financeiro e mostra um cartão: resumo_mes (entrou, saiu, sobrou, maiores categorias), "
+            "gastos_categoria (categoria = 'mercado', 'comida'…), saldos (contas), a_pagar (dias = 7 por padrão), "
+            "faturas (abertas), orcamento (quanto de cada orçamento já foi e se vai estourar), metas, assinaturas "
+            "(gastos que se repetem e aumentos de preço), fechamento (passo a passo do fim do mês), proximas_acoes."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "assunto": {"type": S, "enum": ["resumo_mes", "gastos_categoria", "saldos", "a_pagar", "faturas", "orcamento",
+                                                 "metas", "assinaturas", "fechamento", "proximas_acoes"]},
+                "mes": {"type": S, "description": "AAAA-MM; vazio = este mês."},
+                "categoria": {"type": S},
+                "dias": {"type": "INTEGER"},
+            },
+            "required": ["assunto"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_transferir",
+        description="Transferência entre contas dele (não conta como gasto nem entrada).",
+        parameters={"type": "OBJECT", "properties": {"valor": {"type": N}, "de": {"type": S}, "para": {"type": S}, "data": {"type": S}},
+                    "required": ["valor", "de", "para"]},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_pagar",
+        description=(
+            "Marca como paga uma conta do A pagar ('aluguel') ou paga a fatura de um cartão ('fatura do Nubank') por "
+            "uma conta. Mexe no saldo: chame sem confirmado, diga o que vai pagar e repita com confirmado=true depois do sim."
+        ),
+        parameters={"type": "OBJECT", "properties": {"o_que": {"type": S}, "conta": {"type": S}, "confirmado": {"type": "BOOLEAN"}},
+                    "required": ["o_que"]},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_meta",
+        description="Metas (caixinhas): guardar ou retirar dinheiro (sai/volta da conta), criar (valor = alvo, prazo AAAA-MM-DD) ou listar.",
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["guardar", "retirar", "criar", "listar"]},
+                                                      "meta": {"type": S}, "valor": {"type": N}, "conta": {"type": S}, "prazo": {"type": S}},
+                    "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_importar",
+        description=(
+            "Importa extratos e faturas (PDF, CSV, OFX ou foto; Inter, Nubank, Santander e Mercado Pago com leitor próprio) "
+            "de arquivos ou de uma pasta ('Downloads', 'Mesa/extratos'). Primeiro mostra a prévia; só grava com "
+            "confirmado=true depois do sim."
+        ),
+        parameters={"type": "OBJECT", "properties": {"arquivos": {"type": "ARRAY", "items": {"type": S}}, "pasta": {"type": S},
+                                                      "confirmado": {"type": "BOOLEAN"}}},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_cadastrar",
+        description=(
+            "Cadastra uma conta bancária (nome, saldo atual) ou um cartão (cartão de crédito: limite, dia_fechamento, "
+            "dia_vencimento; vale: tipo_cartao 'vale refeição' ou 'vale alimentação' e saldo)."
+        ),
+        parameters={"type": "OBJECT", "properties": {"o_que": {"type": S, "enum": ["conta", "cartao"]}, "nome": {"type": S}, "banco": {"type": S},
+                                                      "saldo": {"type": N}, "tipo_cartao": {"type": S}, "limite": {"type": N},
+                                                      "dia_fechamento": {"type": "INTEGER"}, "dia_vencimento": {"type": "INTEGER"}},
+                    "required": ["o_que", "nome"]},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_desfazer",
+        description="Desfaz o último lançamento, transferência ou depósito em meta que você fez por voz.",
+        parameters={"type": "OBJECT", "properties": {}},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_abrir",
+        description="Abre a janela do financeiro numa página: visao_geral, lancamentos, a_pagar, carteira, investimentos, metas, relatorios, configuracoes.",
+        parameters={"type": "OBJECT", "properties": {"pagina": {"type": S}}},
+    ),
+    types.FunctionDeclaration(
         name="rotinas",
         description=(
             "Cria, lista ou apaga rotinas (automações). criar: nome, passos e, se ele quiser no horário, hora (HH:MM) "
@@ -939,6 +1037,21 @@ async def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             visao = args.get("visao")
             await hub.broadcast({"type": "painel", "visao": None if visao == "fechar" else visao})
             return {"ok": True, "instrucao": "Painel na tela. Confirme numa frase curta, sem ler o conteúdo."}
+        if name.startswith("financeiro_"):
+            from . import finance_voz as fv
+            from .finance import FinErro
+
+            try:
+                if name == "financeiro_abrir":
+                    return fv.abrir(args.get("pagina"))
+                if name == "financeiro_desfazer":
+                    return await fv.desfazer()
+                fn = {"financeiro_lancar": fv.lancar, "financeiro_consultar": fv.consultar, "financeiro_transferir": fv.transferir,
+                      "financeiro_pagar": fv.pagar, "financeiro_meta": fv.meta, "financeiro_importar": fv.importar,
+                      "financeiro_cadastrar": fv.cadastrar}[name]
+                return await fn(args)
+            except FinErro as exc:
+                return {"erro": str(exc)}
         if name == "executar_protocolo":
             from . import protocols
 

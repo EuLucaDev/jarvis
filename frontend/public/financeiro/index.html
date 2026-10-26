@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*">
+  <title>Jarvis · Financeiro</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="tema-jarvis.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <aside class="sidebar" id="sidebar" aria-label="Navegação principal">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><span>J</span></div>
+      <div class="brand-copy"><strong>Financeiro</strong><small>J.A.R.V.I.S.</small></div>
+      <button class="icon-button sidebar-close" id="sidebarClose" aria-label="Fechar menu">×</button>
+    </div>
+
+    <nav class="main-nav" id="mainNav">
+      <button class="nav-item active" data-page="dashboard">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg></span>
+        <span>Visão geral</span>
+      </button>
+      <button class="nav-item" data-page="transactions">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h13l-3-3"/><path d="M21 16H8l3 3"/></svg></span>
+        <span>Lançamentos</span>
+      </button>
+      <button class="nav-item" data-page="payables">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+        <span>A pagar</span>
+      </button>
+      <button class="nav-item" data-page="wallet">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg></span>
+        <span>Carteira</span>
+      </button>
+      <button class="nav-item" data-page="investments">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></span>
+        <span>Investimentos</span>
+      </button>
+      <button class="nav-item" data-page="goals">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg></span>
+        <span>Metas</span>
+      </button>
+      <button class="nav-item" data-page="reports">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></span>
+        <span>Relatórios</span>
+      </button>
+      <button class="nav-item" data-page="settings">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span>Configurações</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-card">
+      <span class="sidebar-card-icon">✦</span>
+      <div><small>Meta mensal</small><strong id="sidebarGoal">R$ 0,00</strong></div>
+      <div class="mini-progress"><i id="sidebarGoalBar"></i></div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="privacy-dot"><i></i><span id="privacyLabel">Dados salvos só neste computador</span></div>
+      <button class="profile-chip" data-page="settings">
+        <span class="avatar" id="profileAvatar">J</span>
+        <span><strong id="profileName">Financeiro</strong><small id="profileSub">Offline</small></span>
+        <b>›</b>
+      </button>
+    </div>
+  </aside>
+
+  <div class="mobile-overlay" id="mobileOverlay"></div>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-title">
+        <button class="icon-button menu-button" id="menuButton" aria-label="Abrir menu">☰</button>
+        <div><span class="eyebrow" id="pageEyebrow">VISÃO GERAL</span><h1 id="pageTitle">Visão geral</h1></div>
+      </div>
+      <div class="topbar-actions">
+        <div class="date-chip"><span class="live-dot"></span><span id="todayLabel"></span></div>
+        <button class="icon-button cmdk-button" id="cmdkButton" aria-label="Paleta de comandos" title="Comandos (Cmd/Ctrl + K)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
+        <button class="icon-button theme-toggle" id="themeToggle" aria-label="Alternar tema"><span class="theme-sun">☀</span><span class="theme-moon">☾</span></button>
+        <button class="quick-add" id="quickAdd"><span>＋</span><span>Novo lançamento</span></button>
+      </div>
+    </header>
+
+    <main id="app" class="main-content" tabindex="-1"></main>
+  </div>
+
+  <nav class="bottom-nav" aria-label="Navegação rápida">
+    <button class="nav-item bottom-item active" data-page="dashboard"><span class="nav-icon">◱</span><span>Início</span></button>
+    <button class="nav-item bottom-item" data-page="transactions"><span class="nav-icon">⇄</span><span>Lançamentos</span></button>
+    <button class="fab" id="fabAdd" aria-label="Novo lançamento"><span>＋</span></button>
+    <button class="nav-item bottom-item" data-page="payables"><span class="nav-icon">◷</span><span>A pagar</span></button>
+    <button class="nav-item bottom-item" data-page="wallet"><span class="nav-icon">▰</span><span>Carteira</span></button>
+  </nav>
+
+  <div class="modal-root" id="modalRoot" aria-hidden="true">
+    <div class="modal-backdrop" data-close-modal></div>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-header">
+        <div><span class="eyebrow" id="modalEyebrow">NOVO REGISTRO</span><h2 id="modalTitle">Adicionar</h2></div>
+        <button class="icon-button" data-close-modal aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </section>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+  <div class="loading-layer" id="loadingLayer" aria-hidden="true">
+    <div class="loader-card">
+      <span class="loader-mark">J</span>
+      <div><strong>Atualizando sua carteira</strong><small>Recalculando saldos e indicadores…</small></div>
+    </div>
+  </div>
+
+  <div id="onboardingRoot"></div>
+
+  <script src="ponte.js"></script>
+  <script src="core.js"></script>
+  <script src="pages.js"></script>
+  <script src="smart.js"></script>
+  <script src="insights.js"></script>
+  <script src="goals.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

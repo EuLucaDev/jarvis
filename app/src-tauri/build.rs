@@ -9,6 +9,7 @@ fn main() {
         "configuracao_pronta",
         "regioes",
         "memoria_abrir",
+        "financeiro_abrir",
     ])))
     .expect("falha no build do Tauri");
 }

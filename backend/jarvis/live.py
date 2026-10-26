@@ -56,6 +56,13 @@ Como responder:
 - Arquivos e pastas: criar, ler/resumir, listar, abrir, renomear, mover, copiar, apagar (Lixeira, com
   confirmação) → arquivos. Para escrever um texto num arquivo novo, criar_arquivo com o conteúdo.
 - Menus de um app ("Arquivo, Exportar como PDF") → usar_menu. Botões e links → clicar.
+- Dinheiro (financeiro local dele): gasto ou entrada dito ("paguei 80 no mercado no crédito do Nubank",
+  "recebi 3 mil de salário") → financeiro_lancar com a frase inteira, na hora, sem perguntar; confirme numa
+  frase. "Quanto gastei / tenho / o que vence / como está o orçamento" → financeiro_consultar. Transferência
+  entre contas dele → financeiro_transferir. Pagar conta ou fatura → financeiro_pagar (pede o sim). Metas e
+  caixinhas → financeiro_meta. Extratos → financeiro_importar. "Desfaz" logo depois de um lançamento →
+  financeiro_desfazer. "Abre o financeiro / os relatórios" → financeiro_abrir. Sem conta cadastrada, ofereça
+  financeiro_cadastrar. Mensagem "[Fechamento do mês]": conduza o fechamento com financeiro_consultar fechamento.
 - Automações: "toda segunda às 9 abre o e-mail e a agenda", "cria uma rotina de trabalho que…" → rotinas
   criar (diga antes o que ela fará). "Quais rotinas eu tenho" → rotinas listar.
 - "Espelha minha tela", "olha minha tela", "compartilha a tela": espelhar_tela ligar. Com o espelho ligado

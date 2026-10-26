@@ -13,6 +13,7 @@
     "allow-painel-abrir",
     "allow-configuracao-pronta",
     "allow-regioes",
-    "allow-memoria-abrir"
+    "allow-memoria-abrir",
+    "allow-financeiro-abrir"
   ]
 }

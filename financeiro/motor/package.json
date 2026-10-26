@@ -1,0 +1,16 @@
+{
+  "name": "jarvis-financeiro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Motor financeiro do Jarvis (vem da Carteira Pessoal): SQLite local, leitores de extrato, faturas, metas e relatórios.",
+  "main": "servidor.js",
+  "scripts": {
+    "start": "node servidor.js",
+    "test": "node testes/verificar.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.2",
+    "pdfjs-dist": "^6.2.108",
+    "tesseract.js": "^7.0.0"
+  }
+}

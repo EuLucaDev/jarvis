@@ -1,5 +1,7 @@
 import {
   CalendarDays,
+  Undo2,
+  Wallet,
   CheckCircle2,
   Circle,
   CircleDashed,
@@ -29,7 +31,8 @@ import {
   X,
 } from 'lucide-react'
 import type { Card } from '../lib/socket'
-import type { CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
+import { api } from '../lib/api'
 
 const num = (v: unknown, d = 1) =>
   typeof v === 'number' ? v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—'
@@ -77,6 +80,7 @@ function labelFor(kind: Card['kind']) {
     mensagens: 'Mensagens · iMessage',
     saude: 'Saúde · Apple',
     plano: 'Trabalhando junto',
+    financeiro: 'Financeiro',
   }[kind]
 }
 
@@ -522,6 +526,64 @@ function Saude({ card, onClose }: { card: Card; onClose?: () => void }) {
   )
 }
 
+const brl = (v: unknown) =>
+  typeof v === 'number' ? v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : String(v ?? '')
+
+/** Financeiro: lançamento (com Desfazer), resumo com barras ou lista (a pagar, faturas). */
+function Financeiro({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const d = card.data
+  const [desfeito, setDesfeito] = useState(false)
+  const sinal = d.sinal === 'entrada' ? '+' : d.sinal === 'saida' ? '−' : ''
+  const max = Math.max(1, ...((d.barras ?? []) as { valor: number; max?: number }[]).map((b) => b.max || b.valor || 0))
+  return (
+    <>
+      <Head card={{ ...card, data: { categoria: d.modo === 'lancamento' ? (desfeito ? 'Financeiro · desfeito' : 'Financeiro · lançado') : 'Financeiro', titulo: d.titulo } }} icon={Wallet} onClose={onClose} />
+      {typeof d.valor === 'number' && (
+        <p className={`fin-valor ${d.sinal ?? ''} ${desfeito ? 'riscado' : ''}`}>
+          {sinal}
+          {brl(Math.abs(d.valor))}
+        </p>
+      )}
+      {d.linhas?.length > 0 && (
+        <ul className="fin-linhas">
+          {d.linhas.map((l: { rotulo: string; valor: string; detalhe?: string; tom?: string }, i: number) => (
+            <li key={i} className={l.tom ?? ''}>
+              <span>{l.rotulo}</span>
+              <b>{l.valor}</b>
+              {l.detalhe && <small>{l.detalhe}</small>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {d.barras?.length > 0 && (
+        <ul className="fin-barras">
+          {d.barras.map((b: { rotulo: string; valor: number; max?: number }, i: number) => (
+            <li key={i}>
+              <span>{b.rotulo}</span>
+              <b>
+                {brl(b.valor)}
+                {b.max ? <small> de {brl(b.max)}</small> : null}
+              </b>
+              <i style={{ width: `${Math.min(100, ((b.valor || 0) / (b.max || max)) * 100)}%` }} className={b.max && b.valor > b.max * 0.8 ? 'alto' : ''} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {d.aviso && <p className="fin-aviso">{d.aviso}</p>}
+      {d.desfazer && !desfeito && (
+        <footer className="card-foot">
+          <button
+            className="fin-desfazer"
+            onClick={() => api('/api/fin/desfazer', { method: 'POST', json: d.desfazer }).then((r) => !r.erro && setDesfeito(true))}
+          >
+            <Undo2 size={13} /> Desfazer
+          </button>
+        </footer>
+      )}
+    </>
+  )
+}
+
 export function CardView({ card, onClose, onPeriod, preview }: { card: Card; onClose?: () => void; onPeriod?: (p: string) => void; preview?: string | null }) {
   return (
     <article className={`card card-${card.kind}`} key={card.id}>
@@ -537,6 +599,7 @@ export function CardView({ card, onClose, onPeriod, preview }: { card: Card; onC
       {card.kind === 'mensagens' && <Mensagens card={card} onClose={onClose} />}
       {card.kind === 'saude' && <Saude card={card} onClose={onClose} />}
       {card.kind === 'plano' && <Plano card={card} onClose={onClose} />}
+      {card.kind === 'financeiro' && <Financeiro card={card} onClose={onClose} />}
     </article>
   )
 }

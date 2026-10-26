@@ -11,7 +11,7 @@
 //
 // O clique só é capturado em cima dos elementos com data-hit (cartões, esfera); o resto passa para os apps.
 
-import { Brain, Camera, CameraOff, Maximize2, Mic, MicOff, MonitorOff, MonitorUp, Pin, X } from 'lucide-react'
+import { Brain, Camera, CameraOff, Wallet, Maximize2, Mic, MicOff, MonitorOff, MonitorUp, Pin, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { app, type HudState } from '../lib/app'
@@ -403,6 +403,7 @@ export function Overlay() {
             { on: voz, rotulo: voz ? 'Parar de ouvir' : 'Falar com o Jarvis', icon: voz ? Mic : MicOff, f: () => (voz ? j.stopVoice() : j.startVoice()) },
             { on: j.camera.ligada, rotulo: j.camera.ligada ? 'Desligar a câmera' : 'Ligar a câmera (mãos)', icon: j.camera.ligada ? Camera : CameraOff, f: () => api(`/api/camera/${j.camera.ligada ? 'desligar' : 'ligar'}`, { method: 'POST' }) },
             { on: j.tela.ligada, rotulo: j.tela.ligada ? 'Parar de espelhar a tela' : 'Espelhar a tela', icon: j.tela.ligada ? MonitorUp : MonitorOff, f: () => api(`/api/tela/${j.tela.ligada ? 'desligar' : 'ligar'}`, { method: 'POST' }) },
+            { on: false, rotulo: 'Financeiro', icon: Wallet, f: () => app.openFinance() },
             { on: false, rotulo: 'Mapa da memória', icon: Brain, f: () => app.openMemory() },
             { on: false, rotulo: 'Abrir o HUD', icon: Maximize2, f: () => app.showHud() },
           ].map(({ on, rotulo, icon: Icon, f }) => (

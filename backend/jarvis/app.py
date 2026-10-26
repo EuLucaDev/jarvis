@@ -13,11 +13,11 @@ import sys
 import time
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi import Body, FastAPI, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import briefing, chat, pc, store, system
+from . import briefing, chat, finance, pc, store, system
 from .audio import audio
 from .config import CODE_ROOT, DATA, HOME, settings
 from .demo import run_demo
@@ -80,11 +80,15 @@ async def startup():
     asyncio.create_task(alerts.loop())
     asyncio.create_task(activity.loop())
     asyncio.create_task(protocols.loop())
+    if finance.motor.disponivel():
+        await asyncio.to_thread(finance.motor.start)
+        asyncio.create_task(finance.motor.vigiar())
     log.info("Jarvis %s no ar em http://127.0.0.1:%s (%s)", VERSION, settings.port, pc.SISTEMA)
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    finance.motor.stop()
     espelho.stop()
     hands.stop()
     audio.stop()
@@ -151,7 +155,7 @@ async def setup_testar(body: dict = Body(...)):
 
 @app.post("/api/setup")
 async def setup_salvar(body: dict = Body(...)):
-    campos = {k: v for k, v in body.items() if k in ("gemini_api_key", "user_name", "tratamento", "city", "voice", "camera_auto") and v is not None}
+    campos = {k: v for k, v in body.items() if k in ("gemini_api_key", "user_name", "tratamento", "city", "voice", "camera_auto", "financeiro") and v is not None}
     if "gemini_api_key" in campos:
         campos["gemini_api_key"] = str(campos["gemini_api_key"]).strip()
     settings.update(**campos, configurado=True)
@@ -268,6 +272,53 @@ async def app_comandos():
     while not hub.app_queue.empty():
         out.append(hub.app_queue.get_nowait())
     return out
+
+
+# ---------- financeiro (telas em /financeiro/, motor em finance.py) ----------
+
+
+@app.post("/api/fin/c/{canal}")
+async def fin_chamar(canal: str, body: dict = Body(default={})):
+    args = body.get("args") or []
+    try:
+        if canal.startswith(("dialog:", "shell:")):
+            data = await finance.dialogo(canal, args[0] if args else None)
+        else:
+            data = await finance.chamar(canal, *args)
+        return {"ok": True, "data": data}
+    except finance.FinErro as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("financeiro %s: %s", canal, exc)
+        return {"ok": False, "error": "Erro no financeiro."}
+
+
+if os.getenv("JARVIS_TESTE"):
+
+    @app.post("/api/teste/ferramenta")
+    async def teste_ferramenta(body: dict = Body(...)):
+        """Só no modo de teste: roda uma ferramenta como se a voz tivesse pedido (testes e compilação)."""
+        from . import tools
+
+        return await tools.run(body.get("nome", ""), body.get("args") or {})
+
+
+@app.post("/api/fin/desfazer")
+async def fin_desfazer(body: dict = Body(...)):
+    from . import finance_voz
+
+    try:
+        return await finance_voz.desfazer(body.get("tipo"), body.get("id"))
+    except finance.FinErro as exc:
+        return {"erro": str(exc)}
+
+
+@app.post("/api/fin/arquivo")
+async def fin_arquivo(request: Request, nome: str = "arquivo"):
+    dados = await request.body()
+    if len(dados) > 80_000_000:
+        return {"ok": False, "error": "Arquivo grande demais."}
+    return {"ok": True, "data": await asyncio.to_thread(finance.guardar_entrada, nome, dados)}
 
 
 @app.get("/api/gestos")
@@ -706,6 +757,10 @@ if (WEB / "assets").exists():
 
 @app.get("/{path:path}")
 async def spa(path: str):
+    if path in ("financeiro", "financeiro/"):  # telas do financeiro (HTML próprio, arquivos relativos à pasta)
+        if not path.endswith("/"):
+            return RedirectResponse("/financeiro/")
+        return FileResponse(WEB / "financeiro" / "index.html", headers={"Cache-Control": "no-cache"})
     file = (WEB / path).resolve()
     if path and file.is_file() and WEB.resolve() in file.parents:
         return FileResponse(file)

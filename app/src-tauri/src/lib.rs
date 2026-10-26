@@ -193,6 +193,7 @@ fn emit_estado(app: &AppHandle) {
 fn criar_hud(app: &AppHandle, visivel: bool) -> tauri::Result<WebviewWindow> {
     let w = WebviewWindowBuilder::new(app, "hud", url("/?app=1"))
         .title("J.A.R.V.I.S.")
+        .disable_drag_drop_handler() // extratos arrastados para o HUD chegam na página
         .inner_size(1440.0, 900.0)
         .min_inner_size(900.0, 600.0)
         .center()
@@ -334,6 +335,33 @@ fn abrir_memoria(app: &AppHandle, foco: String) {
         .build();
 }
 
+/// Financeiro (as telas da Carteira, servidas pelo núcleo em /financeiro/) numa janela própria, na página pedida.
+fn abrir_financeiro(app: &AppHandle, pagina: String) {
+    let pagina: String = pagina.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    if let Some(w) = app.get_webview_window("financeiro") {
+        if !pagina.is_empty() {
+            let _ = w.eval(&format!("window.jarvisNavegar && window.jarvisNavegar({pagina:?})"));
+        }
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let criada = WebviewWindowBuilder::new(app, "financeiro", url("/financeiro/"))
+        .title("Jarvis · Financeiro")
+        .inner_size(1380.0, 880.0)
+        .min_inner_size(820.0, 560.0)
+        .center()
+        .disable_drag_drop_handler() // extratos arrastados chegam na página (HTML), não no app
+        .build();
+    if let (Ok(w), false) = (criada, pagina.is_empty() || pagina == "dashboard") {
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(2500)); // a página termina de carregar
+            let _ = w.eval(&format!("window.jarvisNavegar && window.jarvisNavegar({pagina:?})"));
+        });
+    }
+}
+
 /// Pedidos do núcleo (chamado por "Jarvis", "vai para o canto", "mostre minha memória"). Espera no próprio
 /// núcleo (até 20 s por vez), então vale mesmo com todas as janelas escondidas.
 fn ouvir_nucleo(app: AppHandle) {
@@ -349,12 +377,14 @@ fn ouvir_nucleo(app: AppHandle) {
         for c in lista {
             let acao = c.get("acao").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let foco = c.get("foco").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let pagina = c.get("pagina").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let h = app.clone();
             let _ = app.run_on_main_thread(move || match acao.as_str() {
                 "mostrar" => mostrar_hud(&h),
                 "minimizar" => ir_para_canto(&h),
                 "esconder" => esconder_tudo(&h),
                 "memoria" => abrir_memoria(&h, foco),
+                "financeiro" => abrir_financeiro(&h, pagina),
                 _ => {}
             });
         }
@@ -389,6 +419,11 @@ fn hud_minimizar(app: AppHandle) {
 #[tauri::command]
 fn hud_esconder(app: AppHandle) {
     esconder_tudo(&app);
+}
+
+#[tauri::command]
+fn financeiro_abrir(app: AppHandle, pagina: Option<String>) {
+    abrir_financeiro(&app, pagina.unwrap_or_default());
 }
 
 #[tauri::command]
@@ -428,13 +463,14 @@ fn montar_bandeja(app: &AppHandle) -> tauri::Result<()> {
     let mostrar = MenuItem::with_id(app, "mostrar", "Mostrar o Jarvis", true, Some("Alt+Space"))?;
     let canto = MenuItem::with_id(app, "canto", "Ficar no canto", true, None::<&str>)?;
     let memoria = MenuItem::with_id(app, "memoria", "Memória", true, None::<&str>)?;
+    let financeiro = MenuItem::with_id(app, "financeiro", "Financeiro", true, None::<&str>)?;
     let painel = MenuItem::with_id(app, "painel", "Painel", true, None::<&str>)?;
     let inicio = CheckMenuItem::with_id(app, "inicio", "Abrir com o computador", true, inicio_ligado(app), None::<&str>)?;
     let config = MenuItem::with_id(app, "config", "Configuração inicial…", true, None::<&str>)?;
     let sair = MenuItem::with_id(app, "sair", "Sair do Jarvis", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&mostrar, &canto, &sep, &memoria, &painel, &config, &inicio, &sep2, &sair])?;
+    let menu = Menu::with_items(app, &[&mostrar, &canto, &sep, &financeiro, &memoria, &painel, &config, &inicio, &sep2, &sair])?;
     TrayIconBuilder::with_id("jarvis")
         .icon(app.default_window_icon().cloned().expect("ícone"))
         .tooltip("Jarvis")
@@ -444,6 +480,7 @@ fn montar_bandeja(app: &AppHandle) -> tauri::Result<()> {
             "mostrar" => mostrar_hud(app),
             "canto" => ir_para_canto(app),
             "memoria" => abrir_memoria(app, String::new()),
+            "financeiro" => abrir_financeiro(app, String::new()),
             "inicio" => {
                 let ligar = !inicio_ligado(app);
                 definir_inicio(app, ligar);
@@ -566,7 +603,8 @@ pub fn run() {
             painel_abrir,
             configuracao_pronta,
             regioes,
-            memoria_abrir
+            memoria_abrir,
+            financeiro_abrir
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

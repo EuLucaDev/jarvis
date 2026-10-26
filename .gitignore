@@ -14,3 +14,10 @@ frontend/public/mediapipe/
 build/
 backend/models/
 backend/dist/
+
+# sistema financeiro de referência (tem extratos reais)
+Sistema Financeiro.zip
+financeiro/exemplos/
+financeiro/motor/node_modules/
+financeiro/motor/tessdata/
+backend/node-bin/

@@ -3,6 +3,8 @@
 - Compromisso começando em N minutos (agenda do briefing).
 - E-mail urgente novo (comparado com o que já foi avisado).
 - Ativo da carteira com movimento forte no dia.
+- Financeiro: conta ou fatura vencendo em 3 dias e no dia, orçamento passando de 80% e o fechamento do mês
+  (último dia, às 19h por padrão: ele chama a pessoa para fechar o mês junto).
 
 Cada aviso vai para o HUD, vira notificação do Mac e, se a voz estiver ao vivo, o Jarvis fala.
 No horário de silêncio só fica registrado.
@@ -12,6 +14,7 @@ import asyncio
 import datetime as dt
 import logging
 import subprocess
+import sys
 import time
 import uuid
 from typing import Any
@@ -57,7 +60,7 @@ async def notify(titulo: str, texto: str, nivel: str = "info", falar: bool = Tru
     await hub.broadcast({"type": "alerta", **alert, "silencioso": quiet})
     if quiet:
         return alert
-    if cfg.get("notificacao_mac", True):
+    if cfg.get("notificacao_mac", True) and sys.platform == "darwin":
         safe = lambda s: s.replace('"', "'")  # noqa: E731
         subprocess.run(
             ["osascript", "-e", f'display notification "{safe(texto)}" with title "Jarvis" subtitle "{safe(titulo)}"'],
@@ -122,13 +125,62 @@ async def _check_market(cfg: dict[str, Any]) -> None:
             await notify("Mercado", f"{q['nome']} {sinal} {abs(v):.1f}% hoje".replace(".", ","), "mercado")
 
 
+async def _check_financeiro(cfg: dict[str, Any]) -> None:
+    from . import finance
+    from .finance_voz import brl
+
+    if not cfg.get("financeiro", True) or not finance.motor.disponivel() or not finance.motor.ligado:
+        return
+    hoje = dt.date.today()
+    for i in await finance.chamar("payables:list", 3) or []:
+        # uma vez quando faltar de 1 a 3 dias (vale mesmo se o Jarvis estava desligado no dia exato) e de novo no dia
+        quando = "hoje" if i["days"] == 0 else "venceu" if i["days"] < 0 else "breve"
+        key = f"fin:{i['kind']}:{i['id']}:{quando}"
+        if _seen(key):
+            continue
+        _mark(key)
+        texto = {"hoje": "vence hoje", "venceu": "está vencida", "breve": f"vence em {i['days']} dia{'s' if i['days'] > 1 else ''}"}[quando]
+        await notify("Conta a pagar" if i["kind"] == "expense" else "Fatura do cartão", f"{i['title']}, {brl(i['amount'])}, {texto}",
+                     "alta" if quando != "breve" else "info")
+    mes = hoje.strftime("%Y-%m")
+    for r in await finance.chamar("insights:budgetPace", mes) or []:
+        if r["pct"] >= 80:
+            key = f"orc:{mes}:{r['category']}"
+            if not _seen(key):
+                _mark(key)
+                extra = "; no ritmo atual vai estourar" if r.get("willExceed") else ""
+                await notify("Orçamento", f"{r['category']} já usou {round(r['pct'])}% ({brl(r['used'])} de {brl(r['limit'])}){extra}")
+
+
+async def _check_fechamento(cfg: dict[str, Any]) -> None:
+    """Último dia do mês, a partir da hora escolhida: o Jarvis chama para fechar o mês junto (uma vez)."""
+    from . import finance
+
+    if not cfg.get("fechamento", True) or not finance.motor.disponivel() or not finance.motor.ligado:
+        return
+    agora = dt.datetime.now()
+    amanha = agora.date() + dt.timedelta(days=1)
+    if amanha.day != 1 or agora.strftime("%H:%M") < (cfg.get("fechamento_hora") or "19:00") or _quiet(cfg):
+        return
+    key = f"fech:{agora.strftime('%Y-%m')}"
+    if _seen(key) or not await finance.chamar("accounts:list"):
+        return
+    _mark(key)
+    from .live import voice
+
+    hub.app_cmd("mostrar")
+    await voice.ask("[Fechamento do mês] Aviso do sistema, não é o usuário falando: hoje é o último dia do mês. "
+                    "Chame-o para fechar o mês junto, numa frase, e se ele topar conduza com financeiro_consultar fechamento.")
+
+
 async def loop() -> None:
     await asyncio.sleep(30)
     tick = 0
     while True:
         cfg = _cfg()
         if cfg.get("ativo", True):
-            for check in (_check_agenda, _check_emails) + ((_check_market,) if tick % 15 == 0 else ()):
+            extras = ((_check_market,) if tick % 15 == 0 else ()) + ((_check_financeiro,) if tick % 30 == 0 else ()) + ((_check_fechamento,) if tick % 5 == 0 else ())
+            for check in (_check_agenda, _check_emails) + extras:
                 try:
                     await check(cfg)
                 except Exception as exc:  # noqa: BLE001

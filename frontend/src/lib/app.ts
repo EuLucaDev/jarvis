@@ -20,6 +20,7 @@ export const app = {
   hide: () => call('hud_esconder'),
   openPanel: () => call('painel_abrir'),
   openMemory: (foco = '') => call('memoria_abrir', { foco }),
+  openFinance: (pagina = '') => call('financeiro_abrir', { pagina }),
   setupDone: () => call('configuracao_pronta'),
   /** Áreas da camada que recebem o mouse (cartões, esfera do canto); o resto deixa o clique passar. */
   setHitRegions: (rects: { x: number; y: number; w: number; h: number }[]) => call('regioes', { rects }),

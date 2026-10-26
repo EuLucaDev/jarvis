@@ -50,10 +50,16 @@ DEPOIS DE INSTALADO
   - Arquivos: "cria uma pasta Projetos na Mesa", "cria um arquivo com…", "resume o PDF contrato",
     "move o relatório para Documentos", "apaga a pasta teste" (vai para a Lixeira, com confirmação).
   - Rotinas: "Jarvis, toda segunda às 9 abre o Gmail e a agenda" (ou em Painel → Operações).
+  - Financeiro (ícone → Financeiro, ou "Jarvis, abre o financeiro"): contas, cartões, faturas, metas,
+    investimentos e relatórios. Por voz: "paguei 80 no mercado no crédito do Nubank em 2x", "recebi 3 mil
+    de salário", "quanto gastei com comida esse mês?", "o que vence essa semana?", "guarda 200 na meta
+    viagem", "importa os extratos da pasta Downloads". Arraste extratos (PDF, CSV, OFX ou foto) para o HUD.
+    Ele avisa contas vencendo, orçamento passando de 80% e chama para fechar o mês no último dia.
   - Peça coisas no computador: "abre o Notas e escreve…", "olha essa planilha", "minimiza o navegador",
     "fecha essa janela", "põe o Chrome na metade da esquerda", "manda pro outro monitor".
   - "Espelha minha tela": o Jarvis passa a ver a sua tela o tempo todo (aparece no HUD); "para de
     espelhar" desliga. No Mac precisa da permissão Gravação de Tela.
 
 A chave da Gemini é grátis: https://aistudio.google.com/apikey
-Cada pessoa começa do zero: memória, ajustes e chave ficam só no computador dela.
+Cada pessoa começa do zero: memória, financeiro, ajustes e chave ficam só no computador dela. Nada vai para a internet
+(fora a conversa com a IA da Gemini e as cotações da bolsa).

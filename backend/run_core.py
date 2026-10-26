@@ -71,6 +71,20 @@ def verificar() -> int:
         out["controle_pc"] = f"ok ({pc.SISTEMA})"
     except Exception as exc:  # noqa: BLE001
         out["controle_pc"] = f"ERRO {exc}"
+    try:
+        import subprocess
+
+        from jarvis import finance
+
+        node = finance._node()  # noqa: SLF001
+        if not node:
+            out["financeiro"] = "ERRO sem Node"
+        else:
+            r = subprocess.run([node, "-e", "require('better-sqlite3'); require('./db/router'); console.log('ok')"], cwd=finance.MOTOR,
+                               capture_output=True, text=True, timeout=60)
+            out["financeiro"] = "ok" if r.stdout.strip() == "ok" else f"ERRO {(r.stderr or r.stdout)[-200:]}"
+    except Exception as exc:  # noqa: BLE001
+        out["financeiro"] = f"ERRO {exc}"
     out["interface"] = "ok" if (settings.web_dist / "index.html").exists() else f"ERRO sem {settings.web_dist}"
     out["versao"] = (CODE_ROOT / "VERSION").read_text().strip() if (CODE_ROOT / "VERSION").exists() else "?"
     print(json.dumps(out, ensure_ascii=False))

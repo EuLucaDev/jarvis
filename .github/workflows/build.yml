@@ -1,4 +1,6 @@
-# Compila o Jarvis para Mac (Apple Silicon), Windows e Linux e junta tudo num zip só, publicado como versão.
+# Compila o Jarvis para Mac (Apple Silicon), Windows e Linux e junta tudo num zip só.
+# Nada é publicado: o zip fica guardado por 1 dia só para ser baixado (scripts/baixar-zip.sh baixa para a Mesa
+# e apaga daqui). Os dados de quem usa o Jarvis nunca passam pelo GitHub: ficam no computador da pessoa.
 # Roda quando uma tag v* é enviada (ex.: v2.0.0) ou à mão (Actions → Compilar o Jarvis → Run workflow).
 name: Compilar o Jarvis
 
@@ -8,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -57,6 +59,16 @@ jobs:
           npm ci
           npm run build
 
+      - name: Motor financeiro (Node) e testes
+        working-directory: financeiro/motor
+        run: |
+          npm ci --omit=dev
+          npm test
+          # o Node vai junto com o Jarvis: quem instala não precisa ter nada
+          mkdir -p ../../backend/node-bin
+          if [ "${{ matrix.nome }}" = "windows" ]; then cp "$(command -v node).exe" ../../backend/node-bin/ 2>/dev/null || cp "$(command -v node)" ../../backend/node-bin/node.exe; else cp "$(command -v node)" ../../backend/node-bin/node; fi
+          ls -la ../../backend/node-bin
+
       - name: Núcleo (Python → executável)
         working-directory: backend
         run: |
@@ -76,6 +88,8 @@ jobs:
           curl -sf http://127.0.0.1:8765/health || (cat "$RUNNER_TEMP/core.log"; exit 1)
           curl -sf http://127.0.0.1:8765/ | grep -q '<div id="root">' || (echo "interface não veio"; exit 1)
           curl -sf http://127.0.0.1:8765/api/setup
+          # financeiro: o motor (Node empacotado) responde e lança pela voz
+          curl -sf -X POST http://127.0.0.1:8765/api/fin/c/app:needsOnboarding -H 'content-type: application/json' -d '{}' | grep -q '"ok":true' || (cat "$RUNNER_TEMP/core.log"; cat "$JARVIS_HOME/financeiro.log"; exit 1)
           python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/reiniciar', data=b'')" || true
 
       - name: App (Tauri)
@@ -127,7 +141,7 @@ jobs:
         with:
           name: jarvis-${{ matrix.nome }}
           path: out/*
-          retention-days: 14
+          retention-days: 1
 
   zip:
     needs: build
@@ -155,9 +169,5 @@ jobs:
         with:
           name: Jarvis-zip
           path: ${{ env.ZIP }}
-      - name: Publicar a versão
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete "v$V" -y 2>/dev/null || true
-          gh release create "v$V" "$ZIP" --title "Jarvis $V" --notes-file docs/LEIA-ME.txt
+          retention-days: 1
+          compression-level: 0
