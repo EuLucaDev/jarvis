@@ -11,7 +11,7 @@
 //
 // O clique só é capturado em cima dos elementos com data-hit (cartões, esfera); o resto passa para os apps.
 
-import { Brain, Camera, CameraOff, Wallet, Maximize2, Mic, MicOff, MonitorOff, MonitorUp, Pin, X } from 'lucide-react'
+import { Brain, Camera, CameraOff, Inbox, Wallet, Maximize2, Mic, MicOff, MonitorOff, MonitorUp, Pin, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { app, type HudState } from '../lib/app'
@@ -31,6 +31,7 @@ type Pos = { x: number; y: number; z: number; fixo?: boolean }
 const MINI = 104
 const FLY = 150
 const CARD_W = 420
+const GUARDAR_MS = 10_000 // tempo na tela antes de ir para a caixa
 const HOLD = (() => {
   try {
     return Number(localStorage.getItem('jarvis.holdMs')) || 1500
@@ -55,7 +56,16 @@ export function Overlay() {
   // ---------- cartões na área de trabalho ----------
   const [pos, setPos] = useState<Record<string, Pos>>({})
   const dragBase = useRef<Record<string, Pos>>({})
-  const visiveis = principal ? j.cards.filter((c) => c.kind !== 'carregando').slice(-5) : []
+  const todos = principal ? j.cards.filter((c) => c.kind !== 'carregando') : []
+
+  // cartão fica ~10 s na tela e vai sozinho para a caixa (canto de cima); fixado ou com a mão/mouse em cima, fica
+  const [guardados, setGuardados] = useState<Set<string>>(new Set())
+  const [caixaAberta, setCaixaAberta] = useState(false)
+  const toque = useRef<Record<string, number>>({}) // última vez que apareceu, foi tocado ou arrastado
+  const [mouseEm, setMouseEm] = useState<string | null>(null)
+  const tocar = (id: string) => (toque.current[id] = Date.now())
+  const visiveis = todos.filter((c) => !guardados.has(c.id)).slice(-5)
+  const naCaixa = todos.filter((c) => guardados.has(c.id))
   // cartão novo entra na coluna da direita, empilhado
   useEffect(() => {
     setPos((p) => {
@@ -70,7 +80,33 @@ export function Overlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visiveis.map((c) => c.id).join()])
 
+  useEffect(() => {
+    const t = setInterval(() => {
+      const agora = Date.now()
+      const sair = visiveis.filter((c) => {
+        toque.current[c.id] ??= agora
+        return !pos[c.id]?.fixo && c.id !== mouseEm && c.id !== hcHover.current && agora - toque.current[c.id] > GUARDAR_MS
+      })
+      if (sair.length) {
+        setGuardados((g) => new Set([...g, ...sair.map((c) => c.id)]))
+        play('close', 0.8)
+      }
+    }, 1000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visiveis.map((c) => c.id).join(), pos, mouseEm])
+  // cartão fechado ou limpo sai também da caixa
+  useEffect(() => {
+    setGuardados((g) => new Set([...g].filter((id) => todos.some((c) => c.id === id))))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todos.map((c) => c.id).join()])
+  const tirarDaCaixa = (id: string) => {
+    tocar(id)
+    setGuardados((g) => new Set([...g].filter((x) => x !== id)))
+  }
+
   const moveCard = useCallback((id: string, dx: number, dy: number, done: boolean) => {
+    tocar(id)
     setPos((p) => {
       const base = dragBase.current[id] ?? p[id]
       if (!dragBase.current[id]) dragBase.current[id] = base
@@ -135,6 +171,7 @@ export function Overlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [area.x, area.y, area.w, area.h],
   )
+  const hcHover = useRef<string | null>(null)
   const minha = useCallback(
     (h: Hand) => {
       if (h.gx == null) return principal
@@ -165,6 +202,11 @@ export function Overlay() {
     },
     j.camera.ligada,
   )
+
+  hcHover.current = hc.hoverCard
+  useEffect(() => {
+    if (hc.hoverCard) tocar(hc.hoverCard) // mão em cima: o tempo recomeça
+  }, [hc.hoverCard])
 
   // "isso aqui": o cartão apontado pela mão vai para o núcleo
   useEffect(() => {
@@ -393,7 +435,15 @@ export function Overlay() {
             data-card={c.id}
             data-hit
             style={{ transform: `translate(${p.x}px, ${p.y}px)` }}
-            onPointerDown={onPointerDown(c.id, 'mover')}
+            onPointerDown={(e) => {
+              tocar(c.id)
+              onPointerDown(c.id, 'mover')(e)
+            }}
+            onPointerEnter={() => setMouseEm(c.id)}
+            onPointerLeave={() => {
+              tocar(c.id)
+              setMouseEm((m) => (m === c.id ? null : m))
+            }}
           >
             {/* zoom (e não scale) muda o tamanho redesenhando o texto: o cartão fica nítido em qualquer tamanho */}
             <div className="dcard-body" style={{ width: CARD_W, zoom: p.z }}>
@@ -418,6 +468,36 @@ export function Overlay() {
           </div>
         )
       })}
+
+      {naCaixa.length > 0 && (
+        <div className={`ov-caixa ${caixaAberta ? 'aberta' : ''}`} data-hit>
+          <button className="ov-caixa-botao" onClick={() => setCaixaAberta((v) => !v)} aria-expanded={caixaAberta}>
+            <Inbox size={14} /> {naCaixa.length} {naCaixa.length === 1 ? 'cartão guardado' : 'cartões guardados'}
+          </button>
+          {caixaAberta && (
+            <ul>
+              {[...naCaixa].reverse().map((c) => (
+                <li key={c.id}>
+                  <button
+                    onClick={() => {
+                      tirarDaCaixa(c.id)
+                      setCaixaAberta(false)
+                    }}
+                  >
+                    <b>{c.data.titulo ?? c.data.cidade ?? c.kind}</b>
+                    <small>{c.at}</small>
+                  </button>
+                </li>
+              ))}
+              <li>
+                <button className="limpar" onClick={() => (j.clearCards(), setCaixaAberta(false))}>
+                  Fechar todos
+                </button>
+              </li>
+            </ul>
+          )}
+        </div>
+      )}
 
       <div
         ref={orbEl}

@@ -304,7 +304,7 @@ DECLARATIONS = [
     types.FunctionDeclaration(
         name="financeiro_lancar",
         description=(
-            "Lança um gasto ou uma entrada no financeiro e mostra o cartão com Desfazer (salva na hora). frase = o que "
+            "Lança um gasto ou uma entrada AVULSA no financeiro (para o que repete todo mês use financeiro_fixa) e mostra o cartão com Desfazer (salva na hora). frase = o que "
             "ele disse, inteiro ('paguei 80 no mercado ontem no crédito do Nubank em 2x'); o leitor tira valor, data, "
             "forma, parcelas, conta/cartão e categoria. Os outros campos só se ele disser algo que a frase não tem ou "
             "corrigir (categoria dita vira regra para as próximas vezes)."
@@ -324,6 +324,31 @@ DECLARATIONS = [
                 "descricao": {"type": S},
             },
             "required": ["frase"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_fixa",
+        description=(
+            "Despesa fixa ou receita fixa: o que se repete TODO MÊS (aluguel, condomínio, internet, academia, "
+            "assinatura, salário, mesada). Use esta (e não financeiro_lancar) quando ele disser fixa, todo mês, mensal, "
+            "recorrente. criar já lança no mês atual (vai para o A pagar). listar mostra as fixas; remover pede o sim."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "acao": {"type": S, "enum": ["criar", "listar", "remover"]},
+                "tipo": {"type": S, "enum": ["despesa", "receita"]},
+                "nome": {"type": S, "description": "Ex.: Aluguel, Internet, Salário."},
+                "valor": {"type": N},
+                "dia": {"type": "INTEGER", "description": "Dia do mês em que vence (ou cai)."},
+                "categoria": {"type": S},
+                "conta": {"type": S},
+                "cartao": {"type": S},
+                "forma": {"type": S, "enum": ["pix", "debito", "dinheiro", "credito", "vale"]},
+                "lancar_este_mes": {"type": "BOOLEAN"},
+                "confirmado": {"type": "BOOLEAN"},
+            },
+            "required": ["tipo"],
         },
     ),
     types.FunctionDeclaration(
@@ -629,7 +654,89 @@ DECLARATIONS = [
 ]
 
 # Ferramentas lentas que não travam a conversa: ele avisa que vai verificar e responde quando chegar.
-NON_BLOCKING = {"pesquisar_web"}
+NON_BLOCKING = {"pesquisar_web", "pensar"}
+
+# Cérebro forte: a voz é rápida mas pensa pouco; pedidos difíceis vão para a Gemini Pro com raciocínio.
+PENSAR_DECL = types.FunctionDeclaration(
+    name="pensar",
+    behavior=types.Behavior.NON_BLOCKING,
+    description=(
+        "Consulta um modelo mais forte, que raciocina com calma (leva alguns segundos). Use para o que exige "
+        "pensar de verdade: análise, estratégia, decisão entre opções, contas e planejamento financeiro, plano "
+        "de projeto, texto caprichado (proposta, e-mail importante, roteiro), explicação difícil, revisar um "
+        "raciocínio; ou quando ele disser 'pensa melhor', 'pensa com calma'. Mande a pergunta completa e o "
+        "contexto que você já tem (dados de ferramentas, o que ele disse antes). Diga numa frase que vai pensar; "
+        "quando a resposta chegar, fale o essencial e mostre o detalhe num cartão (mostrar_lista ou mostrar_pesquisa)."
+    ),
+    parameters={
+        "type": "OBJECT",
+        "properties": {
+            "pergunta": {"type": S, "description": "O que ele quer, completo."},
+            "contexto": {"type": S, "description": "Dados e detalhes que ajudam (números, nomes, o que já se sabe)."},
+            "formato": {"type": S, "description": "Como quer a resposta: lista de passos, texto pronto, comparação, número…"},
+        },
+        "required": ["pergunta"],
+    },
+)
+# A Pro exige chave com faturamento (no grátis a cota dela é zero); sem ela, os Flash pensando no máximo
+_CEREBRO_PAUSA: dict[str, float] = {}
+CEREBROS = ["gemini-pro-latest", "gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-flash-latest"]
+
+
+async def _pensar(a: dict[str, Any]) -> dict[str, Any]:
+    from .llm import client
+    from .memory import memory
+
+    c = client()
+    if not c:
+        return {"erro": "Sem chave da Gemini."}
+    prompt = f"""Você é o raciocínio do J.A.R.V.I.S., assistente de {settings.user_name}. Hoje é {time.strftime('%d/%m/%Y %H:%M')}.
+Pense com cuidado e responda em português do Brasil, direto ao ponto, sem enrolação. A resposta vai ser
+falada (o essencial primeiro, em 1 a 3 frases) e o detalhe mostrado na tela.
+Se faltar um dado importante, diga qual e trabalhe com a melhor suposição, deixando isso claro. Não invente números.
+
+O que se sabe sobre ele:
+{memory.prompt_block(25)}
+
+Pedido: {a.get('pergunta', '')}
+Contexto: {a.get('contexto') or '—'}
+Formato desejado: {a.get('formato') or 'o que for mais útil'}
+
+Responda em JSON com: "fala" (o essencial para dizer em voz, até 3 frases), "titulo" (curto) e "detalhe"
+(lista de itens curtos com o raciocínio, passos ou o texto pronto)."""
+    schema = {"type": "OBJECT", "properties": {"fala": {"type": "STRING"}, "titulo": {"type": "STRING"},
+                                               "detalhe": {"type": "ARRAY", "items": {"type": "STRING"}}},
+              "required": ["fala", "detalhe"]}
+    import json as _json
+
+    inicio = time.monotonic()
+    for modelo in CEREBROS:
+        if _CEREBRO_PAUSA.get(modelo, 0) > time.time():
+            continue  # sem cota ou sobrecarregado há pouco: nem tenta
+        restante = 75 - (time.monotonic() - inicio)
+        if restante < 8:
+            break
+        try:
+            r = await asyncio.wait_for(c.aio.models.generate_content(
+                model=modelo, contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema,
+                                                   thinking_config=types.ThinkingConfig(thinking_budget=-1),
+                                                   http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1))),
+            ), timeout=min(45, restante))
+            out = _json.loads(r.text or "{}")
+            itens = [str(x) for x in out.get("detalhe") or []][:14]
+            if itens:
+                await hub.show_card("lista", {"titulo": out.get("titulo") or "Pensando com calma", "categoria": "Raciocínio",
+                                              "itens": [{"titulo": x} for x in itens]})
+            return {"fala": out.get("fala", ""), "detalhe": itens, "modelo": modelo,
+                    "instrucao": "Fale a 'fala' com naturalidade. O detalhe já está num cartão na tela; não leia a lista inteira."}
+        except Exception as exc:  # noqa: BLE001 - cota ou modelo indisponível: tenta o próximo
+            msg = str(exc)
+            # cota zero (a Pro no plano grátis) ou do dia: 6 h; limite por minuto: 1 min; sobrecarga/tempo: 2 min
+            pausa = 21600 if ("limit: 0" in msg or "PerDay" in msg) else 60 if "429" in msg else 120
+            _CEREBRO_PAUSA[modelo] = time.time() + pausa
+            log.warning("pensar com %s falhou: %s", modelo, msg[:160] or type(exc).__name__)
+    return {"erro": "Não consegui pensar com o modelo forte agora (cota ou instabilidade). Responda com o que você sabe."}
 
 SEARCH_DECL = types.FunctionDeclaration(
     name="pesquisar_web",
@@ -650,9 +757,9 @@ SEARCH_DECL = types.FunctionDeclaration(
 )
 
 if settings.search == "google":
-    TOOLS = [types.Tool(google_search=types.GoogleSearch()), types.Tool(function_declarations=DECLARATIONS)]
+    TOOLS = [types.Tool(google_search=types.GoogleSearch()), types.Tool(function_declarations=[PENSAR_DECL, *DECLARATIONS])]
 else:
-    TOOLS = [types.Tool(function_declarations=[SEARCH_DECL, *DECLARATIONS])]
+    TOOLS = [types.Tool(function_declarations=[SEARCH_DECL, PENSAR_DECL, *DECLARATIONS])]
 
 
 def todas() -> list[types.Tool]:
@@ -806,6 +913,8 @@ async def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 await hub.show_card("clima", data)
                 data = {**data, "instrucao": "O cartão do clima já está na tela; não crie outro cartão."}
             return data
+        if name == "pensar":
+            return await _pensar(args)
         if name == "pesquisar_web":
             res = await asyncio.to_thread(_search, args.get("consulta", ""), args.get("tipo", "geral"))
             return {"resultados": res} if res else {"erro": "A busca não trouxe resultados."}
@@ -1065,7 +1174,7 @@ async def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
                     return fv.abrir(args.get("pagina"))
                 if name == "financeiro_desfazer":
                     return await fv.desfazer()
-                fn = {"financeiro_lancar": fv.lancar, "financeiro_consultar": fv.consultar, "financeiro_transferir": fv.transferir,
+                fn = {"financeiro_lancar": fv.lancar, "financeiro_fixa": fv.fixa, "financeiro_consultar": fv.consultar, "financeiro_transferir": fv.transferir,
                       "financeiro_pagar": fv.pagar, "financeiro_meta": fv.meta, "financeiro_importar": fv.importar,
                       "financeiro_cadastrar": fv.cadastrar}[name]
                 return await fn(args)

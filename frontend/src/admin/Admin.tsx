@@ -1006,6 +1006,43 @@ function IntegracoesPage({ only }: { only?: 'computador' | 'atalhos' | 'cameras'
 
 /* ---------- sistema ---------- */
 
+const RACIOCINIO = [
+  { id: 'rapido', nome: 'Rápido', desc: 'Responde na hora, pensa pouco.' },
+  { id: 'equilibrado', nome: 'Equilibrado', desc: 'Pensa um pouco antes de agir (padrão).' },
+  { id: 'profundo', nome: 'Profundo', desc: 'Pensa bem antes de falar; demora mais para começar.' },
+]
+
+function RaciocinioPanel() {
+  const [voz, setVoz] = useState<Record<string, any> | null>(null)
+  useEffect(() => {
+    api('/api/ajustes/voz').then(setVoz)
+  }, [])
+  if (!voz) return null
+  const atual = voz.raciocinio ?? 'equilibrado'
+  return (
+    <Panel
+      title="Raciocínio da voz"
+      desc="Quanto o Jarvis pensa antes de responder. Pedidos difíceis (análise, plano, contas, texto caprichado) ele passa para um modelo mais forte, que leva alguns segundos. Vale a partir da próxima conversa. Com faturamento ativo na chave da Gemini (Google AI Studio), ele usa a Gemini Pro e a pesquisa do Google; no plano grátis, a Pro fica sem cota."
+    >
+      <div className="seg" role="radiogroup" aria-label="Raciocínio da voz">
+        {RACIOCINIO.map((r) => (
+          <button
+            key={r.id}
+            role="radio"
+            aria-checked={atual === r.id}
+            className={atual === r.id ? 'on' : ''}
+            title={r.desc}
+            onClick={async () => setVoz(await api('/api/ajustes/voz', { method: 'PUT', json: { ...voz, raciocinio: r.id } }))}
+          >
+            {r.nome}
+          </button>
+        ))}
+      </div>
+      <p className="muted">{RACIOCINIO.find((r) => r.id === atual)?.desc}</p>
+    </Panel>
+  )
+}
+
 function SistemaPage({ t }: { t: Telemetry | null }) {
   const [s, setS] = useState<Record<string, any>>({})
   const [logs, setLogs] = useState<any[]>([])
@@ -1026,7 +1063,8 @@ function SistemaPage({ t }: { t: Telemetry | null }) {
         <Kpi icon={BrainCircuit} label="Memórias" value={String(s.memorias ?? '—')} sub="guardadas no Mac" />
         <Kpi icon={Monitor} label="Câmera" value={s.camera ? 'Ligada' : 'Desligada'} sub={s.camera_erro ?? 'mãos e visão'} />
       </div>
-      <Panel title="Configuração" desc="Definida no arquivo .env na pasta do projeto.">
+      <RaciocinioPanel />
+      <Panel title="Configuração" desc="Definida na configuração inicial (ícone → Configuração inicial).">
         <dl className="kv-a">
           <dt>Modelo de voz</dt>
           <dd>{s.model}</dd>

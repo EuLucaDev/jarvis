@@ -191,6 +191,78 @@ async def transferir(a: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "valor": brl(valor), "de": de["name"], "para": para["name"]}
 
 
+# ---------- despesas e receitas fixas (todo mês) ----------
+
+
+async def fixa(a: dict[str, Any]) -> dict[str, Any]:
+    """Conta que se repete todo mês (aluguel, internet, salário): fica cadastrada e é lançada a cada mês."""
+    tipo = a.get("tipo") or "despesa"
+    acao = a.get("acao") or "criar"
+    canal_lista = "fixedExpenses:list" if tipo == "despesa" else "recurringIncomes:list"
+    if acao == "listar":
+        itens = await chamar(canal_lista) or []
+        return {"fixas": [f"{i['name']}: {brl(i['estimatedAmount'])} todo dia {i.get('dueDay') or i.get('receiveDay')}"
+                          + ("" if i.get("status", "ATIVA") == "ATIVA" else " (pausada)") for i in itens]}
+    if acao == "remover":
+        itens = await chamar(canal_lista) or []
+        alvo = _achar(a.get("nome") or "", itens, ("name",))
+        if not alvo:
+            return {"erro": f"Não achei '{a.get('nome')}' nas {tipo}s fixas.", "fixas": [i["name"] for i in itens]}
+        if not a.get("confirmado"):
+            return {"precisa_confirmar": True, "instrucao": f"Pergunte se pode remover {alvo['name']} das {tipo}s fixas (os lançamentos já feitos ficam)."}
+        await chamar("fixedExpenses:delete" if tipo == "despesa" else "recurringIncomes:delete", alvo["id"])
+        await mudou()
+        return {"ok": True, "removida": alvo["name"]}
+
+    nome = (a.get("nome") or "").strip()
+    valor = float(a.get("valor") or 0)
+    if not nome or valor <= 0:
+        return {"erro": "Preciso do nome e do valor (ex.: aluguel, 1.800)."}
+    dia = int(a.get("dia") or dt.date.today().day)
+    contas = _ativas(await chamar("accounts:list") or [])
+    conta = _achar(a.get("conta") or "", contas) or (contas[0] if contas else None)
+    categoria = (a.get("categoria") or "").strip()
+    if not categoria:
+        sug = await chamar("rules:categorize", nome, "fixedExpense" if tipo == "despesa" else "income") or {}
+        categoria = sug.get("category") or ("Moradia" if tipo == "despesa" and "alug" in _norm(nome) else "Outros")
+    mes = dt.date.today().strftime("%Y-%m")
+    # o dia já passou neste mês? começa no mês que vem (senão nasceria "vencida")
+    if "lancar_este_mes" not in a:
+        a["lancar_este_mes"] = dia >= dt.date.today().day
+    if tipo == "receita":
+        if not conta:
+            return {"erro": "Cadastre uma conta antes (financeiro_cadastrar)."}
+        item = await chamar("recurringIncomes:create", {"name": nome, "source": a.get("descricao") or nome, "category": categoria,
+                                                        "defaultAccountId": conta["id"], "estimatedAmount": valor, "receiveDay": dia})
+        if a.get("lancar_este_mes", True):
+            await chamar("recurringIncomes:generate", mes)
+        onde = conta["name"]
+    else:
+        forma = FORMAS.get(a.get("forma") or "", "PIX")
+        cartoes = _ativas(await chamar("cards:list") or [])
+        cartao = _achar(a.get("cartao") or "", cartoes)
+        if cartao:
+            forma = "CARTAO_CREDITO" if cartao.get("cardType") == "CREDITO" else "VALE_BENEFICIO"
+        if forma in ("CARTAO_CREDITO", "VALE_BENEFICIO") and not cartao:
+            return {"erro": "De qual cartão sai essa conta?", "cartoes": [c["name"] for c in cartoes]}
+        if forma not in ("CARTAO_CREDITO", "VALE_BENEFICIO") and not conta:
+            return {"erro": "Cadastre uma conta antes (financeiro_cadastrar)."}
+        item = await chamar("fixedExpenses:create", {
+            "name": nome, "category": categoria, "defaultPaymentMethod": forma, "estimatedAmount": valor, "dueDay": dia,
+            "defaultBankAccountId": conta["id"] if conta and not cartao else "", "defaultCreditCardId": cartao["id"] if cartao else ""})
+        if a.get("lancar_este_mes", True):
+            await chamar("fixedExpenses:generate", mes)  # já aparece no A pagar deste mês
+        onde = cartao["name"] if cartao else f"{conta['name']} · {FORMA_NOME.get(forma, forma)}"
+    await _cartao({"modo": "lancamento", "titulo": f"{'Despesa' if tipo == 'despesa' else 'Receita'} fixa · {nome}",
+                   "sinal": "saida" if tipo == "despesa" else "entrada", "valor": valor,
+                   "linhas": [{"rotulo": "Todo dia", "valor": str(dia)}, {"rotulo": "Categoria", "valor": categoria},
+                              {"rotulo": "Pago com" if tipo == "despesa" else "Cai em", "valor": onde}]})
+    await mudou()
+    return {"ok": True, "fixa": nome, "valor": brl(valor), "todo_dia": dia, "categoria": categoria, "id": item.get("id"),
+            "comeca": "este mês" if a.get("lancar_este_mes") else "no mês que vem",
+            "instrucao": "Confirme numa frase (que vai repetir todo mês e quando começa)."}
+
+
 # ---------- cadastrar contas e cartões ----------
 
 
@@ -255,7 +327,8 @@ async def consultar(a: dict[str, Any]) -> dict[str, Any]:
                    "tom": "perigo" if i["days"] <= 0 else "aviso" if i["days"] <= 3 else ""} for i in itens]
         await _cartao({"modo": "lista", "titulo": f"A pagar · {dias} dias", "valor": sum(i["amount"] for i in itens), "sinal": "saida",
                        "linhas": linhas or [{"rotulo": "Nada vencendo", "valor": ""}]})
-        return {"itens": [f"{i['title']} {brl(i['amount'])} ({'vencida' if i['days'] < 0 else 'em ' + str(i['days']) + ' dias'})" for i in itens]}
+        quando = lambda d: "vencida" if d < 0 else "vence hoje" if d == 0 else "amanhã" if d == 1 else f"em {d} dias"  # noqa: E731
+        return {"itens": [f"{i['title']} {brl(i['amount'])} ({quando(i['days'])})" for i in itens]}
     if assunto == "faturas":
         cartoes = [c for c in await chamar("cards:list") or [] if c.get("cardType") == "CREDITO"]
         linhas, abertas = [], []

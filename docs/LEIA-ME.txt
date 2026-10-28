@@ -41,7 +41,11 @@ DEPOIS DE INSTALADO
     polegar = sim/não, punho = fecha os cartões, chifrinho = espelhar a tela, deslizar = trocar de aba.
   - Fechar a janela do Jarvis deixa ele no canto (esfera pequena com o vídeo da câmera); ele segue
     ouvindo. Para sumir de vez: ícone → Sair do Jarvis. "Abrir com o computador" também fica no ícone.
-  - Os cartões aparecem flutuando na tela; dá para arrastar, aumentar e fechar.
+  - Os cartões aparecem flutuando na tela; dá para arrastar, aumentar e fechar. Depois de ~10 s cada um vai
+    para a caixa no canto de cima ("cartões guardados"); clique nela para trazer de volta. Fixado não sai.
+  - Raciocínio (Painel → Sistema): rápido, equilibrado ou profundo. Pedidos difíceis ("pensa melhor nisso",
+    planos, contas, textos) ele pensa com um modelo mais forte. Com faturamento ativo na chave da Gemini,
+    usa a Gemini Pro e a pesquisa do Google.
   - Memória: "Jarvis, mostre minha memória" abre o mapa (você no centro, temas e memórias ligadas).
     Ele aprende sozinho ao fim de cada conversa. A memória também vira notas em Markdown que abrem
     no Obsidian (no mapa: "Abrir como notas").

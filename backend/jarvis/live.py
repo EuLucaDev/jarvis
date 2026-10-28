@@ -38,6 +38,9 @@ Como responder:
 - Você projeta cartões na tela dele (flutuam na área de trabalho e ele arruma com a mão ou o mouse).
   Quando a resposta tiver dados (números, comparações, notícias, fatos), pesquise e chame mostrar_pesquisa;
   fale só o principal. Passos, opções ou recomendações: mostrar_lista. Limpar: fechar_cartoes.
+- Pedido que exige raciocínio (análise, estratégia, decidir, planejar, contas, texto caprichado, "pensa melhor"):
+  pensar, com a pergunta completa e o contexto. Pedido simples ou de ação (abrir, lançar, criar) não precisa.
+- Antes de agir, confira se a ferramenta é a certa para o que ele pediu (ex.: "fixa/todo mês" ≠ lançamento avulso).
 - Fatos atuais: pesquisar_web. A busca roda em segundo plano: diga numa frase curta que vai verificar e,
   quando chegar, responda e mostre o cartão.
 - Clima: consultar_clima. Mercado: consultar_mercado. Ferramentas que já mostram cartão dispensam mostrar_pesquisa.
@@ -58,7 +61,7 @@ Como responder:
 - Menus de um app ("Arquivo, Exportar como PDF") → usar_menu. Botões e links → clicar.
 - Dinheiro (financeiro local dele): gasto ou entrada dito ("paguei 80 no mercado no crédito do Nubank",
   "recebi 3 mil de salário") → financeiro_lancar com a frase inteira, na hora, sem perguntar; confirme numa
-  frase. "Quanto gastei / tenho / o que vence / como está o orçamento" → financeiro_consultar. Transferência
+  frase. Conta que repete todo mês ("despesa fixa", "aluguel todo dia 5", "salário cai dia 10") → financeiro_fixa. "Quanto gastei / tenho / o que vence / como está o orçamento" → financeiro_consultar. Transferência
   entre contas dele → financeiro_transferir. Pagar conta ou fatura → financeiro_pagar (pede o sim). Metas e
   caixinhas → financeiro_meta. Extratos → financeiro_importar. "Desfaz" logo depois de um lançamento →
   financeiro_desfazer. "Abre o financeiro / os relatórios" → financeiro_abrir. Sem conta cadastrada, ofereça
@@ -108,8 +111,30 @@ def _sistemas() -> str:
     return sistemas.prompt_bloco()
 
 
+# Quanto a voz pensa antes de responder (Painel → Sistema → Raciocínio da voz):
+#   rapido      modelo de voz comum, responde na hora
+#   equilibrado modelo de voz que pensa, com pouco tempo de pensar (padrão)
+#   profundo    pensa mais antes de falar (demora um pouco mais para começar)
+MODELO_PENSA = "gemini-3.8-live-extended-thinking"
+NIVEL = {"equilibrado": "LOW", "profundo": "HIGH"}  # o modelo de voz que pensa usa nível, não orçamento
+_sem_modelo_pensa = False  # a conta não tem o modelo que pensa: volta para o comum
+
+
+def raciocinio() -> str:
+    from . import store
+
+    r = (store.get("voz") or {}).get("raciocinio", "equilibrado")
+    return r if r in ("rapido", "equilibrado", "profundo") else "equilibrado"
+
+
+def modelo_voz() -> str:
+    return settings.live_model if raciocinio() == "rapido" or _sem_modelo_pensa else MODELO_PENSA
+
+
 def build_config(handle: str | None) -> types.LiveConnectConfig:
+    pensa = modelo_voz() == MODELO_PENSA
     return types.LiveConnectConfig(
+        **({"thinking_config": types.ThinkingConfig(thinking_level=NIVEL[raciocinio()])} if pensa else {}),
         response_modalities=["AUDIO"],
         system_instruction=system_prompt(),
         speech_config=types.SpeechConfig(
@@ -235,12 +260,12 @@ class Voice:
         falhas = 0
         try:
             while True:
-                await hub.set_status(voice="connecting", model=settings.live_model, error=None)
+                await hub.set_status(voice="connecting", model=modelo_voz(), error=None)
                 try:
                     from . import sistemas
 
                     await sistemas.carregar_todos()  # ações dos sistemas conectados (WorkFlow etc.) entram na sessão
-                    async with client.aio.live.connect(model=settings.live_model, config=build_config(self.handle)) as session:
+                    async with client.aio.live.connect(model=modelo_voz(), config=build_config(self.handle)) as session:
                         self.session = session
                         falhas = 0
                         await hub.set_status(voice="live")
@@ -257,6 +282,11 @@ class Voice:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001
+                    global _sem_modelo_pensa
+                    if modelo_voz() == MODELO_PENSA and any(k in str(exc).lower() for k in ("not found", "not supported", "permission", "1008")):
+                        _sem_modelo_pensa = True  # tenta de novo já com o modelo comum, sem contar como falha
+                        log.warning("modelo de voz que pensa indisponível (%s); usando %s", exc, settings.live_model)
+                        continue
                     falhas += 1
                     log.warning("sessão de voz caiu: %s", exc)
                     await hub.set_status(voice="error", error=str(exc)[:300])
