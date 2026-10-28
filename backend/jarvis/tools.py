@@ -655,6 +655,17 @@ else:
     TOOLS = [types.Tool(function_declarations=[SEARCH_DECL, *DECLARATIONS])]
 
 
+def todas() -> list[types.Tool]:
+    """As ferramentas do Jarvis mais as dos sistemas conectados (MCP), montadas a cada sessão."""
+    from . import sistemas
+
+    extras = sistemas.declaracoes()
+    if not extras:
+        return TOOLS
+    *antes, ultima = TOOLS
+    return [*antes, types.Tool(function_declarations=[*(ultima.function_declarations or []), *extras])]
+
+
 def _search(consulta: str, tipo: str) -> list[dict[str, Any]]:
     from ddgs import DDGS
 
@@ -755,6 +766,14 @@ _DEPOIS = {"abrir_app", "abrir_link"}
 async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
     """Executa a ferramenta e devolve o que o modelo deve saber para falar."""
     args = args or {}
+    from . import sistemas
+
+    if sistemas.e_do_sistema(name):
+        try:
+            return await sistemas.executar(name, args)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("sistema %s: %s", name, exc)
+            return {"erro": f"Não consegui falar com o sistema: {str(exc)[:160]}"}
     rotulo = _ROTULO[name](args) if name in _ROTULO else ""
     if rotulo:
         from . import overlay

@@ -332,3 +332,11 @@ def front_rect() -> tuple[float, float, float, float] | None:
         if b.get("Width", 0) > 200 and b.get("Height", 0) > 120:
             return b["X"], b["Y"], b["Width"], b["Height"]
     return None
+
+
+def desktop_bounds() -> tuple[float, float, float, float]:
+    """Retângulo que junta todos os monitores (pontos globais): a mão percorre a área de trabalho inteira."""
+    ds = displays() or [main_display()]
+    x0, y0 = min(d[0] for d in ds), min(d[1] for d in ds)
+    x1, y1 = max(d[0] + d[2] for d in ds), max(d[1] + d[3] for d in ds)
+    return x0, y0, x1 - x0, y1 - y0

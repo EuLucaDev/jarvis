@@ -96,8 +96,16 @@ Memória (um mapa: ele no centro, temas ligados a ele e memórias ligadas aos te
 - "Mostre minha memória", "o que você sabe sobre mim/sobre X": mostrar_memoria (foco = o tema, se houver).
 - Siga as correções e lições abaixo.
 
+{_sistemas()}
+
 O que você já sabe sobre ele, por tema:
 {memory.prompt_block()}"""
+
+
+def _sistemas() -> str:
+    from . import sistemas
+
+    return sistemas.prompt_bloco()
 
 
 def build_config(handle: str | None) -> types.LiveConnectConfig:
@@ -109,7 +117,7 @@ def build_config(handle: str | None) -> types.LiveConnectConfig:
         ),
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
-        tools=tools.TOOLS,
+        tools=tools.todas(),
         context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
         session_resumption=types.SessionResumptionConfig(handle=handle),
     )
@@ -229,6 +237,9 @@ class Voice:
             while True:
                 await hub.set_status(voice="connecting", model=settings.live_model, error=None)
                 try:
+                    from . import sistemas
+
+                    await sistemas.carregar_todos()  # ações dos sistemas conectados (WorkFlow etc.) entram na sessão
                     async with client.aio.live.connect(model=settings.live_model, config=build_config(self.handle)) as session:
                         self.session = session
                         falhas = 0

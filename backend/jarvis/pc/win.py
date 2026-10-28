@@ -29,7 +29,7 @@ __all__ = [
     "clipboard_text", "front_app", "front_is_jarvis", "front_window_title", "keys_into", "lock_screen", "look_at",
     "main_bounds", "media", "move", "open_app", "open_link", "open_path", "pedir_permissao", "permitido", "position", "press",
     "replace_selection", "scroll", "selected_text", "set_clipboard", "snapshot", "type_into", "type_text", "volume",
-    "win_aim", "win_grab", "win_move", "win_release", "win_run", "win_scale", "win_throw", "apps_abertos", "janela_app", "front_rect", "usar_menu",
+    "win_aim", "win_grab", "win_move", "win_release", "win_run", "win_scale", "win_throw", "apps_abertos", "janela_app", "front_rect", "usar_menu", "desktop_bounds",
 ]
 
 _in = PynputInput()
@@ -668,3 +668,15 @@ def front_rect() -> tuple[float, float, float, float] | None:
 def usar_menu(caminho: str, app: str | None = None) -> dict[str, Any]:
     """Menus pelo nome ainda são só no Mac; aqui o Jarvis usa clicar (pelo nome) ou teclas."""
     return {"erro": "Neste sistema, use clicar com o nome do menu (ex.: 'Arquivo') e depois o item, ou teclas de atalho."}
+
+
+def desktop_bounds() -> tuple[float, float, float, float]:
+    """Retângulo que junta todos os monitores, em pontos lógicos."""
+    rects = []
+    for m in win32api.EnumDisplayMonitors():
+        rects.append(win32api.GetMonitorInfo(m[0])["Monitor"])
+    if not rects:
+        return main_bounds()
+    l, t = min(r[0] for r in rects), min(r[1] for r in rects)
+    r_, b = max(r[2] for r in rects), max(r[3] for r in rects)
+    return l / ESC, t / ESC, (r_ - l) / ESC, (b - t) / ESC

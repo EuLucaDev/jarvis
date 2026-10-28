@@ -705,6 +705,116 @@ function MemoriasPage() {
   )
 }
 
+/* ---------- sistemas conectados (MCP) ---------- */
+
+function SistemasForm() {
+  const [lista, setLista] = useState<any[] | null>(null)
+  const [novo, setNovo] = useState({ nome: '', url: '', token: '' })
+  const [aberto, setAberto] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [toast, toastNode] = useToast()
+  useEffect(() => {
+    api('/api/sistemas').then(setLista).catch(() => setLista([]))
+  }, [])
+  const salvar = async (dados: Record<string, unknown>, aviso?: string) => {
+    setBusy(true)
+    try {
+      const r = await api('/api/sistemas', { method: 'POST', json: dados })
+      setLista(r.sistemas)
+      toast(r.ok ? (aviso ?? `Conectado: ${r.acoes} ações${r.servidor ? ` do ${r.servidor}` : ''}`) : `Não conectou: ${r.erro}`)
+      return r.ok
+    } catch (e) {
+      toast(String((e as Error).message).slice(0, 160))
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!lista) return <p className="muted">Carregando…</p>
+  return (
+    <div className="stack">
+      <p className="muted">
+        Conecte sistemas seus que falam MCP (como o WorkFlow): o Jarvis passa a criar, ler e mexer neles por voz, com as permissões do token.
+        No WorkFlow, o endereço e o token ficam em Configurações → Conta → Tokens de acesso. O token fica só neste computador.
+      </p>
+      {lista.map((s) => (
+        <section className="panel-a" key={s.id}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span>
+              <b>{s.nome}</b>
+              <small className="muted" style={{ display: 'block' }}>
+                {s.erro ? `Erro: ${s.erro}` : `${s.acoes.length - (s.desligadas?.length ?? 0)} de ${s.acoes.length} ações ligadas`} · {s.url}
+              </small>
+            </span>
+            <span className="row">
+              <Switch on={s.ativo} onChange={(v) => salvar({ id: s.id, ativo: v }, v ? 'Ligado' : 'Desligado')} label="Ativo" />
+              <button className="btn" onClick={() => setAberto(aberto === s.id ? null : s.id)}>
+                {aberto === s.id ? 'Fechar' : 'Ações'}
+              </button>
+              <button className="btn" disabled={busy} onClick={() => salvar({ id: s.id }, 'Conexão testada')}>
+                <RefreshCw size={14} /> Testar
+              </button>
+              <button className="icon" onClick={async () => setLista(await api(`/api/sistemas/${s.id}`, { method: 'DELETE' }))} aria-label={`Remover ${s.nome}`}>
+                <Trash2 size={15} />
+              </button>
+            </span>
+          </div>
+          {aberto === s.id && (
+            <ul className="rows">
+              {s.acoes.map((a: any) => {
+                const ligada = !(s.desligadas ?? []).includes(a.nome)
+                return (
+                  <li key={a.nome}>
+                    <span>
+                      <b>
+                        {a.titulo} {a.destrutiva && <em className="tag t-correcao">pede confirmação</em>}
+                      </b>
+                      <small>{a.descricao}</small>
+                    </span>
+                    <Switch
+                      on={ligada}
+                      onChange={(v) =>
+                        salvar({ id: s.id, desligadas: v ? s.desligadas.filter((n: string) => n !== a.nome) : [...(s.desligadas ?? []), a.nome] }, v ? 'Ação ligada' : 'Ação desligada')
+                      }
+                      label={a.titulo}
+                    />
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </section>
+      ))}
+      <form
+        className="form-grid"
+        onSubmit={async (e) => {
+          e.preventDefault()
+          if (await salvar(novo)) setNovo({ nome: '', url: '', token: '' })
+        }}
+      >
+        <label className="field-a">
+          <span>Nome</span>
+          <input value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} placeholder="WorkFlow" />
+        </label>
+        <label className="field-a">
+          <span>Endereço do MCP</span>
+          <input value={novo.url} onChange={(e) => setNovo({ ...novo, url: e.target.value })} placeholder="https://workflow.agcunae.com/api/mcp" />
+        </label>
+        <label className="field-a span2">
+          <span>Token de acesso</span>
+          <input type="password" value={novo.token} onChange={(e) => setNovo({ ...novo, token: e.target.value })} placeholder="cw_…" autoComplete="off" />
+        </label>
+        <div className="row end span2">
+          <button className="btn primary" disabled={busy || !novo.nome.trim() || !novo.url.trim()}>
+            <Plug size={14} /> Conectar
+          </button>
+        </div>
+      </form>
+      {toastNode}
+    </div>
+  )
+}
+
 /* ---------- gestos ---------- */
 
 function GestosPage() {
@@ -954,6 +1064,7 @@ type ConnId = 'gmail' | 'agendas' | 'radar' | 'clima' | 'alexa' | 'atalhos' | 'l
 type Conn = { id: ConnId | string; nome: string; desc: string; cat: string; icon: typeof Bot; soon?: boolean }
 
 const CONNS: Conn[] = [
+  { id: 'sistemas', nome: 'Seus sistemas (MCP)', desc: 'WorkFlow e outros apps seus, por voz', cat: 'Produtividade', icon: Plug },
   { id: 'gmail', nome: 'Gmail', desc: 'E-mails que pedem ação no briefing', cat: 'Comunicação', icon: Mail },
   { id: 'agendas', nome: 'Google Agenda', desc: 'Compromissos de hoje e da semana', cat: 'Produtividade', icon: CalendarDays },
   { id: 'lembretes', nome: 'Lembretes da Apple', desc: 'Lembretes que chegam no iPhone', cat: 'Produtividade', icon: BellRing },
@@ -978,7 +1089,7 @@ function ConexoesPage() {
   const [open, setOpen] = useState<string | null>(null)
   const [st, setSt] = useState<Record<string, boolean>>({})
   const load = useCallback(async () => {
-    const [b, alexa, atalhos, cams, perm, notas, saude, alertas] = await Promise.all([
+    const [b, alexa, atalhos, cams, perm, notas, saude, alertas, sis] = await Promise.all([
       api('/api/ajustes/briefing'),
       api('/api/ajustes/alexa'),
       api<string[]>('/api/ajustes/atalhos'),
@@ -987,6 +1098,7 @@ function ConexoesPage() {
       api('/api/notas/cofres'),
       api('/api/saude'),
       api('/api/ajustes/alertas'),
+      api<any[]>('/api/sistemas').catch(() => []),
     ])
     setSt({
       gmail: (b.gmail ?? []).length > 0,
@@ -1004,6 +1116,7 @@ function ConexoesPage() {
       mercado: true,
       computador: true,
       musica: true,
+      sistemas: sis.some((x: any) => x.ativo && x.acoes.length > 0),
     })
   }, [])
   useEffect(() => {
@@ -1058,6 +1171,7 @@ function ConexoesPage() {
             {conn.id === 'clima' && <FontesPage only="radar" />}
             {(conn.id === 'atalhos' || conn.id === 'cameras' || conn.id === 'computador') && <IntegracoesPage only={conn.id} />}
             {conn.id === 'alexa' && <AlexaForm />}
+            {conn.id === 'sistemas' && <SistemasForm />}
             {conn.id === 'imessage' && <IMessageForm />}
             {conn.id === 'notas' && <NotasForm />}
             {conn.id === 'alertas' && <AlertasForm />}

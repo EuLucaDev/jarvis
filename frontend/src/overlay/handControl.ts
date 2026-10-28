@@ -24,6 +24,9 @@ type Ctx = {
   moveCard: (id: string, dx: number, dy: number, done: boolean) => void
   scaleCard: (id: string, z: number | null) => void // null = cancela (volta ao tamanho de antes)
   clickAt: (x: number, y: number) => boolean // clica num botão da camada; false se não havia nada
+  /** Mãos nas coordenadas desta camada (0..1 do monitor dela). Ocupada (no meio de um gesto), fica com a mão
+   *  mesmo fora do monitor, para arrastar uma janela de uma tela para a outra. */
+  local: (hands: Hand[], ocupada: boolean) => Hand[]
 }
 
 type Mode =
@@ -53,7 +56,7 @@ export function useHandControl(ctx: Ctx, active: boolean) {
   useEffect(() => {
     if (!active) return
     return handStore.subscribe(() => {
-      const hs = handStore.get().hands
+      const hs = c.current.local(handStore.get().hands, mode.current.m !== 'idle' || zoomBase.current != null)
       if (hs.length === 2 && hs[0].pinch && hs[1].pinch && mode.current.m !== 'resize') return zoom(hs[0], hs[1])
       zoomBase.current = null
       step(hs[0])

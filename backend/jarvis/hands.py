@@ -57,7 +57,9 @@ class Hands:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._jpeg: bytes | None = None
-        self.viewers = 0  # telas mostrando o vídeo ao vivo (aí o JPEG sai a cada quadro, não a cada segundo)
+        self.viewers = 0
+        self.area = (0.0, 0.0, 1920.0, 1080.0)  # área de trabalho inteira (todos os monitores), revista a cada 5 s
+        self._area_em = 0.0  # telas mostrando o vídeo ao vivo (aí o JPEG sai a cada quadro, não a cada segundo)
         self.state: dict[str, dict[str, Any]] = {}
         self.pose = ""
         self.pose_since = 0.0
@@ -130,6 +132,14 @@ class Hands:
                     ultimo_jpeg = agora
                     ok2, buf = cv2.imencode(".jpg", cv2.flip(frame, 1), [cv2.IMWRITE_JPEG_QUALITY, 70])
                     self._jpeg = buf.tobytes() if ok2 else None
+                if agora - self._area_em > 5:  # monitor plugado ou tirado: a mão passa a alcançar a área nova
+                    self._area_em = agora
+                    try:
+                        from . import pc
+
+                        self.area = pc.desktop_bounds()
+                    except Exception:  # noqa: BLE001
+                        pass
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 res = rec.recognize_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), int((agora - t0) * 1000))
                 hands, pts = self._process(res, agora)
@@ -187,10 +197,14 @@ class Hands:
                 pose = res.gestures[i][0].category_name
             s["trail"] = [t for t in s["trail"] if agora - t[2] < 0.32] + [(s["px"], s["py"], agora)]
             pinca = s["pinch"] and agora - s["seen"] > 0.25  # mão recém-chegada não clica
+            dx, dy, dw, dh = self.area
             mao = {"key": key, "x": round(s["x"], 4), "y": round(s["y"], 4), "pinch": pinca, "spread": round(s["spread"], 3),
-                   "pose": pose, "palm": [round(s["px"], 4), round(s["py"], 4)]}
+                   "pose": pose, "palm": [round(s["px"], 4), round(s["py"], 4)],
+                   # ponto na área de trabalho inteira (todos os monitores), em pontos globais: cada camada pega o seu
+                   "gx": round(dx + s["x"] * dw, 1), "gy": round(dy + s["y"] * dh, 1)}
             if pinca:
                 mao["ax"], mao["ay"] = round(s["ax"], 4), round(s["ay"], 4)
+                mao["gax"], mao["gay"] = round(dx + s["ax"] * dw, 1), round(dy + s["ay"] * dh, 1)
             hands.append(mao)
             pts_all.append([[round(x, 3), round(y, 3)] for x, y in pts])
         for k in list(self.state):

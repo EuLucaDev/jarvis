@@ -302,6 +302,12 @@ if os.getenv("JARVIS_TESTE"):
 
         return await tools.run(body.get("nome", ""), body.get("args") or {})
 
+    @app.post("/api/teste/evento")
+    async def teste_evento(body: dict = Body(...)):
+        """Só no modo de teste: manda um evento para as telas (ex.: mãos simuladas)."""
+        await hub.broadcast(body)
+        return {"ok": True}
+
 
 @app.post("/api/fin/desfazer")
 async def fin_desfazer(body: dict = Body(...)):
@@ -319,6 +325,39 @@ async def fin_arquivo(request: Request, nome: str = "arquivo"):
     if len(dados) > 80_000_000:
         return {"ok": False, "error": "Arquivo grande demais."}
     return {"ok": True, "data": await asyncio.to_thread(finance.guardar_entrada, nome, dados)}
+
+
+# ---------- sistemas conectados (MCP): WorkFlow e outros ----------
+
+
+@app.get("/api/sistemas")
+async def sistemas_listar():
+    from . import sistemas
+
+    await sistemas.carregar_todos()
+    return sistemas.publico()
+
+
+@app.post("/api/sistemas")
+async def sistemas_salvar(body: dict = Body(...)):
+    """Cria ou altera (com id) e já testa a conexão; devolve o que o sistema oferece."""
+    from . import sistemas
+
+    try:
+        s = sistemas.salvar(body)
+    except sistemas.SistemaErro as exc:
+        raise HTTPException(400, str(exc)) from exc
+    c = await sistemas.carregar(s, forcar=True)
+    return {"ok": not c.get("erro"), "erro": c.get("erro"), "acoes": len(c.get("ferramentas", [])), "servidor": c.get("servidor"),
+            "sistemas": sistemas.publico()}
+
+
+@app.delete("/api/sistemas/{sid}")
+async def sistemas_remover(sid: str):
+    from . import sistemas
+
+    sistemas.remover(sid)
+    return sistemas.publico()
 
 
 @app.get("/api/gestos")
@@ -669,6 +708,9 @@ async def _janela(ws: WebSocket, kind: str, data: dict[str, Any], aviso: list[fl
                                 "at": time.strftime("%H:%M")})
         return
     x, y = float(data.get("x", 0.5)), float(data.get("y", 0.5))
+    if "gx" in data:  # ponto global (qualquer monitor) → relativo ao principal, como as funções de janela esperam
+        mx, my, mw, mh = pc.main_bounds()
+        x, y = (float(data["gx"]) - mx) / mw, (float(data["gy"]) - my) / mh
     estado, res = None, None
     if kind == "janela.mira":
         res, estado = await pc.win_run(pc.win_aim, x, y), "mira"
@@ -716,9 +758,12 @@ async def ws_endpoint(ws: WebSocket):
             elif kind.startswith("janela.") and kind != "janela.realce":
                 await _janela(ws, kind, data, aviso)
             elif kind == "clique" and pc.permitido():
-                # pinça rápida fora do Jarvis: clique de verdade onde a mão aponta (0..1 do monitor principal)
-                x0, y0, w, h = pc.main_bounds()
-                await asyncio.to_thread(pc.click, x0 + float(data.get("x", 0.5)) * w, y0 + float(data.get("y", 0.5)) * h)
+                # pinça rápida fora do Jarvis: clique de verdade onde a mão aponta (em qualquer monitor)
+                if "gx" in data:
+                    await asyncio.to_thread(pc.click, float(data["gx"]), float(data["gy"]))
+                else:
+                    x0, y0, w, h = pc.main_bounds()
+                    await asyncio.to_thread(pc.click, x0 + float(data.get("x", 0.5)) * w, y0 + float(data.get("y", 0.5)) * h)
             elif kind == "zoom" and pc.permitido() and not pc.front_is_jarvis():
                 await asyncio.to_thread(pc.press, "cmd+=" if int(data.get("direcao", 1)) > 0 else "cmd+-")
             elif kind == "rolar" and pc.permitido():

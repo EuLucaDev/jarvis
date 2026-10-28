@@ -15,7 +15,7 @@ import { Brain, Camera, CameraOff, Wallet, Maximize2, Mic, MicOff, MonitorOff, M
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { app, type HudState } from '../lib/app'
-import { useHands, voiceStore } from '../lib/live'
+import { useHands, voiceStore, type Hand } from '../lib/live'
 import { play } from '../lib/sfx'
 import { CardView, cardText } from '../hud/Cards'
 import { useJarvis } from '../hud/useJarvis'
@@ -120,9 +120,50 @@ export function Overlay() {
     el.click()
     return true
   }, [])
+  // várias telas: cada camada cuida da mão que está no monitor dela (posição global gx/gy vinda do núcleo)
+  const paraLocal = useCallback(
+    (h: Hand): Hand => {
+      if (h.gx == null || h.gy == null) return h // núcleo antigo: só o monitor principal
+      return {
+        ...h,
+        x: (h.gx - area.x) / area.w,
+        y: (h.gy - area.y) / area.h,
+        ax: h.gax != null ? (h.gax - area.x) / area.w : h.ax,
+        ay: h.gay != null ? (h.gay - area.y) / area.h : h.ay,
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [area.x, area.y, area.w, area.h],
+  )
+  const minha = useCallback(
+    (h: Hand) => {
+      if (h.gx == null) return principal
+      const l = paraLocal(h)
+      return l.x >= 0 && l.x < 1 && l.y >= 0 && l.y < 1
+    },
+    [paraLocal, principal],
+  )
+  // o que sai daqui com x/y (clique, janelas) leva também o ponto global, para valer em qualquer monitor
+  const sendGlobal = useCallback(
+    (msg: object) => {
+      const m = msg as Record<string, unknown>
+      j.send(typeof m.x === 'number' && typeof m.y === 'number' ? { ...m, gx: area.x + m.x * area.w, gy: area.y + m.y * area.h } : m)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [j.send, area.x, area.y, area.w, area.h],
+  )
   const hc = useHandControl(
-    { send: j.send, hold: HOLD, cardAt, cardScale: (id) => pos[id]?.z ?? 1, moveCard, scaleCard, clickAt },
-    principal && j.camera.ligada,
+    {
+      send: sendGlobal,
+      hold: HOLD,
+      cardAt,
+      cardScale: (id) => pos[id]?.z ?? 1,
+      moveCard,
+      scaleCard,
+      clickAt,
+      local: (hs, ocupada) => (ocupada ? hs.map(paraLocal) : hs.filter(minha).map(paraLocal)),
+    },
+    j.camera.ligada,
   )
 
   // "isso aqui": o cartão apontado pela mão vai para o núcleo
@@ -315,7 +356,7 @@ export function Overlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handsOn = principal && j.camera.ligada
+  const handsOn = j.camera.ligada
   return (
     <main className="overlay" onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
       {win && (
@@ -413,8 +454,8 @@ export function Overlay() {
           ))}
         </div>
       )}
-      {mini && handsOn && <HandPreview />}
-      {handsOn && <HandCursors ring={hc.ring} tip={hc.tip} />}
+      {mini && principal && handsOn && <HandPreview />}
+      {handsOn && <HandCursors ring={hc.ring} tip={hc.tip} minha={minha} paraLocal={paraLocal} />}
       {gesto && <div className="ov-gesto">{gesto}</div>}
     </main>
   )
@@ -458,8 +499,18 @@ function HandPreview() {
 }
 
 /** Cursores das mãos por cima de tudo, com o anel de segurar e a dica do gesto. */
-function HandCursors({ ring, tip }: { ring: { x: number; y: number; p: number; kind: string } | null; tip: string }) {
-  const { hands } = useHands()
+function HandCursors({
+  ring,
+  tip,
+  minha,
+  paraLocal,
+}: {
+  ring: { x: number; y: number; p: number; kind: string } | null
+  tip: string
+  minha: (h: Hand) => boolean
+  paraLocal: (h: Hand) => Hand
+}) {
+  const hands = useHands().hands.filter(minha).map(paraLocal)
   return (
     <>
       {ring && (
