@@ -2,6 +2,7 @@
 // A voz, a câmera e as mãos rodam no núcleo; aqui só chega o que mostrar.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { voiceStore } from '../lib/live'
 import { play } from '../lib/sfx'
 import { JarvisSocket, type Alert, type Card, type ServerEvent, type Task, type Telemetry, type VoiceStatus } from '../lib/socket'
 
@@ -184,6 +185,17 @@ export function useJarvis(role: 'hud' | 'overlay' | 'admin' = 'hud') {
     },
     [pushLog, sfx],
   )
+
+  // som de "pensando" quando a voz passa a processar (só no HUD, para não tocar duas vezes)
+  useEffect(() => {
+    if (role !== 'hud') return
+    let antes = voiceStore.get().fase
+    return voiceStore.subscribe(() => {
+      const f = voiceStore.get().fase
+      if (f === 'pensando' && antes !== 'pensando') sfx('think')
+      antes = f
+    })
+  }, [role, sfx])
 
   useEffect(() => {
     const s = new JarvisSocket(role, { onEvent, onOpen: setOnline })

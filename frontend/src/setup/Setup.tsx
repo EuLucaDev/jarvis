@@ -1,9 +1,10 @@
-// Configuração inicial: abre na primeira vez (e quando faltar a chave da IA). Quatro passos curtos:
-// boas-vindas, chave da Gemini (com teste), quem é você e as permissões do sistema.
+// Configuração inicial: abre na primeira vez (e quando faltar a chave da IA). Cinco passos curtos:
+// boas-vindas, chave da Gemini (com teste), quem é você, as permissões do sistema e a calibração das mãos.
 
-import { ArrowRight, Check, ExternalLink, KeyRound, Loader2, ShieldCheck, User } from 'lucide-react'
+import { ArrowRight, Check, ExternalLink, Hand, KeyRound, Loader2, ShieldCheck, User } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
+import { Calibrar } from '../ui/Calibrar'
 import { app } from '../lib/app'
 import { Aura } from '../ui/Aura'
 import './setup.css'
@@ -33,6 +34,7 @@ export function Setup() {
   const [camera, setCamera] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [perm, setPerm] = useState<Record<string, any>>({})
+  const [calibrou, setCalibrou] = useState(false)
 
   useEffect(() => {
     api<Cfg>('/api/setup').then((c) => {
@@ -76,7 +78,7 @@ export function Setup() {
       </div>
       <section className="setup-card">
         <ol className="setup-steps" aria-label="Passos">
-          {['Boas-vindas', 'Inteligência', 'Você', 'Permissões'].map((p, i) => (
+          {['Boas-vindas', 'Inteligência', 'Você', 'Permissões', 'Mãos'].map((p, i) => (
             <li key={p} className={i === passo ? 'on' : i < passo ? 'done' : ''}>
               {i < passo ? <Check size={11} /> : i + 1} {p}
             </li>
@@ -87,7 +89,7 @@ export function Setup() {
           <div className="setup-body">
             <h1>J.A.R.V.I.S.</h1>
             <p>Seu assistente de voz. Ele ouve quando você diz “Jarvis” ou bate duas palmas, mostra o que encontra em cartões na tela e mexe no computador quando você pede, à vista. Com a câmera, as mãos viram o ponteiro.</p>
-            <p className="muted">São quatro passos rápidos. Tudo fica guardado só neste computador.</p>
+            <p className="muted">São cinco passos rápidos. Tudo fica guardado só neste computador.</p>
             <button className="primary" onClick={() => setPasso(1)}>
               Começar <ArrowRight size={15} />
             </button>
@@ -221,7 +223,33 @@ export function Setup() {
               <button className="ghost" onClick={() => setPasso(2)}>
                 Voltar
               </button>
-              <button className="primary" onClick={concluir} disabled={salvando}>
+              <button className="primary" onClick={() => (camera ? setPasso(4) : concluir())} disabled={salvando}>
+                {camera ? (
+                  <>
+                    Continuar <ArrowRight size={15} />
+                  </>
+                ) : (
+                  <>
+                    {salvando ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Concluir
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {passo === 4 && (
+          <div className="setup-body">
+            <h2>
+              <Hand size={18} /> Suas mãos
+            </h2>
+            <p className="muted">O Jarvis aprende a sua mão e a sua câmera em menos de um minuto. Cada passo avança sozinho.</p>
+            <Calibrar onFim={() => setCalibrou(true)} onPular={calibrou ? undefined : concluir} />
+            <div className="setup-nav">
+              <button className="ghost" onClick={() => setPasso(3)}>
+                Voltar
+              </button>
+              <button className="primary" onClick={concluir} disabled={salvando || !calibrou}>
                 {salvando ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Concluir
               </button>
             </div>

@@ -38,17 +38,14 @@ def verificar() -> int:
     from jarvis.config import CODE_ROOT, settings
 
     out: dict[str, str] = {}
-    try:
-        from mediapipe.tasks.python import BaseOptions, vision
+    from jarvis import hands_motor
 
-        from jarvis.hands import MODELO
-
-        vision.GestureRecognizer.create_from_options(
-            vision.GestureRecognizerOptions(base_options=BaseOptions(model_asset_path=str(MODELO)), running_mode=vision.RunningMode.VIDEO)
-        ).close()
-        out["maos"] = "ok"
-    except Exception as exc:  # noqa: BLE001
-        out["maos"] = f"ERRO {exc}"
+    for nome in hands_motor.ORDEM:  # todos os motores de mão deste sistema precisam abrir
+        try:
+            hands_motor.CLASSES[nome]().fechar()
+            out[f"maos_{nome}"] = "ok"
+        except Exception as exc:  # noqa: BLE001
+            out[f"maos_{nome}"] = f"ERRO {exc}"
     try:
         import vosk
 

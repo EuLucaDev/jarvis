@@ -1,0 +1,49 @@
+.calibrar {
+  display: grid;
+  gap: 14px;
+}
+.calibrar-video {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #020814;
+  box-shadow: inset 0 0 0 1px rgb(95 212 255 / 0.3);
+}
+.calibrar-video > * {
+  width: 100%;
+  height: 100%;
+}
+.calibrar-texto {
+  display: grid;
+  gap: 8px;
+}
+.calibrar-texto h3 {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0;
+  font: 600 15px/1.4 'Space Grotesk', system-ui, sans-serif;
+}
+.calibrar-passo {
+  color: #5fd4ff;
+  font: 500 10.5px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.calibrar-barra {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(95 212 255 / 0.14);
+  overflow: hidden;
+}
+.calibrar-barra span {
+  display: block;
+  height: 100%;
+  background: #5fd4ff;
+  box-shadow: 0 0 12px rgb(63 211 232 / 0.8);
+  transition: width 0.1s linear;
+}
+.calibrar .ghost {
+  justify-self: start;
+}

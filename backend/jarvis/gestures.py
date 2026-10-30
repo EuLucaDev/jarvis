@@ -1,7 +1,7 @@
 """Gestos de atalho → ações, escolhidas pela pessoa no painel (Gestos).
 
-Os padrões seguem a Meta: microgestos do polegar no indicador (Quest) e a pinça do dedo médio (pulseira dos
-óculos Ray-Ban Display). Poses paradas e deslizes da mão inteira ficam disponíveis, mas desligados de início.
+Disponíveis: microgestos do polegar no indicador (Quest), pinça do dedo médio (pulseira da Meta), poses paradas
+e deslizes da mão inteira. Começam todos desligados: menos gesto ligado = menos ação sem querer.
 A pinça do indicador (selecionar, arrastar, rolar, menu da palma, girar) não entra aqui: é o ponteiro, sempre
 igual (handControl.ts). Tudo roda no núcleo, então vale com o HUD escondido.
 """
@@ -61,34 +61,19 @@ ACOES = {
     "trocar_app": "Trocar de app (como Cmd+Tab / Alt+Tab)",
     "rolar_cima": "Rolar para cima",
     "rolar_baixo": "Rolar para baixo",
+    "ver_tela": "O Jarvis olha a sua tela",
 }
-PADRAO = {
-    # Quest: toque do polegar = ação do contexto, toque duplo = assistente, deslizes = direcional
-    "polegar_toque": "tocar_pausar",
-    "polegar_duplo": "ouvir",
-    "polegar_frente": "rolar_baixo",
-    "polegar_tras": "rolar_cima",
-    # pulseira neural: médio = voltar, duplo = liga/desliga a tela, segurar = trocar de app
-    "medio_toque": "voltar_contexto",
-    "medio_duplo": "alternar_hud",
-    "medio_segurar": "trocar_app",
-    # fora do modelo da Meta: a pessoa liga no painel se quiser
-    "Open_Palm": "nada",
-    "Closed_Fist": "nada",  # é a pose dos microgestos
-    "Thumb_Up": "nada",
-    "Thumb_Down": "nada",
-    "Pointing_Up": "nada",
-    "ILoveYou": "nada",
-    "deslize_esquerda": "nada",
-    "deslize_direita": "nada",
-    "deslize_cima": "nada",
-    "deslize_baixo": "nada",
+PADRAO = {  # tudo desligado de início: o dia a dia é o ponteiro (handControl.ts); a pessoa liga o que quiser
+    **{g: "nada" for g in GESTOS},
 }
 NAVEGADOR = {"aba_anterior", "proxima_aba", "voltar", "avancar"}
 
 
-# padrões de antes da 2.7 (poses e deslizes ligados): o painel salvava o mapa inteiro, então quem nunca mexeu
+# padrões de antes da 2.8 (poses, deslizes e, na 2.7, microgestos ligados): o painel salvava o mapa inteiro, então quem nunca mexeu
 # guardou estes valores; eles não valem mais como escolha da pessoa
+_ANTIGO_27 = {"polegar_toque": "tocar_pausar", "polegar_duplo": "ouvir", "polegar_frente": "rolar_baixo",
+              "polegar_tras": "rolar_cima", "medio_toque": "voltar_contexto", "medio_duplo": "alternar_hud",
+              "medio_segurar": "trocar_app"}
 _ANTIGO = {"Open_Palm": "mostrar_hud", "Closed_Fist": "fechar_cartoes", "Thumb_Up": "sim", "Thumb_Down": "nao",
            "Pointing_Up": "ouvir", "ILoveYou": "espelho", "deslize_esquerda": "aba_anterior",
            "deslize_direita": "proxima_aba", "deslize_cima": "mostrar_hud", "deslize_baixo": "minimizar_hud"}
@@ -96,7 +81,7 @@ _ANTIGO = {"Open_Palm": "mostrar_hud", "Closed_Fist": "fechar_cartoes", "Thumb_U
 
 def mapa() -> dict[str, str]:
     salvo = store.get("gestos") or {}
-    return {**PADRAO, **{k: v for k, v in salvo.items() if k in GESTOS and v in ACOES and _ANTIGO.get(k) != v}}
+    return {**PADRAO, **{k: v for k, v in salvo.items() if k in GESTOS and v in ACOES and _ANTIGO.get(k) != v and _ANTIGO_27.get(k) != v}}
 
 
 def acao_de(gesto: str) -> str:
@@ -120,6 +105,20 @@ async def executar(acao: str) -> None:
             hub.app_cmd("minimizar")
         elif acao == "memoria":
             hub.app_cmd("memoria", foco="")
+        elif acao == "ver_tela":
+            from .screen import foto
+
+            if not voice.session:
+                await voice.start()
+                for _ in range(40):
+                    if voice.session:
+                        break
+                    await asyncio.sleep(0.25)
+            img = await asyncio.to_thread(foto, False)
+            if img and voice.session:
+                await voice.send_image(img)
+                await voice.ask("[Aviso do sistema] Ele pediu pelo gesto para você olhar a tela dele; a imagem acabou "
+                                "de chegar. Diga numa frase o que vê e pergunte como pode ajudar.")
         elif acao == "alternar_hud":
             hub.app_cmd("alternar")
         elif acao == "voltar_contexto":

@@ -1,7 +1,7 @@
 // Efeitos sonoros do HUD, sintetizados na hora (sem arquivos): bipe de "ouvi", abertura do
 // briefing, cartão chegando, desbloqueio das telas, aviso e erro. Volume baixo, por baixo da voz.
 
-export type Sfx = 'ack' | 'listen' | 'start' | 'card' | 'close' | 'unlock' | 'alert' | 'error' | 'step'
+export type Sfx = 'ack' | 'listen' | 'start' | 'card' | 'close' | 'unlock' | 'alert' | 'error' | 'step' | 'think'
 
 const KEY = 'jarvis.sons'
 let ctx: AudioContext | null = null
@@ -118,6 +118,10 @@ export function play(kind: Sfx, pan = 0) {
       break
     case 'step': // etapa nova enquanto ele trabalha
       tone(c, t, 1600, 0.05, 0.03)
+      break
+    case 'think': // começou a pensar: dois pulsos baixinhos, como o HUD do filme processando
+      tone(c, t, 740, 0.07, 0.02, 'sine', 980)
+      tone(c, t + 0.11, 980, 0.07, 0.016, 'sine', 1240)
       break
   }
   out = null

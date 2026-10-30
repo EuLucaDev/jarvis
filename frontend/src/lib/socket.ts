@@ -86,6 +86,8 @@ export class JarvisSocket {
       // os sinais rápidos vão direto para os stores (sem passar pelo React)
       if (e.type === 'vivo') voiceStore.set({ fase: e.fase as Phase, nivel: e.nivel, ouvindo: e.ouvindo })
       else if (e.type === 'maos') handStore.set({ hands: e.hands, pts: e.pts ?? handStore.get().pts })
+      // ninguém na frente do computador: a interface escurece devagar (volta quando a pessoa chega)
+      else if (e.type === 'presenca') document.documentElement.classList.toggle('ausente', !e.presente)
       else this.h.onEvent(e as ServerEvent)
     }
     ws.onclose = () => {

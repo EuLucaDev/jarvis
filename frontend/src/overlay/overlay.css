@@ -370,8 +370,8 @@ body:has(.overlay) {
   mask: radial-gradient(circle, transparent 29px, #000 30px);
   filter: drop-shadow(0 0 8px rgb(63 211 232 / 0.8));
 }
-.ov-ring.girar {
-  background: conic-gradient(#7cf29a 360deg, transparent 0);
+.ov-ring.fixar {
+  background: conic-gradient(#7cf29a calc(var(--p) * 360deg), rgb(124 242 154 / 0.12) 0);
 }
 .ov-ring.centro {
   background: conic-gradient(#e8f4ff calc(var(--p) * 360deg), rgb(232 244 255 / 0.12) 0);

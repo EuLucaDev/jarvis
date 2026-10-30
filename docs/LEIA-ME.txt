@@ -32,16 +32,20 @@ DEPOIS DE INSTALADO
   - O Jarvis liga com o computador, escondido: só o ícone na barra de menus (Mac) ou na
     bandeja (Windows/Linux).
   - Para chamar: diga "Jarvis" (ou "Jarvis, bom dia") ou bata duas palmas. Também: Alt+Espaço.
-  - Com a câmera ligada, a mão vira o ponteiro, no modelo da Meta (Quest e pulseira do Ray-Ban Display):
+  - Na primeira vez o Jarvis calibra a sua mão (menos de um minuto). Dá para refazer em Painel → Gestos.
+  - Com a câmera ligada, a mão vira o ponteiro:
       o anel do cursor fecha conforme você junta polegar e indicador
-      pinça e solta = clica · pinça e arrasta = rola a página (na barra de título move a janela;
-      num cartão move o cartão) · pinça parada e girar o punho = volume
+      pinça e solta = clica · pinça e mexe = arrasta a janela ou o cartão (segure na borda: outro monitor)
+      pinça parada = ajusta o tamanho (abra polegar e indicador em L; parado fixa; mão aberta cancela)
+      dois dedos e mexe = rola · duas mãos em pinça: afastar ou juntar muda o tamanho
       palma virada para você + pinça = menu rápido (aponte e solte; segure no meio para recentrar)
-      duas mãos em pinça: afastar ou juntar muda o tamanho do cartão ou da janela
-    Com a mão fechada (Painel → Gestos escolhe o que cada um faz):
-      polegar toca o lado do indicador = tocar/pausar · toque duplo = falar com o Jarvis
-      polegar desliza no indicador = rola · pinça do polegar com o dedo médio = voltar
-      pinça dupla com o médio = mostra/esconde o HUD · segurar a pinça do médio = trocar de app
+    Gestos de atalho (microgestos do polegar, pinça do dedo médio, poses): ligue os que quiser em
+    Painel → Gestos.
+  - "Jarvis, zera a minha memória" (ou o histórico, o financeiro, tudo): ele diz o que vai apagar e pede o sim;
+    guarda um backup por 30 dias ("desfaz o zerar"). Também em Painel → Sistema → Zerar.
+  - Ele vê sua tela quando você fala com ele (sem espelhar o tempo todo) e "veja minha tela" olha na hora
+    (ou "todas as telas"). Fala por conta própria quando vale (reunião, conta, cliente que respondeu, pausa)
+    e escurece quando você sai da frente da câmera. Ajuste em Painel → Sistema → Iniciativa.
   - Fechar a janela do Jarvis deixa ele no canto (esfera pequena com o vídeo da câmera); ele segue
     ouvindo. Para sumir de vez: ícone → Sair do Jarvis. "Abrir com o computador" também fica no ícone.
   - Os cartões aparecem flutuando na tela; dá para arrastar, aumentar e fechar. Depois de ~10 s cada um vai

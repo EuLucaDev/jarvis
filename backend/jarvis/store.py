@@ -43,7 +43,9 @@ DEFAULTS: dict[str, Any] = {
     "despertar": {"palavra": True, "palmas": True, "bom_dia": True, "sensibilidade": 0.7},
     # câmera (mãos e visão) ligada junto com o app; voz: interromper falando (só com fone)
     "camera": {"ligada": True},
-    "voz": {"interromper": False},
+    "voz": {"interromper": False, "efeito": "hud", "ver_tela_ao_falar": True},
+    # Jarvis puxando conversa: presente (padrão), importante, cartao ou desligado (proativo.py)
+    "proativo": {"nivel": "presente"},
     # luz ambiente pelo estado do Jarvis: dispositivo/rotina da Alexa (Voice Monkey) por fase; vazio = nada
     "ambiente": {"ativo": False, "espera": "", "ouvindo": "", "pensando": "", "falando": ""},
 }

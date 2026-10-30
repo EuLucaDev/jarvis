@@ -72,6 +72,12 @@ async def notify(titulo: str, texto: str, nivel: str = "info", falar: bool = Tru
         await bridge.send_text(
             f"[Aviso do sistema, não é o usuário falando. Anuncie em uma frase curta e natural, sem perguntar nada.] {titulo}: {texto}"
         )
+    elif falar and cfg.get("falar", True):
+        # voz dormindo: o Jarvis acorda para avisar (ou guarda, se a pessoa não está na frente)
+        from . import proativo
+
+        await proativo.falar(f"Aviso: {titulo}: {texto}. Anuncie em uma frase curta, sem perguntar nada.",
+                             urgente=nivel == "alta", categoria="aviso")
     return alert
 
 

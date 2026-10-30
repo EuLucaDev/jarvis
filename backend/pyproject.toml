@@ -1,6 +1,6 @@
 [project]
 name = "jarvis-core"
-version = "2.6.0"
+version = "2.8.0"
 description = "Núcleo do Jarvis: voz, mãos, ouvido, controle do PC e dados (Mac, Windows e Linux)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -37,7 +37,17 @@ dependencies = [
     "uiautomation>=2.0.20; sys_platform == 'win32'",
     "tzlocal>=5.2",
     "pypdf>=5.1",
+    "pyobjc-framework-vision>=12.2.2 ; sys_platform == 'darwin'",
+    "rtmlib>=0.0.13 ; sys_platform != 'darwin'",
 ]
 
 [dependency-groups]
 build = ["pyinstaller>=6.11"]
+
+[tool.uv]
+# o rtmlib (mãos no Windows/Linux) pede o OpenCV completo e o contrib; o Jarvis usa só o opencv-python-headless,
+# que já traz tudo o que ele precisa (as três versões juntas brigam pelo mesmo cv2 e o completo exige libGL no Linux)
+override-dependencies = [
+    "opencv-python; sys_platform == 'never'",
+    "opencv-contrib-python; sys_platform == 'never'",
+]

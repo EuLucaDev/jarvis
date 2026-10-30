@@ -24,6 +24,7 @@ import {
   RefreshCw,
   Send,
   Sun,
+  RotateCcw,
   Trash2,
   X,
   Mail,
@@ -40,6 +41,7 @@ import { api } from '../lib/api'
 import { app, isApp } from '../lib/app'
 import type { Telemetry } from '../lib/socket'
 import { useJarvis } from '../hud/useJarvis'
+import { Calibrar } from '../ui/Calibrar'
 import './admin.css'
 
 type Page = 'chat' | 'briefing' | 'conexoes' | 'operacoes' | 'gestos' | 'memorias' | 'financeiro' | 'saude' | 'conversas' | 'sistema'
@@ -817,6 +819,65 @@ function SistemasForm() {
 
 /* ---------- gestos ---------- */
 
+type MaosEstado = {
+  motor: string
+  rodando: string
+  camera: boolean
+  erro: string | null
+  motores: { id: string; nome: string }[]
+  calibracao: { feita: boolean }
+}
+
+/** Motor do reconhecimento das mãos e a calibração. */
+function MaosPanel() {
+  const [m, setM] = useState<MaosEstado | null>(null)
+  const [calibrando, setCalibrando] = useState(false)
+  const [toast, toastNode] = useToast()
+  const carregar = () => api<MaosEstado>('/api/maos').then(setM)
+  useEffect(() => {
+    carregar()
+  }, [])
+  if (!m) return null
+  const nome = (id: string) => m.motores.find((x) => x.id === id)?.nome ?? id
+  return (
+    <Panel
+      title="Reconhecimento das mãos"
+      desc={`Motor em uso: ${m.rodando ? nome(m.rodando) : 'câmera desligada'}${m.erro ? ` · ${m.erro}` : ''}. ${m.calibracao.feita ? 'Calibrado para a sua mão.' : 'Ainda não calibrado: calibre para a pinça e o menu da palma acertarem.'}`}
+      actions={
+        <button className="btn" onClick={() => setCalibrando((v) => !v)}>
+          {calibrando ? 'Fechar' : m.calibracao.feita ? 'Recalibrar' : 'Calibrar agora'}
+        </button>
+      }
+    >
+      <label className="field-a">
+        <span>Motor</span>
+        <select
+          value={m.motor}
+          onChange={async (e) => {
+            setM(await api<MaosEstado>('/api/maos/motor', { method: 'PUT', json: { motor: e.target.value } }))
+            toast('Motor trocado; a câmera reiniciou')
+          }}
+        >
+          {m.motores.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.nome}
+            </option>
+          ))}
+        </select>
+      </label>
+      {calibrando && (
+        <Calibrar
+          onFim={() => {
+            toast('Calibração salva')
+            carregar()
+          }}
+        />
+      )}
+      {toastNode}
+    </Panel>
+  )
+}
+
 function GestosPage() {
   const [d, setD] = useState<{ gestos: Record<string, string>; acoes: Record<string, string>; mapa: Record<string, string>; padrao: Record<string, string> } | null>(null)
   const [toast, toastNode] = useToast()
@@ -830,15 +891,16 @@ function GestosPage() {
   }
   return (
     <div className="stack">
-      <Panel title="Ponteiro (modelo da Meta)" desc="Com a câmera ligada, a mão é o mouse da tela inteira, como no Quest. O anel do cursor fecha conforme o polegar se aproxima do indicador.">
+      <MaosPanel />
+      <Panel title="Ponteiro (sempre igual)" desc="Com a câmera ligada, a mão é o mouse da tela inteira. O anel do cursor fecha conforme o polegar se aproxima do indicador.">
         <ul className="rows">
           {[
-            ['Pinça e solta', 'Seleciona: clica onde a pinça começou (em qualquer app ou nos cartões do Jarvis)'],
-            ['Pinça e arrasta', 'No conteúdo, rola a página (com inércia ao soltar); na barra de título, move a janela (segurar na borda manda para o outro monitor); num cartão, move o cartão'],
-            ['Pinça parada e gira o punho', 'Muda o volume, como o "pinçar e girar" da pulseira da Meta'],
-            ['Palma virada para você + pinça', 'Abre o menu rápido em volta da mão: aponte e solte para escolher; segure no meio para recentrar o ponteiro'],
+            ['Pinça e solta', 'Clica onde a pinça começou (em qualquer app ou nos cartões do Jarvis)'],
+            ['Pinça e mexe', 'Arrasta a janela ou o cartão embaixo da mão; segurar na borda manda para o outro monitor'],
+            ['Pinça parada', 'Enche o anel e entra no ajuste de tamanho: abra polegar e indicador em L; parado fixa, mão aberta cancela'],
+            ['Dois dedos (V) e mexe', 'Rola a página embaixo'],
+            ['Palma virada para você + pinça', 'Abre o menu rápido em volta da mão (como no Quest): aponte e solte para escolher; segure no meio para recentrar o ponteiro'],
             ['Duas mãos em pinça', 'Afastar ou juntar muda o tamanho do cartão ou da janela embaixo; soltar fixa'],
-            ['Mão fechada', 'Polegar no lado do indicador: toque, toque duplo e deslizes (os atalhos abaixo)'],
           ].map(([g, a]) => (
             <li key={g}>
               <span>
@@ -851,7 +913,7 @@ function GestosPage() {
       </Panel>
       <Panel
         title="Gestos de atalho"
-        desc="Poses paradas por um instante e deslizes da mão. Escolha o que cada um faz; as ações do navegador só valem com o navegador na frente."
+        desc="Começam desligados (menos gesto ligado, menos ação sem querer). Microgestos com a mão fechada, pinça do dedo médio, poses paradas e deslizes: escolha o que cada um faz; as ações do navegador só valem com o navegador na frente."
         actions={
           <button className="btn" onClick={() => salvar(d.padrao)}>
             Voltar ao padrão
@@ -1014,6 +1076,79 @@ const RACIOCINIO = [
   { id: 'profundo', nome: 'Profundo', desc: 'Pensa a fundo em quase tudo que não for um comando simples; respostas mais lentas e cuidadosas.' },
 ]
 
+/** Zerar memória, histórico, financeiro ou tudo, com backup de 30 dias e desfazer. */
+function ZerarPanel() {
+  const [d, setD] = useState<{ backups: { arquivo: string; em: string; niveis: string[] }[]; niveis: Record<string, string> } | null>(null)
+  const [marcados, setMarcados] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+  const [toast, toastNode] = useToast()
+  const carregar = () => api<typeof d>('/api/zerar').then(setD)
+  useEffect(() => {
+    carregar()
+  }, [])
+  if (!d) return null
+  const nomes: Record<string, string> = { memoria: 'Memória', historico: 'Histórico e cartões', financeiro: 'Financeiro', tudo: 'Tudo (instalação nova)' }
+  const zerar = async () => {
+    const lista = [...marcados]
+    if (!lista.length) return
+    const texto = lista.map((n) => d.niveis[n]).join('; ')
+    if (!confirm(`Apagar ${texto}?\n\nUm backup fica guardado por 30 dias e dá para desfazer.`)) return
+    setBusy(true)
+    const r = await api<{ ok?: boolean; erro?: string }>('/api/zerar', { method: 'POST', json: { o_que: lista, confirmado: true } })
+    setBusy(false)
+    toast(r.ok ? 'Zerado. Dá para desfazer abaixo.' : r.erro ?? 'Não deu certo')
+    setMarcados(new Set())
+    carregar()
+  }
+  return (
+    <Panel title="Zerar" desc="Apaga o que você escolher. Antes, guarda um backup por 30 dias; dá para desfazer aqui ou dizendo “Jarvis, desfaz o zerar”.">
+      <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
+        {Object.keys(d.niveis).map((n) => (
+          <Switch
+            key={n}
+            on={marcados.has(n)}
+            label={nomes[n] ?? n}
+            onChange={(v) => {
+              const m = new Set(marcados)
+              if (v) m.add(n)
+              else m.delete(n)
+              setMarcados(m)
+            }}
+          />
+        ))}
+        <button className="btn danger" disabled={busy || !marcados.size} onClick={zerar}>
+          <Trash2 size={14} /> Zerar
+        </button>
+      </div>
+      {d.backups.length > 0 && (
+        <ul className="rows">
+          {d.backups.slice(0, 5).map((b) => (
+            <li key={b.arquivo}>
+              <span>
+                <b>{b.em}</b>
+                <small>{b.niveis.map((n) => nomes[n] ?? n).join(', ')}</small>
+              </span>
+              <button
+                className="btn"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  const r = await api<{ ok?: boolean; erro?: string; aviso?: string }>('/api/zerar/desfazer', { method: 'POST', json: { arquivo: b.arquivo } })
+                  setBusy(false)
+                  toast(r.aviso ?? (r.ok ? 'Restaurado' : r.erro ?? 'Não deu certo'))
+                }}
+              >
+                <RotateCcw size={14} /> Desfazer
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {toastNode}
+    </Panel>
+  )
+}
+
 function RaciocinioPanel() {
   const [voz, setVoz] = useState<Record<string, any> | null>(null)
   useEffect(() => {
@@ -1041,6 +1176,57 @@ function RaciocinioPanel() {
         ))}
       </div>
       <p className="muted">{RACIOCINIO.find((r) => r.id === atual)?.desc}</p>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
+        <Switch
+          on={(voz.efeito ?? 'hud') === 'hud'}
+          label="Voz de filme (efeito HUD)"
+          onChange={async (v) => setVoz(await api('/api/ajustes/voz', { method: 'PUT', json: { ...voz, efeito: v ? 'hud' : 'nenhum' } }))}
+        />
+        <Switch
+          on={voz.ver_tela_ao_falar !== false}
+          label="Ver a tela quando eu falo"
+          onChange={async (v) => setVoz(await api('/api/ajustes/voz', { method: 'PUT', json: { ...voz, ver_tela_ao_falar: v } }))}
+        />
+      </div>
+    </Panel>
+  )
+}
+
+const PROATIVO = [
+  { id: 'presente', nome: 'Bem presente', desc: 'Avisos, cliente que respondeu, tempo demais na mesma janela, pausas, boas-vindas quando você volta.' },
+  { id: 'importante', nome: 'Só o importante', desc: 'Agenda, contas e o que for urgente.' },
+  { id: 'cartao', nome: 'Cartão', desc: 'Mostra um cartão discreto; só fala se for urgente.' },
+  { id: 'desligado', nome: 'Desligado', desc: 'Só fala quando você chamar.' },
+]
+
+/** Quanto o Jarvis puxa conversa sozinho. */
+function ProativoPanel() {
+  const [p, setP] = useState<Record<string, any> | null>(null)
+  useEffect(() => {
+    api('/api/ajustes/proativo').then(setP)
+  }, [])
+  if (!p) return null
+  const atual = p.nivel ?? 'presente'
+  return (
+    <Panel
+      title="Iniciativa"
+      desc="Quando o Jarvis fala sem você chamar. Ele nunca fala no horário de silêncio, no modo foco (só o urgente) nem com você fora da frente da câmera: guarda e conta quando você volta."
+    >
+      <div className="seg" role="radiogroup" aria-label="Iniciativa">
+        {PROATIVO.map((r) => (
+          <button
+            key={r.id}
+            role="radio"
+            aria-checked={atual === r.id}
+            className={atual === r.id ? 'on' : ''}
+            title={r.desc}
+            onClick={async () => setP(await api('/api/ajustes/proativo', { method: 'PUT', json: { ...p, nivel: r.id } }))}
+          >
+            {r.nome}
+          </button>
+        ))}
+      </div>
+      <p className="muted">{PROATIVO.find((r) => r.id === atual)?.desc}</p>
     </Panel>
   )
 }
@@ -1066,6 +1252,8 @@ function SistemaPage({ t }: { t: Telemetry | null }) {
         <Kpi icon={Monitor} label="Câmera" value={s.camera ? 'Ligada' : 'Desligada'} sub={s.camera_erro ?? 'mãos e visão'} />
       </div>
       <RaciocinioPanel />
+      <ProativoPanel />
+      <ZerarPanel />
       <Panel title="Configuração" desc="Definida na configuração inicial (ícone → Configuração inicial).">
         <dl className="kv-a">
           <dt>Modelo de voz</dt>

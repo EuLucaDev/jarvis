@@ -391,6 +391,7 @@ fn ouvir_nucleo(app: AppHandle) {
                         mostrar_hud(&h)
                     }
                 }
+                "configuracao" => abrir_configuracao(&h),
                 "memoria" => abrir_memoria(&h, foco),
                 "financeiro" => abrir_financeiro(&h, pagina),
                 _ => {}

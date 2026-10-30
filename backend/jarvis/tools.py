@@ -133,8 +133,25 @@ DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="esquecer",
-        description="Apaga da memória o que ele pedir para esquecer.",
+        description="Apaga da memória uma coisa específica que ele pedir para esquecer (para apagar tudo, use zerar).",
         parameters={"type": "OBJECT", "properties": {"descricao": {"type": S}}, "required": ["descricao"]},
+    ),
+    types.FunctionDeclaration(
+        name="zerar",
+        description=(
+            "Zera dados do Jarvis: memoria (tudo o que ele aprendeu), historico (conversas, atividade, cartões), "
+            "financeiro (todos os dados financeiros) ou tudo (como instalação nova: inclui ajustes e a chave). "
+            "Antes guarda um backup por 30 dias (dá para desfazer). Primeiro chame sem confirmado para saber o que "
+            "será apagado, diga isso a ele e pergunte; só depois do sim chame com confirmado=true."
+        ),
+        parameters={"type": "OBJECT", "properties": {
+            "o_que": {"type": "ARRAY", "items": {"type": S, "enum": ["memoria", "historico", "financeiro", "tudo"]}},
+            "confirmado": {"type": "BOOLEAN"}}, "required": ["o_que"]},
+    ),
+    types.FunctionDeclaration(
+        name="desfazer_zerar",
+        description="Desfaz o último zerar (restaura a memória, o histórico, o financeiro e os ajustes do backup). Ou lista os backups.",
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["desfazer", "listar"]}}},
     ),
     types.FunctionDeclaration(
         name="briefing_bom_dia",
@@ -642,9 +659,11 @@ DECLARATIONS = [
         name="espelhar_tela",
         description=(
             "Espelho da tela: ligar (você passa a ver a tela dele o tempo todo, como numa chamada com a tela "
-            "compartilhada, e ela aparece no HUD), desligar, ou ver (uma foto da tela agora)."
+            "compartilhada, e ela aparece no HUD), desligar, ou ver (uma foto da tela agora; telas=todas para "
+            "ver todos os monitores juntos)."
         ),
-        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["ligar", "desligar", "ver"]}}, "required": ["acao"]},
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["ligar", "desligar", "ver"]},
+                                                     "telas": {"type": S, "enum": ["principal", "todas"]}}, "required": ["acao"]},
     ),
     types.FunctionDeclaration(
         name="substituir_selecao",
@@ -826,11 +845,32 @@ def assuntos_disponiveis() -> dict[str, str]:
     """Assunto → o que ele cobre (para a voz saber quando carregar)."""
     from . import sistemas
 
-    out = {"financeiro": "dinheiro pessoal: gastos, entradas, contas fixas, cartões e faturas, orçamento, metas, investimentos, extratos"}
+    from . import finance_completo
+
+    out = {"financeiro": "dinheiro pessoal no dia a dia: lançar e ver gastos e entradas, contas fixas, faturas, orçamento, metas, "
+                         "investimentos (resumo), extratos"}
+    if finance_completo._catalogo:  # noqa: SLF001 - o resto do financeiro, por área, quando o motor está no ar
+        out.update({k: f"financeiro a fundo: {v[0]}" for k, v in finance_completo.ASSUNTOS.items()})
     for s in sistemas.lista():
-        if s.get("ativo", True) and sistemas.declaracoes_de(s):
-            out[s["prefixo"]] = f"o sistema {s['nome']} da pessoa"
+        if not s.get("ativo", True):
+            continue
+        base, areas = _sistema_partes(s)
+        if base:
+            out[s["prefixo"]] = f"o sistema {s['nome']} da pessoa (ações do dia a dia)"
+        for area, d in areas.items():
+            resumo = (d.description or "").split(". Operações")[0].split(": ", 1)[-1]
+            out[f"{s['prefixo']}_{area}"] = f"o sistema {s['nome']} a fundo: {resumo}"
     return out
+
+
+def _sistema_partes(s: dict) -> tuple[list, dict]:
+    """Ações de um sistema MCP: as do dia a dia e as áreas (ações area_* cobrem todas as rotas, uma por área)."""
+    from . import sistemas
+
+    decls = sistemas.declaracoes_de(s)
+    base = [d for d in decls if "__area_" not in (d.name or "")]
+    areas = {(d.name or "").split("__area_", 1)[1]: d for d in decls if "__area_" in (d.name or "")}
+    return base, areas
 
 
 def todas(assuntos: set[str] | None = None) -> list[types.Tool]:
@@ -841,7 +881,17 @@ def todas(assuntos: set[str] | None = None) -> list[types.Tool]:
     carregados = assuntos or set()
     *antes, ultima = TOOLS
     base = [d for d in (ultima.function_declarations or []) if tudo or "financeiro" in carregados or not (d.name or "").startswith("financeiro_")]
-    extras = [d for s in sistemas.lista() if s.get("ativo", True) and (tudo or s["prefixo"] in carregados) for d in sistemas.declaracoes_de(s)]
+    extras = []
+    for s in sistemas.lista():
+        if not s.get("ativo", True):
+            continue
+        base_s, areas = _sistema_partes(s)
+        if tudo or s["prefixo"] in carregados:
+            extras += base_s
+        extras += [d for area, d in areas.items() if tudo or f"{s['prefixo']}_{area}" in carregados]
+    from . import finance_completo
+
+    extras += [d for a in finance_completo.ASSUNTOS if tudo or a in carregados for d in finance_completo.declaracoes(a)]
     faltam = {k: v for k, v in assuntos_disponiveis().items() if k not in carregados}
     if not tudo and faltam:
         base.append(types.FunctionDeclaration(
@@ -963,6 +1013,14 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
         from .live import voice
 
         return voice.carregar(str(args.get("assunto", "")), str(args.get("pedido", "")))
+    if name.startswith("fin_"):
+        from . import finance_completo
+        from .finance import FinErro
+
+        try:
+            return await finance_completo.run(name, args)
+        except FinErro as exc:
+            return {"erro": str(exc)}
     if sistemas.e_do_sistema(name):
         try:
             return await sistemas.executar(name, args)
@@ -1020,6 +1078,27 @@ async def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             return {**res, "instrucao": "O mapa abriu na tela. Diga em uma ou duas frases o que tem lá (ou sobre o foco)."}
         if name == "buscar_memorias":
             return {"memorias": await memory.search(args.get("consulta", ""))}
+        if name == "zerar":
+            from . import zerar
+
+            o_que = [x for x in (args.get("o_que") or []) if isinstance(x, str)]
+            if not args.get("confirmado"):
+                desc = zerar.descrever(o_que)
+                if not desc:
+                    return {"erro": "Pergunte o que ele quer zerar: memória, histórico, financeiro ou tudo."}
+                return {"precisa_confirmar": True, "vai_apagar": desc, "backup": "fica 30 dias, dá para desfazer",
+                        "instrucao": "Diga exatamente o que vai apagar, que guarda um backup por 30 dias, e pergunte se pode."}
+            res = await zerar.zerar(o_que)
+            if res.get("ok"):
+                res["instrucao"] = ("Confirme numa frase o que foi zerado e que dá para desfazer pedindo 'desfaz o zerar'."
+                                    + (" Diga que a configuração inicial vai abrir." if "ajustes" in res["zerado"] else ""))
+            return res
+        if name == "desfazer_zerar":
+            from . import zerar
+
+            if args.get("acao") == "listar":
+                return {"backups": zerar.backups()}
+            return await zerar.desfazer()
         if name == "esquecer":
             gone = await memory.forget(args.get("descricao", ""))
             return {"apagadas": gone} if gone else {"erro": "Não encontrei nada parecido na memória."}
@@ -1226,10 +1305,10 @@ async def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             if acao == "desligar":
                 await asyncio.to_thread(espelho.stop)
                 return {"ok": True}
-            from . import pc
+            from .screen import foto
 
-            x, y, w, h = await asyncio.to_thread(pc.main_bounds)
-            img = espelho.latest() or await asyncio.to_thread(pc.capture, x, y, w, h, 1280)
+            todas = args.get("telas") == "todas"
+            img = (None if todas else espelho.latest()) or await asyncio.to_thread(foto, todas)
             if not img:
                 return {"erro": "Não consegui ver a tela. No Mac, libere Gravação de Tela para o Jarvis."}
             return {"ok": True, "_imagem": img, "instrucao": "Você recebeu a tela de agora. Responda sobre o que ele perguntou."}

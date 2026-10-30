@@ -189,7 +189,6 @@ export function Overlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [j.send, area.x, area.y, area.w, area.h],
   )
-  const winRef = useRef<Rect | null>(null)
   const hc = useHandControl(
     {
       send: sendGlobal,
@@ -199,7 +198,6 @@ export function Overlay() {
       moveCard,
       scaleCard,
       clickAt,
-      winAt: () => winRef.current,
       local: (hs, ocupada) => (ocupada ? hs.map(paraLocal) : hs.filter(minha).map(paraLocal)),
     },
     j.camera.ligada,
@@ -245,7 +243,6 @@ export function Overlay() {
   // ---------- janela realçada (borda azul) ----------
   const [win, setWin] = useState<(Rect & { estado: string; app: string; titulo: string; escala?: number }) | null>(null)
   const winTimer = useRef(0)
-  winRef.current = win
   useEffect(() => {
     const e = j.last
     if (!e || e.type !== 'janela.realce') return
@@ -589,7 +586,7 @@ function HandCursors({
   minha,
   paraLocal,
 }: {
-  ring: { x: number; y: number; p: number; kind: string; valor?: number } | null
+  ring: { x: number; y: number; p: number; kind: string } | null
   menu: Menu | null
   tip: string
   minha: (h: Hand) => boolean
@@ -601,7 +598,7 @@ function HandCursors({
       {ring && (
         <div className={`ov-ring ${ring.kind}`} style={{ transform: `translate(${ring.x * innerWidth}px, ${ring.y * innerHeight}px)`, ['--p' as string]: ring.p }}>
           <span>
-            {ring.kind === 'armar' ? 'Girar' : ring.kind === 'centro' ? 'Recentrar' : `Volume ${ring.valor && ring.valor > 0 ? '+' : ''}${(ring.valor ?? 0) * 4}`}
+            {ring.kind === 'armar' ? 'Ajustar' : ring.kind === 'centro' ? 'Recentrar' : 'Fixar'}
           </span>
         </div>
       )}

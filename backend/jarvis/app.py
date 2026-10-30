@@ -79,10 +79,17 @@ async def startup():
     asyncio.create_task(telemetry_loop())
     asyncio.create_task(alerts.loop())
     asyncio.create_task(activity.loop())
+    from . import proativo
+
+    proativo.presenca.loop = loop
+    asyncio.create_task(proativo.loop())
     asyncio.create_task(protocols.loop())
     if finance.motor.disponivel():
         await asyncio.to_thread(finance.motor.start)
         asyncio.create_task(finance.motor.vigiar())
+        from . import finance_completo
+
+        asyncio.create_task(finance_completo.preparar())  # catálogo das operações para as ações completas
     log.info("Jarvis %s no ar em http://127.0.0.1:%s (%s)", VERSION, settings.port, pc.SISTEMA)
 
 
@@ -375,6 +382,74 @@ async def gestos_salvar(body: dict = Body(...)):
     return gestures.descrever()
 
 
+@app.get("/api/zerar")
+async def zerar_backups():
+    from . import zerar
+
+    return {"backups": zerar.backups(), "niveis": zerar.NIVEIS}
+
+
+@app.post("/api/zerar")
+async def zerar_agora(body: dict = Body(...)):
+    from . import zerar
+
+    if not body.get("confirmado"):
+        return {"erro": "Falta confirmar."}
+    return await zerar.zerar([x for x in body.get("o_que", []) if isinstance(x, str)])
+
+
+@app.post("/api/zerar/desfazer")
+async def zerar_desfazer(body: dict = Body(default={})):
+    from . import zerar
+
+    return await zerar.desfazer(body.get("arquivo"))
+
+
+@app.get("/api/maos")
+async def maos_estado():
+    from . import hands_motor
+    from .hands import calibracao
+
+    escolhido = (store.get("maos") or {}).get("motor", "auto")
+    return {"motor": escolhido, "rodando": hands.motor_nome, "camera": hands.on, "erro": hands.erro,
+            "motores": [{"id": m, "nome": hands_motor.NOMES[m]} for m in hands_motor.disponiveis()],
+            "calibracao": calibracao()}
+
+
+@app.put("/api/maos/motor")
+async def maos_motor(body: dict = Body(...)):
+    from . import hands_motor
+
+    motor = body.get("motor", "auto")
+    if motor not in hands_motor.disponiveis():
+        return {"ok": False, "erro": "Motor desconhecido."}
+    store.put("maos", {**(store.get("maos") or {}), "motor": motor})
+    await asyncio.to_thread(hands.reiniciar)
+    return {"ok": True, **(await maos_estado())}
+
+
+@app.put("/api/maos/calibracao")
+async def maos_calibrar(body: dict = Body(...)):
+    try:
+        fecha, abre = float(body["fecha"]), float(body["abre"])
+        area = [min(1.0, max(0.0, float(v))) for v in body["area"]][:4]
+    except (KeyError, TypeError, ValueError):
+        return {"ok": False, "erro": "Calibração incompleta."}
+    if not (0.05 < fecha < abre < 2.5) or len(area) != 4 or area[1] - area[0] < 0.15 or area[3] - area[2] < 0.15:
+        return {"ok": False, "erro": "As medidas não fazem sentido; refaça a calibração."}
+    store.put("maos_calibracao", {"fecha": fecha, "abre": abre, "inverter_palma": bool(body.get("inverter_palma")),
+                                  "area": area, "em": time.strftime("%Y-%m-%d %H:%M")})
+    hands.recalibrar()
+    return {"ok": True}
+
+
+@app.delete("/api/maos/calibracao")
+async def maos_descalibrar():
+    store.put("maos_calibracao", {})
+    hands.recalibrar()
+    return {"ok": True}
+
+
 @app.get("/api/permissoes")
 async def permissoes():
     out: dict[str, Any] = {"sistema": pc.SISTEMA, "acessibilidade": pc.permitido(), "camera": hands.on and not hands.erro,
@@ -437,7 +512,7 @@ async def apresentar_briefing():
 
 # ---------- ajustes ----------
 
-EDITABLE = {"despertar", "briefing", "cameras", "atalhos", "alexa", "mercado", "presenca", "alertas", "notas", "protocolos",
+EDITABLE = {"proativo", "despertar", "briefing", "cameras", "atalhos", "alexa", "mercado", "presenca", "alertas", "notas", "protocolos",
             "agentes", "atividade", "ambiente", "camera", "voz"}
 
 

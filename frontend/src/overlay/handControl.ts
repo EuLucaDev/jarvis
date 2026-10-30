@@ -1,31 +1,28 @@
-// Mãos como ponteiro da tela inteira, no modelo de interação da Meta (Quest e pulseira do Ray-Ban Display),
-// adaptado à câmera. Sem modos: o gesto vale para o que estiver embaixo.
+// Mãos como ponteiro da tela inteira, sem modos: o gesto vale para o que estiver embaixo.
 //
-//   cursor                  → anel que fecha conforme o polegar se aproxima do indicador (força da pinça)
-//   pinça e solta           → seleciona: clica onde a pinça começou (cartão do Jarvis ou qualquer app)
-//   pinça e arrasta         → no conteúdo, rola (como arrastar no Quest), com inércia ao soltar;
-//                             na barra de título de uma janela, move a janela (segurar na borda: outro monitor);
-//                             num cartão do Jarvis, move o cartão
-//   pinça parada e gira     → "pinçar e girar" da pulseira: girar o punho muda o volume
-//   palma virada para você  → aparece o botão na mão; pinça abre o menu rápido. Com a pinça, aponte o item e
-//                             solte para escolher; solte no meio para fechar; segure no meio para recentrar
-//   duas mãos em pinça      → afastar ou juntar muda o tamanho do cartão ou da janela embaixo
+//   cursor                  → anel que fecha conforme o polegar se aproxima do indicador (como no Quest)
+//   pinça e solta           → clica onde a pinça começou (cartão do Jarvis ou qualquer app)
+//   pinça e mexe            → arrasta o cartão ou a janela embaixo da mão; segurar na borda manda ao outro monitor
+//   pinça PARADA (o anel)   → ajuste de tamanho: polegar e indicador em L, abrir aumenta, fechar diminui;
+//                             parado de novo fixa; mão aberta ou tirar a mão cancela (volta como estava)
+//   dois dedos (V) e mexe   → rola a página embaixo
+//   palma virada para você  → aparece o botão na mão; pinça abre o menu rápido (como no Quest): com a pinça,
+//                             aponte o item e solte; solte no meio para fechar; segure no meio para recentrar
+//   duas mãos em pinça      → afastar ou juntar muda o tamanho do cartão ou da janela embaixo; soltar fixa
 //
-// Microgestos (polegar no indicador) e a pinça do dedo médio são reconhecidos no núcleo (hands.py).
 // O cursor, o anel, o menu e a borda são desenhados pela camada (Overlay.tsx) a partir do estado daqui.
 
 import { useEffect, useRef, useState } from 'react'
 import { handStore, type Hand } from '../lib/live'
 import { play } from '../lib/sfx'
 
-export type Ring = { x: number; y: number; p: number; kind: 'armar' | 'girar' | 'centro'; valor?: number }
+export type Ring = { x: number; y: number; p: number; kind: 'armar' | 'fixar' | 'centro' }
 export type Menu = { x: number; y: number; sel: number | null }
-type Rect = { x: number; y: number; w: number; h: number }
 
 export const MENU = [
   { acao: 'ouvir', rotulo: 'Falar' },
   { acao: 'alternar_hud', rotulo: 'HUD' },
-  { acao: 'espelho', rotulo: 'Tela' },
+  { acao: 'ver_tela', rotulo: 'Ver a tela' },
   { acao: 'memoria', rotulo: 'Memória' },
   { acao: 'fechar_cartoes', rotulo: 'Cartões' },
   { acao: 'parar', rotulo: 'Parar' },
@@ -40,7 +37,6 @@ type Ctx = {
   moveCard: (id: string, dx: number, dy: number, done: boolean) => void
   scaleCard: (id: string, z: number | null) => void // null = cancela (volta ao tamanho de antes)
   clickAt: (x: number, y: number) => boolean // clica num botão da camada; false se não havia nada
-  winAt: () => Rect | null // janela mirada agora (px da camada), para saber se a pinça caiu na barra de título
   /** Mãos nas coordenadas desta camada (0..1 do monitor dela). Ocupada (no meio de um gesto), fica com a mão
    *  mesmo fora do monitor, para arrastar uma janela de uma tela para a outra. */
   local: (hands: Hand[], ocupada: boolean) => Hand[]
@@ -48,21 +44,19 @@ type Ctx = {
 
 type Mode =
   | { m: 'idle' }
-  | { m: 'press'; x: number; y: number; t: number; card: string | null; barra: boolean; giro0: number }
+  | { m: 'press'; x: number; y: number; t: number; card: string | null }
   | { m: 'drag-card'; id: string; x: number; y: number }
   | { m: 'drag-win'; edge: number }
-  | { m: 'scroll'; y: number; x: number; vy: number; vx: number; t: number }
-  | { m: 'girar'; giro: number; nivel: number }
+  | { m: 'resize'; card: string | null; z0: number; z: number; started: boolean; still: number; open: number }
   | { m: 'menu'; x: number; y: number; sel: number | null; t: number }
   | { m: 'escala'; card: string | null; d0: number; z0: number; z: number }
 
-const CLIQUE_MS = 600 // pinça e solta até aqui = seleção
-const MEXER = 0.025 // quanto (fração da largura) a mão anda com a pinça para virar arrasto
-const BARRA_PX = 46 // altura da barra de título (Mac ~28, Windows ~32, com folga)
-const GIRAR_GRAUS = 14 // cada passo do "pinçar e girar"
+const CLIQUE_MS = 650 // pinça e solta até aqui = clique
+const MEXER = 0.03 // quanto (fração da largura) a mão anda com a pinça para virar arrasto
+const MIN_Z = 0.5
+const MAX_Z = 1.8
 const RECENTRAR_MS = 1200
-
-const angDif = (a: number, b: number) => ((((a - b) % 360) + 540) % 360) - 180
+const zFor = (spread: number) => MIN_Z + ((Math.min(1.25, Math.max(0.25, spread)) - 0.25) / 1.0) * (MAX_Z - MIN_Z)
 
 export function useHandControl(ctx: Ctx, active: boolean) {
   const c = useRef(ctx)
@@ -70,7 +64,7 @@ export function useHandControl(ctx: Ctx, active: boolean) {
   const mode = useRef<Mode>({ m: 'idle' })
   const aim = useRef({ t: 0, x: -1, y: -1 })
   const sent = useRef(0)
-  const inercia = useRef(0)
+  const scroll = useRef<number | null>(null)
   const [ring, setRing] = useState<Ring | null>(null)
   const [menu, setMenu] = useState<Menu | null>(null)
   const [tip, setTip] = useState('')
@@ -81,14 +75,14 @@ export function useHandControl(ctx: Ctx, active: boolean) {
     return handStore.subscribe(() => {
       const md = mode.current
       const hs = c.current.local(handStore.get().hands, md.m !== 'idle')
-      if (hs.length === 2 && hs[0].pinch && hs[1].pinch && md.m !== 'menu' && md.m !== 'girar') return escala(hs[0], hs[1])
+      if (hs.length === 2 && hs[0].pinch && hs[1].pinch && md.m !== 'resize' && md.m !== 'menu') return escala(hs[0], hs[1])
       if (md.m === 'escala') return fimEscala()
       step(hs[0])
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
 
-  const flash = (msg: string, ms = 1200) => {
+  const flash = (msg: string, ms = 1500) => {
     setTip(msg)
     setTimeout(() => setTip((t) => (t === msg ? '' : t)), ms)
   }
@@ -133,20 +127,6 @@ export function useHandControl(ctx: Ctx, active: boolean) {
     reset('Tamanho fixado')
   }
 
-  // ---------- inércia da rolagem, como no Quest ----------
-  function soltarRolagem(vy: number, vx: number) {
-    clearInterval(inercia.current)
-    if (Math.hypot(vx, vy) < 0.4) return
-    let n = 0
-    inercia.current = window.setInterval(() => {
-      vy *= 0.86
-      vx *= 0.86
-      n++
-      if (n > 22 || Math.hypot(vx, vy) < 0.15) return clearInterval(inercia.current)
-      c.current.send({ type: 'rolar', dy: Math.round(vy * 33), dx: Math.round(vx * 33) })
-    }, 33)
-  }
-
   function step(h: Hand | undefined) {
     const k = c.current
     const md = mode.current
@@ -154,6 +134,7 @@ export function useHandControl(ctx: Ctx, active: boolean) {
 
     if (!h) {
       if (md.m === 'drag-win') k.send({ type: 'janela.soltar' })
+      if (md.m === 'resize') md.card ? k.scaleCard(md.card, null) : k.send({ type: 'janela.soltar', cancelar: true })
       if (md.m !== 'idle') reset()
       setHoverCard(null)
       return
@@ -161,13 +142,12 @@ export function useHandControl(ctx: Ctx, active: boolean) {
     const px = h.x * innerWidth
     const py = h.y * innerHeight
 
-    // ---------- menu da palma aberto: a pinça segura o menu, apontar escolhe, soltar confirma ----------
+    // ---------- menu da palma: a pinça segura o menu, apontar escolhe, soltar confirma ----------
     if (md.m === 'menu') {
       const dx = px - md.x
       const dy = py - md.y
-      const r = Math.hypot(dx, dy)
       let sel: number | null = null
-      if (r > MENU_RAIO * 0.45) {
+      if (Math.hypot(dx, dy) > MENU_RAIO * 0.45) {
         const ang = (Math.atan2(dy, dx) * 180) / Math.PI + 90 // 0° = em cima, sentido horário
         sel = Math.round((((ang % 360) + 360) % 360) / (360 / MENU.length)) % MENU.length
       }
@@ -202,31 +182,43 @@ export function useHandControl(ctx: Ctx, active: boolean) {
       return
     }
 
-    // ---------- pinçar e girar: volume ----------
-    if (md.m === 'girar') {
-      if (!h.pinch) {
-        play('close')
-        reset()
-        return
-      }
-      const giro = h.torcao ?? 0
-      const dif = angDif(giro, md.giro)
-      if (Math.abs(dif) >= GIRAR_GRAUS) {
-        const passo = dif > 0 ? 1 : -1
-        md.giro = giro
-        md.nivel += passo
-        k.send({ type: 'volume', delta: passo * 4 })
-        play('step', passo * 0.5)
-      }
-      setRing({ x: h.x, y: h.y, p: 1, kind: 'girar', valor: md.nivel })
-      setTip('Gire o punho: volume · solte para terminar')
+    // ---------- ajuste de tamanho (cartão ou janela) ----------
+    if (md.m === 'resize') {
+      if (h.pose === 'Open_Palm') {
+        if (!md.open) md.open = now
+        if (now - md.open > 300) {
+          md.card ? k.scaleCard(md.card, null) : k.send({ type: 'janela.soltar', cancelar: true })
+          play('close')
+          reset('Ajuste cancelado')
+          return
+        }
+      } else md.open = 0
+      if (!md.started && h.spread > 0.4) md.started = true // só segue os dedos depois que abrem um pouco
+      if (md.started) {
+        const alvo = md.card ? zFor(h.spread) * md.z0 : zFor(h.spread)
+        if (Math.abs(alvo - md.z) > 0.03) md.still = now
+        md.z += (alvo - md.z) * 0.35
+        if (md.card) k.scaleCard(md.card, md.z)
+        else if (now - sent.current > 50) {
+          sent.current = now
+          k.send({ type: 'janela.ajustar', escala: Number(md.z.toFixed(3)) })
+        }
+        const p = Math.min(1, (now - md.still) / k.hold)
+        setRing(p > 0.08 ? { x: h.x, y: h.y, p, kind: 'fixar' } : null)
+        setTip(`Tamanho ${md.z.toFixed(1).replace('.', ',')}× · parado fixa · mão aberta cancela`)
+        if (p >= 1) {
+          if (!md.card) k.send({ type: 'janela.soltar' })
+          play('ack')
+          reset('Tamanho fixado')
+        }
+      } else setTip('Abra polegar e indicador em L')
       return
     }
 
     // ---------- mão sem pinça ----------
     if (!h.pinch) {
       if (md.m === 'press' && now - md.t < CLIQUE_MS) {
-        // seleção onde a pinça COMEÇOU (soltar os dedos mexe a mão), num botão do Jarvis ou no app
+        // pinça e solta: clique onde a pinça COMEÇOU (soltar os dedos mexe a mão), num botão do Jarvis ou no app
         if (!k.clickAt(md.x, md.y)) k.send({ type: 'clique', x: md.x / innerWidth, y: md.y / innerHeight })
         play('ack', (md.x / innerWidth) * 2 - 1)
         flash('Clique', 600)
@@ -236,10 +228,19 @@ export function useHandControl(ctx: Ctx, active: boolean) {
       } else if (md.m === 'drag-win') {
         k.send({ type: 'janela.soltar' })
         play('close', h.x * 2 - 1)
-      } else if (md.m === 'scroll') {
-        soltarRolagem(md.vy, md.vx)
       }
       if (md.m !== 'idle') reset()
+      // dois dedos (V) e mexer: rola como no trackpad
+      if (h.pose === 'Victory') {
+        if (scroll.current != null) k.send({ type: 'rolar', dy: Math.round((h.palm[1] - scroll.current) * -2400) })
+        scroll.current = h.palm[1]
+        setTip('Rolando')
+        return
+      }
+      if (scroll.current != null) {
+        scroll.current = null
+        setTip('')
+      }
       const card = k.cardAt(px, py)
       setHoverCard(card)
       setTip((t) => (h.costas ? 'Pince para o menu' : t === 'Pince para o menu' ? '' : t))
@@ -253,7 +254,6 @@ export function useHandControl(ctx: Ctx, active: boolean) {
 
     // ---------- pinça fechada ----------
     if (md.m === 'idle') {
-      clearInterval(inercia.current)
       const x = (h.ax ?? h.x) * innerWidth
       const y = (h.ay ?? h.y) * innerHeight
       if (h.costas) {
@@ -263,47 +263,31 @@ export function useHandControl(ctx: Ctx, active: boolean) {
         play('start')
         return
       }
-      const card = k.cardAt(x, y)
-      const w = card ? null : k.winAt()
-      const barra = !!w && x >= w.x && x <= w.x + w.w && y >= w.y && y - w.y <= BARRA_PX
-      mode.current = { m: 'press', x, y, t: now, card, barra, giro0: h.torcao ?? 0 }
+      mode.current = { m: 'press', x, y, t: now, card: k.cardAt(x, y) }
       return
     }
     if (md.m === 'press') {
       if (Math.hypot(px - md.x, py - md.y) > MEXER * innerWidth) {
+        // mexeu: arrastar, nunca ajuste
         if (md.card) mode.current = { m: 'drag-card', id: md.card, x: md.x, y: md.y }
-        else if (md.barra) {
+        else {
           k.send({ type: 'janela.pegar', x: md.x / innerWidth, y: md.y / innerHeight })
           mode.current = { m: 'drag-win', edge: 0 }
-        } else {
-          // arrastar o conteúdo rola, como no Quest: o conteúdo segue a mão
-          mode.current = { m: 'scroll', x: px, y: py, vx: 0, vy: 0, t: now }
-          setTip('Rolando')
         }
         setRing(null)
         play('step', h.x * 2 - 1)
         return
       }
-      // parada: o anel enche e vira o "pinçar e girar"; girar já no meio do anel também entra
+      // parado: o anel enche e entra no ajuste (só aparece depois do tempo do clique, para não piscar)
       const p = Math.min(1, (now - md.t) / k.hold)
-      setRing(now - md.t > CLIQUE_MS * 0.8 ? { x: md.x / innerWidth, y: md.y / innerHeight, p, kind: 'armar' } : null)
-      if (p >= 1 || (now - md.t > 250 && Math.abs(angDif(h.torcao ?? 0, md.giro0)) > GIRAR_GRAUS * 1.5)) {
-        mode.current = { m: 'girar', giro: h.torcao ?? 0, nivel: 0 }
+      setRing(now - md.t > CLIQUE_MS ? { x: md.x / innerWidth, y: md.y / innerHeight, p, kind: 'armar' } : null)
+      if (p >= 1) {
+        if (!md.card) k.send({ type: 'janela.pegar', x: md.x / innerWidth, y: md.y / innerHeight, modo: 'ajuste' })
+        const z0 = md.card ? k.cardScale(md.card) : 1
+        mode.current = { m: 'resize', card: md.card, z0, z: md.card ? z0 : 1, started: false, still: now, open: 0 }
+        setRing(null)
         play('start')
       }
-      return
-    }
-    if (md.m === 'scroll') {
-      const dt = Math.max(1, now - md.t)
-      if (dt < 30) return
-      const dy = py - md.y
-      const dx = px - md.x
-      md.vy = md.vy * 0.5 + (dy / dt) * 0.5 * 1.6
-      md.vx = md.vx * 0.5 + (dx / dt) * 0.5 * 1.6
-      md.x = px
-      md.y = py
-      md.t = now
-      if (Math.abs(dy) + Math.abs(dx) > 1) k.send({ type: 'rolar', dy: Math.round(dy * 1.6), dx: Math.round(dx * 1.6) })
       return
     }
     if (md.m === 'drag-card') {

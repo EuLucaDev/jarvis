@@ -10,6 +10,8 @@ export type Hand = {
   key: string; x: number; y: number; pinch: boolean; spread: number; pose: string; palm: [number, number]
   /** força da pinça 0..1 (o cursor fecha), palma virada para a pessoa, giro do punho em graus, mão fechada */
   forca?: number; costas?: boolean; torcao?: number; micro?: boolean
+  /** medidas cruas para a calibração: abertura da pinça (em tamanhos de mão), lado da palma, ponto na câmera */
+  cal?: { d: number; frente: number; cx: number; cy: number }
   ax?: number; ay?: number; gx?: number; gy?: number; gax?: number; gay?: number }
 
 function store<T>(initial: T) {

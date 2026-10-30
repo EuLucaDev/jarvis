@@ -25,7 +25,7 @@ binaries = []
 hiddenimports = collect_submodules("jarvis") + ["uvicorn.logging", "uvicorn.loops.auto", "uvicorn.protocols.http.auto",
                                                 "uvicorn.protocols.websockets.auto", "uvicorn.lifespan.on"]
 
-for pkg in ("mediapipe", "vosk", "sounddevice", "_sounddevice_data", "google.genai", "ddgs", "certifi", "icalendar",
+for pkg in ("mediapipe", "rtmlib", "onnxruntime", "vosk", "sounddevice", "_sounddevice_data", "google.genai", "ddgs", "certifi", "icalendar",
             "recurring_ical_events", "pynput", "mss", "send2trash"):
     try:
         d, b, h = collect_all(pkg)
@@ -36,7 +36,7 @@ for pkg in ("mediapipe", "vosk", "sounddevice", "_sounddevice_data", "google.gen
         pass
 
 if sys.platform == "darwin":
-    hiddenimports += ["AppKit", "Quartz", "ApplicationServices", "Foundation", "objc", "PyObjCTools.AppHelper"]
+    hiddenimports += ["AppKit", "Quartz", "ApplicationServices", "Foundation", "objc", "PyObjCTools.AppHelper", "Vision", "CoreML"]
 elif sys.platform == "win32":
     hiddenimports += ["win32gui", "win32con", "win32api", "win32process", "win32clipboard", "pycaw.pycaw", "comtypes",
                       "screen_brightness_control", "uiautomation"]

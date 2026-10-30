@@ -4,6 +4,8 @@
   Guarda os últimos 3 s, para a frase dita junto com "Jarvis" não se perder enquanto a conversa conecta.
 - Alto-falante a 24 kHz: toca a voz da Gemini numa fila; conta o que já tocou, para a legenda andar junto.
 - Nível de entrada e de saída (0..1) para a esfera e o espectro.
+- Efeito "HUD" na voz (ajuste "voz", campo efeito; padrão ligado): leve corte de graves e agudos, um brilho metálico
+  curto e um eco de 18 ms, como a voz do J.A.R.V.I.S. dos filmes. Tudo em numpy, sem atraso perceptível.
 """
 
 import collections
@@ -19,6 +21,39 @@ log = logging.getLogger("jarvis.audio")
 IN_RATE = 16000
 OUT_RATE = 24000
 BLOCK = 512  # 32 ms de microfone por pedaço
+_CAUDA = 640  # amostras do pedaço anterior que o efeito precisa (o eco mais longo é 430)
+
+
+class EfeitoHUD:
+    """Voz "de filme" vetorizada: cada pedaço usa a cauda do anterior, então não há emendas audíveis."""
+
+    def __init__(self) -> None:
+        self.cauda = np.zeros(_CAUDA, np.float32)
+        self.media_ant = np.zeros(63, np.float32)
+
+    def __call__(self, pcm: bytes) -> bytes:
+        x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768
+        if x.size == 0:
+            return pcm
+        ext = np.concatenate([self.cauda, x])
+        n, c = x.size, _CAUDA
+        lp = np.convolve(ext, np.array([0.25, 0.5, 0.25], np.float32), "same")  # tira o chiado de cima
+        caixa = np.convolve(ext, np.full(64, 1 / 64, np.float32), "same")  # graves (média de ~2,7 ms)
+        y = lp[c:] - 0.55 * caixa[c:]  # menos grave: voz de rádio, sem ficar fina
+        y += 0.16 * ext[c - 72 : c - 72 + n]  # brilho metálico (3 ms)
+        y += 0.11 * ext[c - 430 : c - 430 + n]  # espaço (18 ms)
+        y = np.tanh(1.5 * y) / np.tanh(1.5) * 0.92
+        self.cauda = ext[-c:].copy()
+        return (np.clip(y, -1, 1) * 32767).astype(np.int16).tobytes()
+
+
+def _efeito_ligado() -> bool:
+    try:
+        from . import store
+
+        return (store.get("voz") or {}).get("efeito", "hud") == "hud"
+    except Exception:  # noqa: BLE001
+        return False
 
 
 class AudioIO:
@@ -35,6 +70,9 @@ class AudioIO:
         self.erro: str | None = None
         self._in = None
         self._outs = None
+        self._efeito = EfeitoHUD()
+        self._efeito_em = 0.0
+        self._efeito_on = True
 
     # ---------- entrada ----------
 
@@ -62,6 +100,11 @@ class AudioIO:
     def enqueue(self, pcm: bytes) -> None:
         if self._outs is None:
             return  # sem alto-falante: não acumula (a legenda segue sem esperar o áudio)
+        if time.time() - self._efeito_em > 5:  # o ajuste é relido de vez em quando, não a cada pedaço
+            self._efeito_em = time.time()
+            self._efeito_on = _efeito_ligado()
+        if self._efeito_on:
+            pcm = self._efeito(pcm)
         with self._lock:
             self._out.extend(pcm)
             self.queued += len(pcm) // 2
