@@ -383,6 +383,14 @@ fn ouvir_nucleo(app: AppHandle) {
                 "mostrar" => mostrar_hud(&h),
                 "minimizar" => ir_para_canto(&h),
                 "esconder" => esconder_tudo(&h),
+                // pelo gesto o HUD nunca está em foco (o foco fica no app de baixo): vale só se está à vista
+                "alternar" => {
+                    if ler_estado(&h).modo == "visivel" {
+                        ir_para_canto(&h)
+                    } else {
+                        mostrar_hud(&h)
+                    }
+                }
                 "memoria" => abrir_memoria(&h, foco),
                 "financeiro" => abrir_financeiro(&h, pagina),
                 _ => {}

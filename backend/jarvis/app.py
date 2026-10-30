@@ -767,7 +767,19 @@ async def ws_endpoint(ws: WebSocket):
             elif kind == "zoom" and pc.permitido() and not pc.front_is_jarvis():
                 await asyncio.to_thread(pc.press, "cmd+=" if int(data.get("direcao", 1)) > 0 else "cmd+-")
             elif kind == "rolar" and pc.permitido():
-                await asyncio.to_thread(pc.scroll, max(-400, min(400, int(data.get("dy", 0)))))
+                await asyncio.to_thread(pc.scroll, max(-400, min(400, int(data.get("dy", 0)))), max(-400, min(400, int(data.get("dx", 0)))))
+            elif kind == "gesto.acao" and isinstance(data.get("acao"), str):
+                # menu da palma: a ação escolhida roda aqui, igual a um gesto de atalho
+                from . import gestures
+
+                if data["acao"] in gestures.ACOES:
+                    await gestures.executar(data["acao"])
+            elif kind == "volume":
+                from . import gestures
+
+                await asyncio.to_thread(gestures._volume, max(-20, min(20, int(data.get("delta", 0)))))
+            elif kind == "maos.recentrar":
+                await ws.send_json({"type": "maos.recentrada", "ok": hands.recentrar()})
             elif kind == "apontado":
                 hub.pointed = {**data["alvo"], "em": time.time()} if data.get("alvo") else None
             elif kind == "copiar" and isinstance(data.get("texto"), str):

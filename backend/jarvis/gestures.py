@@ -1,7 +1,9 @@
-"""Gestos de atalho (poses paradas e deslizes da mão) → ações, escolhidas pela pessoa no painel (Gestos).
+"""Gestos de atalho → ações, escolhidas pela pessoa no painel (Gestos).
 
-As poses vêm do MediaPipe (hands.py). A pinça (clicar, arrastar, ajustar) e os dois dedos (rolar) não entram
-aqui: são o ponteiro, sempre iguais. Tudo roda no núcleo, então vale com o HUD escondido.
+Os padrões seguem a Meta: microgestos do polegar no indicador (Quest) e a pinça do dedo médio (pulseira dos
+óculos Ray-Ban Display). Poses paradas e deslizes da mão inteira ficam disponíveis, mas desligados de início.
+A pinça do indicador (selecionar, arrastar, rolar, menu da palma, girar) não entra aqui: é o ponteiro, sempre
+igual (handControl.ts). Tudo roda no núcleo, então vale com o HUD escondido.
 """
 
 import asyncio
@@ -14,6 +16,13 @@ from .hub import hub
 log = logging.getLogger("jarvis.gestures")
 
 GESTOS = {  # o que a pessoa faz → nome no painel
+    "polegar_toque": "Toque do polegar no lado do indicador (mão fechada)",
+    "polegar_duplo": "Toque duplo do polegar no indicador",
+    "polegar_frente": "Polegar desliza no indicador, para a ponta",
+    "polegar_tras": "Polegar desliza no indicador, para a base",
+    "medio_toque": "Pinça do polegar com o dedo médio",
+    "medio_duplo": "Pinça dupla com o dedo médio",
+    "medio_segurar": "Segurar a pinça com o dedo médio",
     "Open_Palm": "Mão aberta parada",
     "Closed_Fist": "Punho fechado",
     "Thumb_Up": "Polegar para cima",
@@ -47,24 +56,47 @@ ACOES = {
     "minimizar_janela": "Minimizar a janela da frente",
     "maximizar_janela": "Maximizar a janela da frente",
     "memoria": "Abrir o mapa da memória",
+    "voltar_contexto": "Voltar (fecha o cartão mais novo ou volta a página)",
+    "alternar_hud": "Mostrar ou esconder o HUD",
+    "trocar_app": "Trocar de app (como Cmd+Tab / Alt+Tab)",
+    "rolar_cima": "Rolar para cima",
+    "rolar_baixo": "Rolar para baixo",
 }
 PADRAO = {
-    "Open_Palm": "mostrar_hud",
-    "Closed_Fist": "fechar_cartoes",
-    "Thumb_Up": "sim",
-    "Thumb_Down": "nao",
-    "Pointing_Up": "ouvir",
-    "ILoveYou": "espelho",
-    "deslize_esquerda": "aba_anterior",
-    "deslize_direita": "proxima_aba",
-    "deslize_cima": "mostrar_hud",
-    "deslize_baixo": "minimizar_hud",
+    # Quest: toque do polegar = ação do contexto, toque duplo = assistente, deslizes = direcional
+    "polegar_toque": "tocar_pausar",
+    "polegar_duplo": "ouvir",
+    "polegar_frente": "rolar_baixo",
+    "polegar_tras": "rolar_cima",
+    # pulseira neural: médio = voltar, duplo = liga/desliga a tela, segurar = trocar de app
+    "medio_toque": "voltar_contexto",
+    "medio_duplo": "alternar_hud",
+    "medio_segurar": "trocar_app",
+    # fora do modelo da Meta: a pessoa liga no painel se quiser
+    "Open_Palm": "nada",
+    "Closed_Fist": "nada",  # é a pose dos microgestos
+    "Thumb_Up": "nada",
+    "Thumb_Down": "nada",
+    "Pointing_Up": "nada",
+    "ILoveYou": "nada",
+    "deslize_esquerda": "nada",
+    "deslize_direita": "nada",
+    "deslize_cima": "nada",
+    "deslize_baixo": "nada",
 }
 NAVEGADOR = {"aba_anterior", "proxima_aba", "voltar", "avancar"}
 
 
+# padrões de antes da 2.7 (poses e deslizes ligados): o painel salvava o mapa inteiro, então quem nunca mexeu
+# guardou estes valores; eles não valem mais como escolha da pessoa
+_ANTIGO = {"Open_Palm": "mostrar_hud", "Closed_Fist": "fechar_cartoes", "Thumb_Up": "sim", "Thumb_Down": "nao",
+           "Pointing_Up": "ouvir", "ILoveYou": "espelho", "deslize_esquerda": "aba_anterior",
+           "deslize_direita": "proxima_aba", "deslize_cima": "mostrar_hud", "deslize_baixo": "minimizar_hud"}
+
+
 def mapa() -> dict[str, str]:
-    return {**PADRAO, **{k: v for k, v in (store.get("gestos") or {}).items() if k in GESTOS and v in ACOES}}
+    salvo = store.get("gestos") or {}
+    return {**PADRAO, **{k: v for k, v in salvo.items() if k in GESTOS and v in ACOES and _ANTIGO.get(k) != v}}
 
 
 def acao_de(gesto: str) -> str:
@@ -88,6 +120,23 @@ async def executar(acao: str) -> None:
             hub.app_cmd("minimizar")
         elif acao == "memoria":
             hub.app_cmd("memoria", foco="")
+        elif acao == "alternar_hud":
+            hub.app_cmd("alternar")
+        elif acao == "voltar_contexto":
+            if hub.cards:
+                await hub.close_card(hub.cards[-1]["id"])
+            else:
+                from .pc.common import NAVEGADORES
+
+                frente = (pc.front_app() or "").lower()
+                if frente and any(n.lower() == frente or n.lower() in frente for n in NAVEGADORES):
+                    from . import web
+
+                    await asyncio.to_thread(web.acao, "voltar")
+        elif acao == "trocar_app" and pc.permitido():
+            await asyncio.to_thread(pc.press, "cmd+tab" if pc.SISTEMA == "mac" else "alt+tab")
+        elif acao in ("rolar_cima", "rolar_baixo") and pc.permitido():
+            await asyncio.to_thread(pc.scroll, 320 if acao == "rolar_cima" else -320)
         elif acao == "fechar_cartoes":
             await hub.clear_cards()
         elif acao in ("sim", "nao"):

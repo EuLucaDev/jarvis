@@ -21,7 +21,7 @@ import { CardView, cardText } from '../hud/Cards'
 import { useJarvis } from '../hud/useJarvis'
 import { Aura } from '../ui/Aura'
 import { CameraView } from '../ui/CameraView'
-import { useHandControl } from './handControl'
+import { MENU, MENU_RAIO, useHandControl, type Menu } from './handControl'
 import './overlay.css'
 
 type Rect = { x: number; y: number; w: number; h: number }
@@ -189,6 +189,7 @@ export function Overlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [j.send, area.x, area.y, area.w, area.h],
   )
+  const winRef = useRef<Rect | null>(null)
   const hc = useHandControl(
     {
       send: sendGlobal,
@@ -198,6 +199,7 @@ export function Overlay() {
       moveCard,
       scaleCard,
       clickAt,
+      winAt: () => winRef.current,
       local: (hs, ocupada) => (ocupada ? hs.map(paraLocal) : hs.filter(minha).map(paraLocal)),
     },
     j.camera.ligada,
@@ -243,6 +245,7 @@ export function Overlay() {
   // ---------- janela realçada (borda azul) ----------
   const [win, setWin] = useState<(Rect & { estado: string; app: string; titulo: string; escala?: number }) | null>(null)
   const winTimer = useRef(0)
+  winRef.current = win
   useEffect(() => {
     const e = j.last
     if (!e || e.type !== 'janela.realce') return
@@ -535,7 +538,7 @@ export function Overlay() {
         </div>
       )}
       {mini && principal && handsOn && <HandPreview />}
-      {handsOn && <HandCursors ring={hc.ring} tip={hc.tip} minha={minha} paraLocal={paraLocal} />}
+      {handsOn && <HandCursors ring={hc.ring} menu={hc.menu} tip={hc.tip} minha={minha} paraLocal={paraLocal} />}
       {gesto && <div className="ov-gesto">{gesto}</div>}
     </main>
   )
@@ -581,11 +584,13 @@ function HandPreview() {
 /** Cursores das mãos por cima de tudo, com o anel de segurar e a dica do gesto. */
 function HandCursors({
   ring,
+  menu,
   tip,
   minha,
   paraLocal,
 }: {
-  ring: { x: number; y: number; p: number; kind: string } | null
+  ring: { x: number; y: number; p: number; kind: string; valor?: number } | null
+  menu: Menu | null
   tip: string
   minha: (h: Hand) => boolean
   paraLocal: (h: Hand) => Hand
@@ -595,11 +600,34 @@ function HandCursors({
     <>
       {ring && (
         <div className={`ov-ring ${ring.kind}`} style={{ transform: `translate(${ring.x * innerWidth}px, ${ring.y * innerHeight}px)`, ['--p' as string]: ring.p }}>
-          <span>{ring.kind === 'armar' ? 'Ajustar' : 'Fixar'}</span>
+          <span>
+            {ring.kind === 'armar' ? 'Girar' : ring.kind === 'centro' ? 'Recentrar' : `Volume ${ring.valor && ring.valor > 0 ? '+' : ''}${(ring.valor ?? 0) * 4}`}
+          </span>
+        </div>
+      )}
+      {menu && (
+        <div className="ov-menu" style={{ transform: `translate(${menu.x}px, ${menu.y}px)` }}>
+          <i className="ov-menu-centro" />
+          {MENU.map((it, n) => {
+            const a = ((n * 360) / MENU.length - 90) * (Math.PI / 180)
+            return (
+              <b
+                key={it.acao}
+                className={menu.sel === n ? 'is-sel' : ''}
+                style={{ transform: `translate(${Math.cos(a) * MENU_RAIO}px, ${Math.sin(a) * MENU_RAIO}px)` }}
+              >
+                {it.rotulo}
+              </b>
+            )
+          })}
         </div>
       )}
       {hands.map((h, i) => (
-        <div key={h.key} className={`ov-hand ${h.pinch ? 'pinch' : ''} ${i ? 'second' : ''}`} style={{ transform: `translate(${h.x * innerWidth}px, ${h.y * innerHeight}px)` }}>
+        <div
+          key={h.key}
+          className={`ov-hand ${h.pinch ? 'pinch' : ''} ${h.costas ? 'palma' : ''} ${h.micro ? 'micro' : ''} ${i ? 'second' : ''}`}
+          style={{ transform: `translate(${h.x * innerWidth}px, ${h.y * innerHeight}px)`, ['--f' as string]: h.forca ?? (h.pinch ? 1 : 0) }}
+        >
           {i === 0 && tip && <span>{tip}</span>}
         </div>
       ))}

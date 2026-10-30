@@ -1,8 +1,18 @@
 """Mãos pela câmera, no núcleo (fora da interface): MediaPipe Gesture Recognizer, até duas mãos, 30 quadros/s.
 
+O modelo de interação é o da Meta (Quest e a pulseira neural dos óculos Ray-Ban Display), adaptado à câmera:
+  - ponteiro filtrado (filtro One Euro, como no Quest) e cursor que fecha conforme a pinça (`forca` 0..1);
+  - pinça do indicador = selecionar; o resto (arrastar, rolar, menu da palma, girar) fica em handControl.ts;
+  - costas da mão para a câmera = palma virada para você (`costas`): o botão do menu aparece na mão;
+  - microgestos com a mão fechada: toque do polegar no lado do indicador (simples e duplo) e deslize do
+    polegar ao longo dele (para a ponta / para trás);
+  - pinça do polegar com o dedo médio: toque (voltar), toque duplo (mostrar/esconder o HUD), segurar (trocar
+    de app);
+  - `torcao`: o giro do punho, em graus, para o "pinçar e girar" (volume).
+
 Cada quadro vira, para as telas:
-  {"type": "maos", "hands": [{x, y, pinch, spread, pose, palm}], "pts": [...]}   (pts = esqueleto, a cada 2 quadros)
-  {"type": "gesto", "acao": "...", "rotulo": "..."}                             (deslizes e poses paradas)
+  {"type": "maos", "hands": [{x, y, pinch, forca, costas, torcao, micro, spread, pose, palm}], "pts": [...]}
+  {"type": "gesto", "acao": "...", "rotulo": "..."}      (microgestos, pinça do médio, deslizes e poses paradas)
 x/y: o ponteiro, pela base do indicador e do dedo médio (os nós dos dedos não se mexem ao fazer a pinça,
 então o ponteiro fica parado na hora do clique); espelhado e esticado para a tela inteira (0..1).
 ax/ay (só com pinça): onde o ponteiro estava logo ANTES da pinça começar, que é onde o clique deve cair.
@@ -25,6 +35,11 @@ log = logging.getLogger("jarvis.hands")
 
 MODELO = CODE_ROOT / "models" / "gesture_recognizer.task"
 AREA = (0.18, 0.82, 0.22, 0.78)  # miolo do quadro da câmera que vira a tela inteira (x0, x1, y0, y1)
+LARG, ALT = AREA[1] - AREA[0], AREA[3] - AREA[2]
+
+TOQUE_S = 0.35  # contato do polegar (ou do médio) até aqui = toque
+DUPLO_S = 0.38  # segundo toque dentro disto = toque duplo
+SEGURAR_S = 0.7  # pinça do médio mantida = segurar
 
 POSES = {  # pose → segundos parada para valer (a ação de cada uma é escolhida no painel: gestures.py)
     "Open_Palm": 1.4,
@@ -44,9 +59,39 @@ def _dist(a, b) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def _tela(p) -> tuple[float, float]:
-    x0, x1, y0, y1 = AREA
-    return _clamp((p[0] - x0) / (x1 - x0)), _clamp((p[1] - y0) / (y1 - y0))
+def _seg(p, a, b) -> tuple[float, float]:
+    """Distância de p ao segmento a→b e onde cai nele (0 = a, 1 = b)."""
+    vx, vy = b[0] - a[0], b[1] - a[1]
+    n = vx * vx + vy * vy or 1e-9
+    t = ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / n
+    tc = min(1.0, max(0.0, t))
+    return math.hypot(p[0] - a[0] - vx * tc, p[1] - a[1] - vy * tc), t
+
+
+class OneEuro:
+    """Filtro One Euro (Casiez et al.): parado, corta o tremor; rápido, segue sem atraso."""
+
+    def __init__(self, mincut: float = 1.2, beta: float = 18.0, dcut: float = 1.0) -> None:
+        self.mincut, self.beta, self.dcut = mincut, beta, dcut
+        self.x: float | None = None
+        self.dx = 0.0
+        self.t = 0.0
+
+    @staticmethod
+    def _a(cut: float, dt: float) -> float:
+        r = 2 * math.pi * cut * dt
+        return r / (r + 1)
+
+    def __call__(self, x: float, t: float) -> float:
+        if self.x is None:
+            self.x, self.t = x, t
+            return x
+        dt = max(1e-3, t - self.t)
+        self.t = t
+        dx = (x - self.x) / dt
+        self.dx += (dx - self.dx) * self._a(self.dcut, dt)
+        self.x += (x - self.x) * self._a(self.mincut + self.beta * abs(self.dx), dt)
+        return self.x
 
 
 class Hands:
@@ -65,6 +110,20 @@ class Hands:
         self.pose_since = 0.0
         self.pose_anchor = (0.0, 0.0)
         self.cooldown = 0.0
+        self.centro = ((AREA[0] + AREA[1]) / 2, (AREA[2] + AREA[3]) / 2)  # "recentrar" muda o miolo da câmera
+
+    def _tela(self, p) -> tuple[float, float]:
+        x0, y0 = self.centro[0] - LARG / 2, self.centro[1] - ALT / 2
+        return _clamp((p[0] - x0) / LARG), _clamp((p[1] - y0) / ALT)
+
+    def recentrar(self) -> bool:
+        """Como no Quest: o ponto onde a mão principal está agora vira o meio da tela."""
+        s = next(iter(self.state.values()), None)
+        if not s or "cru" not in s:
+            return False
+        cx, cy = s["cru"]
+        self.centro = (min(1 - LARG / 2, max(LARG / 2, cx)), min(1 - ALT / 2, max(ALT / 2, cy)))
+        return True
 
     def bind(self, loop: asyncio.AbstractEventLoop) -> None:
         self.loop = loop
@@ -167,23 +226,42 @@ class Hands:
             if key in vistas or tamanho < 0.07 or (hd and hd.score < 0.7):
                 continue  # mão pequena (no fundo) ou duvidosa: era o que "pegava" do nada
             vistas.add(key)
-            bruto = _tela(((pts[5][0] + pts[9][0]) / 2, (pts[5][1] + pts[9][1]) / 2))
-            palma = _tela((sum(pts[j][0] for j in (0, 5, 9, 13, 17)) / 5, sum(pts[j][1] for j in (0, 5, 9, 13, 17)) / 5))
+            cru = ((pts[5][0] + pts[9][0]) / 2, (pts[5][1] + pts[9][1]) / 2)
+            bruto = self._tela(cru)
+            palma = self._tela((sum(pts[j][0] for j in (0, 5, 9, 13, 17)) / 5, sum(pts[j][1] for j in (0, 5, 9, 13, 17)) / 5))
             s = self.state.get(key)
             if not s:
                 s = {"x": bruto[0], "y": bruto[1], "px": palma[0], "py": palma[1], "pinch": False, "raw": False, "since": agora,
-                     "spread": 1.0, "seen": agora, "trail": [], "hist": [], "ax": bruto[0], "ay": bruto[1]}
+                     "spread": 1.0, "seen": agora, "trail": [], "hist": [], "ax": bruto[0], "ay": bruto[1],
+                     "fx": OneEuro(), "fy": OneEuro(), "forca": 0.0, "costas": 0, "micro": None, "medio": None}
                 self.state[key] = s
-            vel = math.hypot(bruto[0] - s["x"], bruto[1] - s["y"])
-            if vel > 0.0025:  # zona morta: a mão parada não faz o ponteiro tremer
-                a = min(0.85, max(0.18, vel * 9))  # devagar = suave e preciso, rápido = sem atraso
-                s["x"] += (bruto[0] - s["x"]) * a
-                s["y"] += (bruto[1] - s["y"]) * a
+            s["cru"] = cru
+            s["x"], s["y"] = s["fx"](bruto[0], agora), s["fy"](bruto[1], agora)
             s["hist"] = [p for p in s["hist"] if agora - p[0] < 0.5] + [(agora, s["x"], s["y"])]
             s["px"] += (palma[0] - s["px"]) * 0.5
             s["py"] += (palma[1] - s["py"]) * 0.5
             d = _dist(pts[4], pts[8]) / (tamanho or 1)
             s["spread"] += (d - s["spread"]) * 0.5
+            # força da pinça para o cursor (o anel fecha conforme os dedos se aproximam, como no Quest)
+            s["forca"] += (_clamp((0.95 - d) / 0.7) - s["forca"]) * 0.5
+            # mão fechada (indicador e médio dobrados): é a pose dos microgestos, não do ponteiro
+            fechada = _dist(pts[8], pts[0]) < _dist(pts[6], pts[0]) * 1.05 and _dist(pts[12], pts[0]) < _dist(pts[10], pts[0]) * 1.05
+            # palma para você = costas da mão para a câmera (em coordenadas espelhadas, o sinal do produto vetorial
+            # muda com o lado da mão; o MediaPipe chama de "Left" a mão direita quando o quadro não vem espelhado)
+            v1 = (pts[5][0] - pts[0][0], pts[5][1] - pts[0][1])
+            v2 = (pts[17][0] - pts[0][0], pts[17][1] - pts[0][1])
+            cruz = (v1[0] * v2[1] - v1[1] * v2[0]) / (tamanho * tamanho or 1)
+            frente = cruz * (1 if (hd and hd.category_name == "Left") else -1)
+            alvo_costas = 1 if frente < -0.12 else 0 if frente > 0.05 else s["costas"]
+            s["costas"] = alvo_costas
+            torcao = math.degrees(math.atan2(pts[17][1] - pts[5][1], pts[17][0] - pts[5][0]))
+            if fechada:
+                self._micro(s, pts, tamanho, agora)
+            else:
+                s["micro"] = None
+                self._medio(s, pts, tamanho, d, agora)
+            if fechada:
+                d = 9.0  # mão fechada nunca é pinça do ponteiro (o polegar encosta no indicador nos microgestos)
             quer = d < 0.4 if s["raw"] else d < 0.25  # histerese
             if quer != s["raw"]:
                 s["raw"], s["since"] = quer, agora
@@ -199,6 +277,8 @@ class Hands:
             pinca = s["pinch"] and agora - s["seen"] > 0.25  # mão recém-chegada não clica
             dx, dy, dw, dh = self.area
             mao = {"key": key, "x": round(s["x"], 4), "y": round(s["y"], 4), "pinch": pinca, "spread": round(s["spread"], 3),
+                   "forca": round(1.0 if pinca else min(0.95, s["forca"]), 3), "costas": bool(s["costas"]), "micro": fechada,
+                   "torcao": round(torcao, 1),
                    "pose": pose, "palm": [round(s["px"], 4), round(s["py"], 4)],
                    # ponto na área de trabalho inteira (todos os monitores), em pontos globais: cada camada pega o seu
                    "gx": round(dx + s["x"] * dw, 1), "gy": round(dy + s["y"] * dh, 1)}
@@ -213,6 +293,55 @@ class Hands:
         hands.sort(key=lambda h: 0 if h["key"] == "Right" else 1)  # mão principal primeiro
         self._gestures(hands, agora)
         return hands, pts_all
+
+    def _micro(self, s: dict[str, Any], pts, tamanho: float, agora: float) -> None:
+        """Microgestos (Quest): polegar tocando o lado do indicador e deslizando ao longo dele."""
+        dist, t = _seg(pts[4], pts[5], pts[7])
+        dist /= tamanho or 1
+        m = s["micro"]
+        if m is None:
+            m = s["micro"] = {"toque": False, "inicio": 0.0, "t0": 0.0, "deslizou": False, "pendente": 0.0}
+        if not m["toque"] and dist < 0.28:
+            m.update(toque=True, inicio=agora, t0=t, deslizou=False)
+        elif m["toque"] and not m["deslizou"] and abs(t - m["t0"]) > 0.45:
+            m["deslizou"] = True  # deslize do polegar: para a ponta do dedo ou de volta para a base
+            self._acao("polegar_frente" if t > m["t0"] else "polegar_tras", agora, 0.35)
+        elif m["toque"] and dist > 0.42:
+            m["toque"] = False
+            if not m["deslizou"] and agora - m["inicio"] < TOQUE_S:
+                if m["pendente"] and agora - m["pendente"] < DUPLO_S:
+                    m["pendente"] = 0.0
+                    self._acao("polegar_duplo", agora, 0.5)
+                else:
+                    m["pendente"] = agora
+        if m["pendente"] and agora - m["pendente"] >= DUPLO_S and not m["toque"]:
+            m["pendente"] = 0.0
+            self._acao("polegar_toque", agora, 0.4)
+
+    def _medio(self, s: dict[str, Any], pts, tamanho: float, d_indicador: float, agora: float) -> None:
+        """Pinça do polegar com o dedo médio (pulseira da Meta): toque, toque duplo e segurar."""
+        d = _dist(pts[4], pts[12]) / (tamanho or 1)
+        m = s["medio"]
+        if m is None:
+            m = s["medio"] = {"junto": False, "inicio": 0.0, "segurou": False, "pendente": 0.0}
+        junto = (d < 0.38 and d_indicador > 0.45) if m["junto"] else (d < 0.24 and d_indicador > 0.5)
+        if junto and not m["junto"]:
+            m.update(junto=True, inicio=agora, segurou=False)
+        elif junto and not m["segurou"] and agora - m["inicio"] > SEGURAR_S:
+            m["segurou"] = True
+            m["pendente"] = 0.0
+            self._acao("medio_segurar", agora, 0.8)
+        elif not junto and m["junto"]:
+            m["junto"] = False
+            if not m["segurou"] and agora - m["inicio"] < TOQUE_S:
+                if m["pendente"] and agora - m["pendente"] < DUPLO_S:
+                    m["pendente"] = 0.0
+                    self._acao("medio_duplo", agora, 0.6)
+                else:
+                    m["pendente"] = agora
+        if m["pendente"] and agora - m["pendente"] >= DUPLO_S and not m["junto"]:
+            m["pendente"] = 0.0
+            self._acao("medio_toque", agora, 0.4)
 
     def _gestures(self, hands: list[dict[str, Any]], agora: float) -> None:
         h = hands[0] if len(hands) == 1 else None

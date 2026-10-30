@@ -32,13 +32,16 @@ DEPOIS DE INSTALADO
   - O Jarvis liga com o computador, escondido: só o ícone na barra de menus (Mac) ou na
     bandeja (Windows/Linux).
   - Para chamar: diga "Jarvis" (ou "Jarvis, bom dia") ou bata duas palmas. Também: Alt+Espaço.
-  - Com a câmera ligada, a mão vira o ponteiro:
-      o ponteiro segue os nós dos dedos (fica parado quando você faz a pinça)
-      pinça e solta = clica onde começou · pinça e mexe = arrasta · pinça parada = ajusta o tamanho
-      (abra polegar e indicador em L; parado fixa; mão aberta cancela)
-      dois dedos e mexe = rola · duas mãos em pinça: afastar = zoom +, juntar = zoom −
-    Gestos de atalho (escolha o que cada um faz em Painel → Gestos): indicador para cima = falar,
-    polegar = sim/não, punho = fecha os cartões, chifrinho = espelhar a tela, deslizar = trocar de aba.
+  - Com a câmera ligada, a mão vira o ponteiro, no modelo da Meta (Quest e pulseira do Ray-Ban Display):
+      o anel do cursor fecha conforme você junta polegar e indicador
+      pinça e solta = clica · pinça e arrasta = rola a página (na barra de título move a janela;
+      num cartão move o cartão) · pinça parada e girar o punho = volume
+      palma virada para você + pinça = menu rápido (aponte e solte; segure no meio para recentrar)
+      duas mãos em pinça: afastar ou juntar muda o tamanho do cartão ou da janela
+    Com a mão fechada (Painel → Gestos escolhe o que cada um faz):
+      polegar toca o lado do indicador = tocar/pausar · toque duplo = falar com o Jarvis
+      polegar desliza no indicador = rola · pinça do polegar com o dedo médio = voltar
+      pinça dupla com o médio = mostra/esconde o HUD · segurar a pinça do médio = trocar de app
   - Fechar a janela do Jarvis deixa ele no canto (esfera pequena com o vídeo da câmera); ele segue
     ouvindo. Para sumir de vez: ícone → Sair do Jarvis. "Abrir com o computador" também fica no ícone.
   - Os cartões aparecem flutuando na tela; dá para arrastar, aumentar e fechar. Depois de ~10 s cada um vai

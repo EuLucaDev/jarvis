@@ -830,13 +830,15 @@ function GestosPage() {
   }
   return (
     <div className="stack">
-      <Panel title="Ponteiro (sempre igual)" desc="Com a câmera ligada, a mão é o mouse da tela inteira. O ponteiro segue os nós dos dedos, então fica parado quando você faz a pinça.">
+      <Panel title="Ponteiro (modelo da Meta)" desc="Com a câmera ligada, a mão é o mouse da tela inteira, como no Quest. O anel do cursor fecha conforme o polegar se aproxima do indicador.">
         <ul className="rows">
           {[
-            ['Pinça e solta', 'Clica onde a pinça começou (em qualquer app ou nos cartões do Jarvis)'],
-            ['Pinça e mexe', 'Arrasta o cartão ou a janela embaixo da mão; segurar na borda manda para o outro monitor'],
-            ['Pinça parada', 'Enche o anel e entra no ajuste de tamanho: abra polegar e indicador em L; parado fixa, mão aberta cancela'],
-            ['Dois dedos (V) e mexe', 'Rola a página embaixo'],
+            ['Pinça e solta', 'Seleciona: clica onde a pinça começou (em qualquer app ou nos cartões do Jarvis)'],
+            ['Pinça e arrasta', 'No conteúdo, rola a página (com inércia ao soltar); na barra de título, move a janela (segurar na borda manda para o outro monitor); num cartão, move o cartão'],
+            ['Pinça parada e gira o punho', 'Muda o volume, como o "pinçar e girar" da pulseira da Meta'],
+            ['Palma virada para você + pinça', 'Abre o menu rápido em volta da mão: aponte e solte para escolher; segure no meio para recentrar o ponteiro'],
+            ['Duas mãos em pinça', 'Afastar ou juntar muda o tamanho do cartão ou da janela embaixo; soltar fixa'],
+            ['Mão fechada', 'Polegar no lado do indicador: toque, toque duplo e deslizes (os atalhos abaixo)'],
           ].map(([g, a]) => (
             <li key={g}>
               <span>

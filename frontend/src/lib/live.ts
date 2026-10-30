@@ -6,7 +6,11 @@ import { useSyncExternalStore } from 'react'
 export type Phase = 'espera' | 'ouvindo' | 'pensando' | 'falando'
 
 // ax/ay: onde o ponteiro estava logo antes da pinça (o clique cai ali, não onde os dedos se mexeram)
-export type Hand = { key: string; x: number; y: number; pinch: boolean; spread: number; pose: string; palm: [number, number]; ax?: number; ay?: number; gx?: number; gy?: number; gax?: number; gay?: number }
+export type Hand = {
+  key: string; x: number; y: number; pinch: boolean; spread: number; pose: string; palm: [number, number]
+  /** força da pinça 0..1 (o cursor fecha), palma virada para a pessoa, giro do punho em graus, mão fechada */
+  forca?: number; costas?: boolean; torcao?: number; micro?: boolean
+  ax?: number; ay?: number; gx?: number; gy?: number; gax?: number; gay?: number }
 
 function store<T>(initial: T) {
   let value = initial

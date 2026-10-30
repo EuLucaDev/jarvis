@@ -269,15 +269,80 @@ body:has(.overlay) {
     top 0.12s,
     left 0.12s;
 }
+/* como no Quest: o anel do cursor fecha conforme o polegar se aproxima do indicador (--f = força da pinça) */
+.ov-hand::before {
+  content: '';
+  position: absolute;
+  inset: calc(4px + var(--f, 0) * 8px);
+  border-radius: 50%;
+  background: rgb(95 212 255 / calc(0.15 + var(--f, 0) * 0.75));
+  transition: inset 0.06s linear;
+}
 .ov-hand.pinch {
-  top: -11px;
-  left: -11px;
-  width: 22px;
-  height: 22px;
-  background: #5fd4ff;
   box-shadow:
+    inset 0 0 0 2px #5fd4ff,
     0 0 0 4px rgb(95 212 255 / 0.25),
     0 0 30px rgb(63 211 232 / 1);
+}
+.ov-hand.pinch::before {
+  inset: 9px;
+  background: #5fd4ff;
+}
+/* palma virada para você: o botão do menu na mão */
+.ov-hand.palma {
+  box-shadow:
+    inset 0 0 0 2px #e8f4ff,
+    0 0 26px rgb(232 244 255 / 0.8);
+}
+.ov-hand.palma::before {
+  inset: 9px;
+  background: #e8f4ff;
+}
+/* mão fechada (microgestos): o ponteiro some quase todo, a mão está "em descanso" */
+.ov-hand.micro {
+  opacity: 0.35;
+}
+/* menu rápido da palma: itens em círculo em volta da pinça */
+.ov-menu {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+.ov-menu-centro {
+  position: absolute;
+  top: -22px;
+  left: -22px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgb(95 212 255 / 0.6),
+    0 0 18px rgb(63 211 232 / 0.5);
+  background: rgb(3 10 26 / 0.7);
+}
+.ov-menu b {
+  position: absolute;
+  top: -24px;
+  left: -40px;
+  width: 80px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgb(6 16 34 / 0.94);
+  box-shadow: inset 0 0 0 1px rgb(95 212 255 / 0.45);
+  color: #e8f4ff;
+  font: 600 12px/1 'Manrope', system-ui, sans-serif;
+  transition:
+    box-shadow 0.12s,
+    background 0.12s;
+}
+.ov-menu b.is-sel {
+  background: rgb(14 48 82 / 0.98);
+  box-shadow:
+    inset 0 0 0 2px #5fd4ff,
+    0 0 24px rgb(63 211 232 / 0.9);
 }
 .ov-hand span {
   position: absolute;
@@ -305,8 +370,11 @@ body:has(.overlay) {
   mask: radial-gradient(circle, transparent 29px, #000 30px);
   filter: drop-shadow(0 0 8px rgb(63 211 232 / 0.8));
 }
-.ov-ring.fixar {
-  background: conic-gradient(#7cf29a calc(var(--p) * 360deg), rgb(124 242 154 / 0.12) 0);
+.ov-ring.girar {
+  background: conic-gradient(#7cf29a 360deg, transparent 0);
+}
+.ov-ring.centro {
+  background: conic-gradient(#e8f4ff calc(var(--p) * 360deg), rgb(232 244 255 / 0.12) 0);
 }
 .ov-ring span {
   position: absolute;
