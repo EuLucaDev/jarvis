@@ -170,7 +170,9 @@ async def falar(texto: str, urgente: bool = False, guardar: bool = True, categor
     from .live import voice
 
     nivel = _nivel()
-    if nivel == "desligado":
+    from . import nuvem
+
+    if nivel == "desligado" or nuvem.NA_NUVEM:  # na nuvem não há voz; os avisos vão pelo telegram.avisar
         return False
     if nivel == "importante" and not urgente and categoria not in ("aviso", "agenda", "financeiro"):
         return False
@@ -255,6 +257,13 @@ async def _sistemas() -> None:
             continue  # o que já estava lá quando o Jarvis abriu não vira fala
         if novas:
             resumo = "; ".join(f"{n.get('titulo')}" + (f" ({n.get('quem')})" if n.get("quem") else "") for n in novas[:4])
+            from . import nuvem
+
+            if nuvem.NA_NUVEM:
+                from . import telegram
+
+                await telegram.avisar(f"Novidade no {s['nome']}", resumo)
+                continue
             await falar(f"Chegou novidade no {s['nome']}: {resumo}. Conte em uma frase e pergunte se ele quer ver.",
                         categoria="sistema")
     _notif_primeira = False

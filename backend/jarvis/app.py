@@ -67,7 +67,10 @@ async def startup():
 
     overlay.bind_loop(loop)
     espelho.bind(loop)
-    teste = bool(os.getenv("JARVIS_TESTE"))  # testes e compilação: sem microfone, câmera nem ouvido
+    from . import nuvem
+
+    # testes, compilação e a nuvem (servidor): sem microfone, câmera nem ouvido
+    teste = bool(os.getenv("JARVIS_TESTE")) or nuvem.NA_NUVEM
     if not teste:
         audio.start()
     voice.bind(loop)
@@ -83,7 +86,13 @@ async def startup():
 
     proativo.presenca.loop = loop
     asyncio.create_task(proativo.loop())
-    asyncio.create_task(protocols.loop())
+    if not nuvem.NA_NUVEM:
+        asyncio.create_task(protocols.loop())  # rotinas mexem no computador: só no notebook
+        asyncio.create_task(nuvem.loop())  # notebook ligado à nuvem: sinal de vida e memória sincronizada
+    else:
+        from . import telegram
+
+        asyncio.create_task(telegram.loop())  # lembretes do Telegram
     if finance.motor.disponivel():
         await asyncio.to_thread(finance.motor.start)
         asyncio.create_task(finance.motor.vigiar())
@@ -380,6 +389,180 @@ async def gestos_salvar(body: dict = Body(...)):
 
     store.put("gestos", {k: v for k, v in body.items() if k in gestures.GESTOS and v in gestures.ACOES})
     return gestures.descrever()
+
+
+# ---------- nuvem e Telegram ----------
+
+
+def _so_portaria(request: Request) -> None:
+    """Na nuvem, estas rotas só valem vindas da portaria (que confere o token de cada pessoa)."""
+    from . import nuvem
+
+    segredo = os.getenv("JARVIS_PORTARIA_SEGREDO", "")
+    if nuvem.NA_NUVEM and segredo and request.headers.get("x-segredo") != segredo:
+        raise HTTPException(403)
+
+
+@app.get("/api/impressao/cartao/{cid}")
+async def impressao_cartao(cid: str):
+    card = hub.guardados.get(cid) or next((c for c in hub.cards if c["id"] == cid), None)
+    if not card:
+        raise HTTPException(404)
+    return card
+
+
+@app.get("/api/impressao/relatorio")
+async def impressao_relatorio(mes: str = ""):
+    from . import impressao
+
+    return await impressao.dados_relatorio(mes or time.strftime("%Y-%m"))
+
+
+@app.post("/api/telegram/update")
+async def telegram_update(request: Request, body: dict = Body(...)):
+    _so_portaria(request)
+    from . import telegram
+
+    asyncio.create_task(telegram.tratar(body))  # responde já; a conversa segue em segundo plano
+    return {"ok": True}
+
+
+@app.post("/api/nuvem/presenca")
+async def nuvem_presenca(request: Request, body: dict = Body(default={})):
+    _so_portaria(request)
+    store.put("nuvem_presenca", {"em": time.time()})
+    return {"ok": True}
+
+
+@app.post("/api/nuvem/config")
+async def nuvem_config(request: Request, body: dict = Body(...)):
+    """O notebook manda os ajustes dele (nome, cidade, chave da Gemini, sistemas) para o perfil na nuvem."""
+    _so_portaria(request)
+    conf = json.loads(settings_file().read_text()) if settings_file().exists() else {}
+    novos = {k: v for k, v in (body.get("config") or {}).items() if k in ("gemini_api_key", "user_name", "tratamento", "city", "voice", "text_model", "fuso") and v}
+    settings.save({**conf, **novos, "configurado": True})
+    if body.get("sistemas"):
+        store.put("sistemas", body["sistemas"])
+    if body.get("proativo"):
+        store.put("proativo", body["proativo"])
+    return {"ok": True, "recebido": sorted(novos)}
+
+
+def settings_file():
+    from .config import CONFIG_FILE
+
+    return CONFIG_FILE
+
+
+@app.post("/api/nuvem/arquivo")
+async def nuvem_arquivo(request: Request, arquivo: UploadFile):
+    _so_portaria(request)
+    return {"caminho": finance.guardar_entrada(arquivo.filename or "arquivo", await arquivo.read())}
+
+
+@app.post("/api/nuvem/financeiro")
+async def nuvem_financeiro(request: Request, arquivo: UploadFile):
+    """O financeiro do notebook chega (cópia do banco): backup do que havia aqui e restauração da cópia."""
+    _so_portaria(request)
+    caminho = finance.guardar_entrada(arquivo.filename or "financeiro.db", await arquivo.read())
+    antes = await finance.chamar("backup:create")
+    await finance.chamar("backup:restore", caminho)
+    await finance.mudou()
+    return {"ok": True, "backup_do_que_havia": (antes or {}).get("name") if isinstance(antes, dict) else str(antes)}
+
+
+@app.post("/api/memoria/sync")
+async def memoria_sync(request: Request, body: dict = Body(...)):
+    _so_portaria(request)
+    from . import nuvem
+
+    recebidas = await asyncio.to_thread(nuvem.importar, body)
+    volta = await asyncio.to_thread(nuvem.exportar, float(body.get("desde") or 0))
+    return {**volta, "recebidas": recebidas}
+
+
+@app.get("/api/nuvem")
+async def nuvem_estado():
+    from . import nuvem
+
+    c = nuvem.cfg()
+    out: dict[str, Any] = {"na_nuvem": nuvem.NA_NUVEM, "ligado": nuvem.ligado(), "url": c.get("url", ""), "perfil": c.get("perfil", ""),
+                           "subido": c.get("subido"), "tem_token": bool(c.get("token"))}
+    if nuvem.ligado():
+        try:
+            out["portaria"] = await _portaria("GET", "/nuvem/eu")
+        except Exception as exc:  # noqa: BLE001
+            out["erro"] = f"A nuvem não respondeu: {str(exc)[:120]}"
+    return out
+
+
+async def _portaria(metodo: str, caminho: str, json_: Any = None) -> Any:
+    import httpx
+
+    from . import nuvem
+
+    c = nuvem.cfg()
+    async with httpx.AsyncClient(timeout=30) as cl:
+        r = await cl.request(metodo, f"{c['url'].rstrip('/')}{caminho}", json=json_, headers={"authorization": f"Bearer {c['token']}"})
+    if r.status_code == 401:
+        raise HTTPException(401, "Token recusado pela nuvem.")
+    r.raise_for_status()
+    return r.json()
+
+
+@app.put("/api/nuvem")
+async def nuvem_ligar(body: dict = Body(...)):
+    """Liga o notebook à nuvem: confere o endereço e o token na portaria e descobre o perfil."""
+    import httpx
+
+    url, token = str(body.get("url", "")).strip().rstrip("/"), str(body.get("token", "")).strip()
+    if not url.startswith("https://") and not url.startswith("http://127.0.0.1") and not url.startswith("http://localhost"):
+        return {"ok": False, "erro": "Use o endereço https da nuvem."}
+    try:
+        async with httpx.AsyncClient(timeout=20) as cl:
+            r = await cl.get(f"{url}/nuvem/eu", headers={"authorization": f"Bearer {token}"})
+        if r.status_code == 401:
+            return {"ok": False, "erro": "A nuvem não aceitou esse token."}
+        r.raise_for_status()
+        eu = r.json()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "erro": f"Não consegui falar com a nuvem: {str(exc)[:140]}"}
+    store.put("nuvem", {"url": url, "token": token, "perfil": eu["perfil"], "ativo": True})
+    return {"ok": True, "perfil": eu}
+
+
+@app.post("/api/nuvem/subir")
+async def nuvem_subir(body: dict = Body(default={})):
+    from . import nuvem
+
+    if not nuvem.ligado():
+        return {"ok": False, "erro": "Ligue a nuvem antes."}
+    try:
+        return {"ok": True, **(await nuvem.subir_tudo(bool(body.get("substituir"))))}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("subir para a nuvem: %s", exc)
+        return {"ok": False, "erro": str(exc)[:200]}
+
+
+@app.delete("/api/nuvem")
+async def nuvem_desligar():
+    from . import nuvem
+
+    store.put("nuvem", {**nuvem.cfg(), "ativo": False})
+    if finance.motor.disponivel():
+        await asyncio.to_thread(finance.motor.start)
+    return {"ok": True}
+
+
+@app.api_route("/api/nuvem/portaria/{caminho:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def nuvem_portaria(caminho: str, request: Request):
+    """O painel do notebook administra o robô e os convites pela portaria (com o token dele)."""
+    from . import nuvem
+
+    if not nuvem.ligado():
+        raise HTTPException(400, "Nuvem desligada.")
+    corpo = await request.json() if request.method in ("POST", "PUT") and (await request.body()) else None
+    return await _portaria(request.method, f"/nuvem/{caminho}", corpo)
 
 
 @app.get("/api/zerar")

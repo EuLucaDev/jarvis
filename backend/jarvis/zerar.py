@@ -147,6 +147,7 @@ async def zerar(niveis: list[str]) -> dict[str, Any]:
         hands.recalibrar()
         feito.append("ajustes")
         hub.app_cmd("configuracao")  # abre a configuração inicial, como na primeira vez
+    await _na_nuvem("/api/zerar", {"o_que": [x for x in ("memoria", "historico") if tudo or x in niveis], "confirmado": True})
     log.info("zerado: %s (backup %s)", feito, bkp.name)
     return {"ok": True, "zerado": feito, "backup": bkp.name, "guardado_dias": GUARDAR_DIAS}
 
@@ -205,4 +206,19 @@ async def desfazer(arquivo: str | None = None) -> dict[str, Any]:
     from .hands import hands
 
     hands.recalibrar()
+    await _na_nuvem("/api/zerar/desfazer", {})
     return {"ok": True, "restaurado": alvo["niveis"], "de": alvo["em"]}
+
+
+async def _na_nuvem(caminho: str, corpo: dict[str, Any]) -> None:
+    """Com a nuvem ligada, a memória e o histórico de lá acompanham (senão a sincronização traria tudo de volta).
+    O financeiro já é o da nuvem: o zerar dele vale lá direto."""
+    from . import nuvem
+
+    if not nuvem.ligado() or ("o_que" in corpo and not corpo["o_que"]):
+        return
+    try:
+        await nuvem.chamar("POST", caminho, json=corpo)
+        nuvem.store.put("nuvem", {**nuvem.cfg(), "memoria_em": time.time()})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("zerar na nuvem falhou: %s", exc)

@@ -9,6 +9,7 @@ import datetime as dt
 import json
 import difflib
 import logging
+import re
 import unicodedata
 from typing import Any
 
@@ -111,6 +112,9 @@ async def lancar(a: dict[str, Any]) -> dict[str, Any]:
     forma = p.get("paymentMethod") or "PIX"
     data = p.get("date") or dt.date.today().isoformat()
     descricao = (p.get("description") or frase or "Lançamento").strip()[:120]
+    # "32 reais na padaria" deixava "Reais padaria": a moeda falada não é parte da descrição
+    descricao = re.sub(r"^(?:r\$\s*|reais\b\s*|real\b\s*|conto[s]?\b\s*)(?:de\s+|na\s+|no\s+|em\s+)?", "", descricao, flags=re.I).strip() or "Lançamento"
+    descricao = descricao[:1].upper() + descricao[1:]
 
     if p.get("isIncome"):
         categoria = p.get("category") or "Outros"

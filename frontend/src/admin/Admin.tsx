@@ -44,7 +44,7 @@ import { useJarvis } from '../hud/useJarvis'
 import { Calibrar } from '../ui/Calibrar'
 import './admin.css'
 
-type Page = 'chat' | 'briefing' | 'conexoes' | 'operacoes' | 'gestos' | 'memorias' | 'financeiro' | 'saude' | 'conversas' | 'sistema'
+type Page = 'chat' | 'briefing' | 'conexoes' | 'nuvem' | 'operacoes' | 'gestos' | 'memorias' | 'financeiro' | 'saude' | 'conversas' | 'sistema'
 
 const NAV: { group: string; items: { id: Page; label: string; desc: string; icon: typeof Bot }[] }[] = [
   {
@@ -58,6 +58,7 @@ const NAV: { group: string; items: { id: Page; label: string; desc: string; icon
     group: 'Dados e automação',
     items: [
       { id: 'conexoes', label: 'Conexões', desc: 'E-mail, agenda, casa, mercado', icon: Plug },
+      { id: 'nuvem', label: 'Nuvem e Telegram', desc: 'O Jarvis no celular, sempre ligado', icon: Send },
       { id: 'operacoes', label: 'Operações', desc: 'Rotinas, horários e tarefas para outras IAs', icon: Workflow },
       { id: 'gestos', label: 'Gestos', desc: 'O que cada gesto da mão faz', icon: Hand },
       { id: 'memorias', label: 'Memórias', desc: 'O que ele sabe sobre você', icon: BrainCircuit },
@@ -157,6 +158,7 @@ export function Admin() {
           {page === 'chat' && <ChatPage />}
           {page === 'briefing' && <BriefingPage />}
           {page === 'conexoes' && <ConexoesPage />}
+          {page === 'nuvem' && <NuvemPage />}
           {page === 'operacoes' && <OperacoesPage tasks={j.tasks} />}
           {page === 'gestos' && <GestosPage />}
           {page === 'financeiro' && <FinanceiroPage />}
@@ -1075,6 +1077,208 @@ const RACIOCINIO = [
   { id: 'equilibrado', nome: 'Equilibrado', desc: 'Pensa a fundo nos pedidos difíceis: análise, planos, contas, textos (padrão).' },
   { id: 'profundo', nome: 'Profundo', desc: 'Pensa a fundo em quase tudo que não for um comando simples; respostas mais lentas e cuidadosas.' },
 ]
+
+type NuvemEstado = {
+  na_nuvem: boolean
+  ligado: boolean
+  url: string
+  perfil: string
+  subido?: string
+  tem_token: boolean
+  erro?: string
+  portaria?: { perfil: string; nome: string; dono: boolean; telegram_ligado: boolean; robo?: string; robo_configurado: boolean }
+}
+type Perfil = { perfil: string; nome: string; telegram: boolean; criado: string; dono: boolean; no_ar: boolean }
+
+/** Notebook ligado ao Jarvis na nuvem, o robô do Telegram e os convites (perfis de outras pessoas). */
+function NuvemPage() {
+  const [e, setE] = useState<NuvemEstado | null>(null)
+  const [url, setUrl] = useState('')
+  const [token, setToken] = useState('')
+  const [robo, setRobo] = useState('')
+  const [nomeConvite, setNomeConvite] = useState('')
+  const [codigo, setCodigo] = useState<{ codigo: string; link?: string | null; para: string } | null>(null)
+  const [perfis, setPerfis] = useState<Perfil[]>([])
+  const [busy, setBusy] = useState(false)
+  const [toast, toastNode] = useToast()
+  const carregar = async () => {
+    const x = await api<NuvemEstado>('/api/nuvem')
+    setE(x)
+    setUrl((u) => u || x.url)
+    if (x.ligado && x.portaria?.dono) api<Perfil[]>('/api/nuvem/portaria/perfis').then(setPerfis).catch(() => {})
+  }
+  useEffect(() => {
+    carregar()
+  }, [])
+  if (!e) return <p className="muted">Carregando…</p>
+  if (e.na_nuvem) return <p className="muted">Este é o Jarvis da nuvem. A configuração fica no Jarvis do notebook.</p>
+  const passo = async (fn: () => Promise<any>, ok: string) => {
+    setBusy(true)
+    try {
+      const r = await fn()
+      toast(r?.ok === false ? (r.erro ?? 'Não deu certo') : ok)
+      await carregar()
+      return r
+    } finally {
+      setBusy(false)
+    }
+  }
+  const p = e.portaria
+  return (
+    <div className="stack">
+      <Panel
+        title="Jarvis na nuvem"
+        desc="Ligado, o financeiro e a memória passam a morar no seu servidor: o mesmo Jarvis no notebook e no Telegram, sempre ligado. Backup diário criptografado."
+      >
+        {e.ligado ? (
+          <>
+            <dl className="kv-a">
+              <dt>Endereço</dt>
+              <dd>{e.url}</dd>
+              <dt>Perfil</dt>
+              <dd>
+                {p?.nome ?? e.perfil} {p?.dono ? '· dono' : ''}
+              </dd>
+              <dt>Dados do notebook</dt>
+              <dd>{e.subido ? `enviados em ${e.subido}` : 'ainda não enviados'}</dd>
+            </dl>
+            {e.erro && <p className="muted">{e.erro}</p>}
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <button
+                className="btn primary"
+                disabled={busy}
+                onClick={() =>
+                  passo(async () => {
+                    const r = await api<any>('/api/nuvem/subir', { method: 'POST', json: {} })
+                    if (r.financeiro?.ok === false) toast(r.financeiro.motivo)
+                    return r
+                  }, 'Ajustes, financeiro e memória enviados')
+                }
+              >
+                {e.subido ? 'Enviar ajustes de novo' : 'Enviar meus dados para a nuvem'}
+              </button>
+              <button className="btn" disabled={busy} onClick={() => passo(() => api('/api/nuvem', { method: 'DELETE' }), 'Nuvem desligada; o notebook volta a usar o financeiro local')}>
+                Desligar a nuvem
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="form-row">
+            <label className="field-a">
+              <span>Endereço</span>
+              <input value={url} onChange={(x) => setUrl(x.target.value)} placeholder="https://jarvis.seudominio.com" />
+            </label>
+            <label className="field-a">
+              <span>Token</span>
+              <input value={token} onChange={(x) => setToken(x.target.value)} placeholder="jv_…" type="password" />
+            </label>
+            <button className="btn primary" disabled={busy || !url || !token} onClick={() => passo(() => api('/api/nuvem', { method: 'PUT', json: { url, token } }), 'Notebook ligado à nuvem')}>
+              Ligar
+            </button>
+          </div>
+        )}
+      </Panel>
+
+      {e.ligado && p && (
+        <Panel
+          title="Robô do Telegram"
+          desc={p.robo_configurado ? `@${p.robo} no ar.` : 'No Telegram, fale com o @BotFather, mande /newbot e cole aqui o token que ele devolver.'}
+        >
+          {p.dono && (
+            <div className="form-row">
+              <label className="field-a span2">
+                <span>Token do robô (do @BotFather)</span>
+                <input value={robo} onChange={(x) => setRobo(x.target.value)} placeholder="123456789:AA…" type="password" />
+              </label>
+              <button
+                className="btn primary"
+                disabled={busy || !robo}
+                onClick={() =>
+                  passo(async () => {
+                    const r = await api<any>('/api/nuvem/portaria/telegram', { method: 'PUT', json: { token: robo } })
+                    if (r.ok) setRobo('')
+                    return r
+                  }, 'Robô configurado')
+                }
+              >
+                {p.robo_configurado ? 'Trocar' : 'Salvar'}
+              </button>
+            </div>
+          )}
+          {p.robo_configurado && (
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="muted">{p.telegram_ligado ? 'Seu Telegram está ligado a este Jarvis.' : 'Seu Telegram ainda não está ligado.'}</span>
+              <button
+                className="btn"
+                disabled={busy}
+                onClick={async () => {
+                  const c = await api<any>('/api/nuvem/portaria/codigo', { method: 'POST', json: { tipo: 'vincular' } })
+                  setCodigo({ ...c, para: 'você' })
+                }}
+              >
+                {p.telegram_ligado ? 'Ligar outro Telegram meu' : 'Ligar meu Telegram'}
+              </button>
+            </div>
+          )}
+          {codigo && (
+            <div className="panel-a" style={{ display: 'grid', gap: 6 }}>
+              <b>Código para {codigo.para}: {codigo.codigo}</b>
+              <small className="muted">
+                {codigo.link ? (
+                  <>
+                    Abra <a href={codigo.link}>{codigo.link}</a> no celular (ou mande o código para o robô). Vale 7 dias.
+                  </>
+                ) : (
+                  'Mande este código para o robô. Vale 7 dias.'
+                )}
+              </small>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {e.ligado && p?.dono && p.robo_configurado && (
+        <Panel title="Pessoas" desc="Cada pessoa usa o mesmo robô na conversa dela, com o financeiro, a memória e as conversas só dela. Ninguém vê os dados do outro.">
+          <ul className="rows">
+            {perfis.map((x) => (
+              <li key={x.perfil}>
+                <span>
+                  <b>
+                    {x.nome} {x.dono ? '(você)' : ''}
+                  </b>
+                  <small>
+                    {x.telegram ? 'Telegram ligado' : 'Telegram ainda não ligado'} · desde {x.criado} · {x.no_ar ? 'no ar' : 'parado'}
+                  </small>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="form-row">
+            <label className="field-a">
+              <span>Nome de quem você vai convidar</span>
+              <input value={nomeConvite} onChange={(x) => setNomeConvite(x.target.value)} placeholder="Ana" />
+            </label>
+            <button
+              className="btn primary"
+              disabled={busy || !nomeConvite.trim()}
+              onClick={async () => {
+                const c = await api<any>('/api/nuvem/portaria/codigo', { method: 'POST', json: { tipo: 'convite', nome: nomeConvite.trim() } })
+                setCodigo({ ...c, para: nomeConvite.trim() })
+                setNomeConvite('')
+              }}
+            >
+              Criar convite
+            </button>
+          </div>
+          <small className="muted">
+            Quando a pessoa instalar o Jarvis no computador dela, ela manda /token para o robô e cola o endereço e o token em Painel → Nuvem e Telegram: o financeiro dela aparece lá.
+          </small>
+        </Panel>
+      )}
+      {toastNode}
+    </div>
+  )
+}
 
 /** Zerar memória, histórico, financeiro ou tudo, com backup de 30 dias e desfazer. */
 function ZerarPanel() {

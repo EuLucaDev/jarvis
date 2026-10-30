@@ -46,6 +46,11 @@ DEPOIS DE INSTALADO
   - Ele vê sua tela quando você fala com ele (sem espelhar o tempo todo) e "veja minha tela" olha na hora
     (ou "todas as telas"). Fala por conta própria quando vale (reunião, conta, cliente que respondeu, pausa)
     e escurece quando você sai da frente da câmera. Ajuste em Painel → Sistema → Iniciativa.
+  - Telegram (o Jarvis no celular, sempre ligado): em Painel → Nuvem e Telegram, ligue a nuvem com o endereço
+    e o token, envie seus dados, cole o token do robô (crie no @BotFather com /newbot) e ligue o seu Telegram.
+    Lá: escreva ou mande áudio ("gastei 80 no mercado no crédito do Nubank"), foto de nota fiscal ou Pix,
+    extrato em PDF/CSV/OFX, peça o relatório do mês (imagem ou PDF) ou "me lembra amanhã às 9h de…".
+    Convide outra pessoa (Pessoas → Criar convite): ela usa o mesmo robô com o financeiro só dela.
   - Fechar a janela do Jarvis deixa ele no canto (esfera pequena com o vídeo da câmera); ele segue
     ouvindo. Para sumir de vez: ícone → Sair do Jarvis. "Abrir com o computador" também fica no ícone.
   - Os cartões aparecem flutuando na tela; dá para arrastar, aumentar e fechar. Depois de ~10 s cada um vai

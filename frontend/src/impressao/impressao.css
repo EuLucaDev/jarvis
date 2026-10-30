@@ -1,0 +1,298 @@
+/* impressão (imagem e PDF): o mesmo azul-noite e ciano do Jarvis, em páginas A4 */
+.imp {
+  --fundo: #050b18;
+  --painel: #0a1630;
+  --linha: rgb(95 212 255 / 0.22);
+  --ciano: #5fd4ff;
+  --texto: #e8f4ff;
+  --apagado: #8aa4c4;
+  --bom: #7cf29a;
+  --ruim: #ff6b8a;
+  --aviso: #ffb547;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: 'Manrope', system-ui, sans-serif;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+html:has(.imp),
+body:has(.imp) {
+  background: #050b18;
+  margin: 0;
+}
+.imp-erro {
+  padding: 40px;
+}
+
+/* cartão sozinho */
+.imp-cartao {
+  display: inline-grid;
+  gap: 10px;
+  padding: 22px;
+  width: 520px;
+  background: radial-gradient(120% 80% at 0% 0%, #0d2348, #050b18 70%);
+}
+.imp-cartao .card {
+  width: 100%;
+  max-height: none;
+}
+.imp-marca {
+  justify-self: end;
+  color: var(--ciano);
+  font: 600 10px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.24em;
+  opacity: 0.7;
+}
+
+/* relatório */
+.imp-pagina {
+  width: 210mm;
+  box-sizing: border-box;
+  padding: 16mm 14mm 12mm;
+  display: flex;
+  flex-direction: column;
+  gap: 8mm;
+  background: radial-gradient(90% 40% at 0% 0%, #0d2348, transparent 70%), var(--fundo);
+  break-after: page;
+  position: relative;
+}
+.imp-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--linha);
+  padding-bottom: 6mm;
+}
+.imp-topo small,
+.imp-kpi small {
+  color: var(--ciano);
+  font: 600 10px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.imp-topo h1 {
+  margin: 8px 0 4px;
+  font: 600 34px/1.1 'Space Grotesk', sans-serif;
+}
+.imp-topo p {
+  margin: 0;
+  color: var(--apagado);
+}
+.imp-saude {
+  text-align: right;
+  display: grid;
+  gap: 4px;
+}
+.imp-saude b {
+  font: 600 40px/1 'Space Grotesk', sans-serif;
+  color: var(--ciano);
+}
+.imp-saude.warning b {
+  color: var(--aviso);
+}
+.imp-saude.danger b {
+  color: var(--ruim);
+}
+.imp-saude.success b {
+  color: var(--bom);
+}
+.imp-saude span {
+  color: var(--apagado);
+  font-size: 11px;
+}
+.imp-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4mm;
+}
+.imp-kpi,
+.imp-bloco {
+  background: var(--painel);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 0 0 1px var(--linha),
+    0 0 30px -10px rgb(40 140 255 / 0.5);
+  padding: 5mm;
+}
+.imp-kpi {
+  display: grid;
+  gap: 6px;
+}
+.imp-kpi b {
+  font: 600 20px/1.1 'Space Grotesk', sans-serif;
+}
+.imp-kpi.bom b {
+  color: var(--bom);
+}
+.imp-kpi.ruim b {
+  color: var(--ruim);
+}
+.imp-kpi span {
+  color: var(--apagado);
+  font-size: 10.5px;
+}
+.imp-duas {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4mm;
+}
+.imp h2 {
+  margin: 0 0 4mm;
+  font: 600 15px/1.2 'Space Grotesk', sans-serif;
+}
+.imp-h {
+  margin: 0;
+  color: var(--ciano);
+}
+.imp h3 {
+  margin: 0 0 3mm;
+  font: 600 12.5px/1.2 'Space Grotesk', sans-serif;
+  color: var(--apagado);
+}
+.imp-cat {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 4mm;
+  align-items: center;
+}
+.imp-rosca {
+  width: 110px;
+}
+.imp-barras,
+.imp-linhas,
+.imp-orc {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+}
+.imp-barras li,
+.imp-orc li {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 11.5px;
+}
+.imp-barras i,
+.imp-orc i {
+  height: 7px;
+  border-radius: 99px;
+  background: rgb(95 212 255 / 0.1);
+  overflow: hidden;
+}
+.imp-barras em,
+.imp-orc em {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--ciano);
+}
+.imp-orc li.aviso em {
+  background: var(--aviso);
+}
+.imp-orc li.ruim em {
+  background: var(--ruim);
+}
+.imp-barras b,
+.imp-orc b,
+.imp-linhas b {
+  font: 500 11px/1 'JetBrains Mono', monospace;
+  white-space: nowrap;
+}
+.imp-orc li {
+  grid-template-columns: 1fr 2fr auto;
+  font-size: 12.5px;
+}
+.imp-linhas li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgb(95 212 255 / 0.08);
+}
+.imp-linhas span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.imp-linhas i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+.vazio {
+  color: var(--apagado);
+  font-size: 12px;
+}
+.imp-meses {
+  width: 100%;
+}
+.imp-meses text {
+  fill: var(--apagado);
+  font: 500 10px 'JetBrains Mono', monospace;
+}
+.imp-legenda {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--apagado);
+  font-size: 10.5px;
+  margin: 2mm 0 0;
+}
+.imp-legenda i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+.imp-legenda .ent {
+  background: var(--bom);
+}
+.imp-legenda .sai {
+  background: var(--ciano);
+  margin-left: 8px;
+}
+.imp-tab {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.imp-tab th {
+  text-align: left;
+  color: var(--apagado);
+  font: 600 10px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--linha);
+}
+.imp-tab td {
+  padding: 7px 0;
+  border-bottom: 1px solid rgb(95 212 255 / 0.08);
+}
+.imp-tab .num {
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+}
+.imp-rodape {
+  margin-top: auto;
+  color: var(--apagado);
+  font: 500 9.5px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.08em;
+}
+@page {
+  size: A4;
+  margin: 0;
+}
+/* no PDF cada seção é uma página A4 inteira; na imagem (tela) o resumo fica do tamanho do conteúdo */
+@media print {
+  .imp-pagina {
+    min-height: 297mm;
+  }
+  /* sombra com desfoque vira retângulo sólido no PDF: no papel fica só a borda */
+  .imp-kpi,
+  .imp-bloco {
+    box-shadow: inset 0 0 0 1px var(--linha);
+  }
+}

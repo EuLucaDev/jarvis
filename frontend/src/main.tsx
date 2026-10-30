@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Admin } from './admin/Admin'
 import { Hud } from './hud/Hud'
+import { Impressao } from './impressao/Impressao'
 import { Memoria } from './memoria/Memoria'
 import { Overlay } from './overlay/Overlay'
 import { Setup } from './setup/Setup'
@@ -13,8 +14,9 @@ import './hud/widgets.css'
 // /setup     configuração inicial
 // /memoria  mapa da memória (estilo Obsidian)
 // /admin/... painel de ajustes
+// /impressao cartão ou relatório para virar imagem/PDF (Telegram)
 const path = location.pathname
-const page = path.startsWith('/admin') ? <Admin /> : path.startsWith('/memoria') ? <Memoria /> : path.startsWith('/overlay') ? <Overlay /> : path.startsWith('/setup') ? <Setup /> : <Hud />
+const page = path.startsWith('/impressao') ? <Impressao /> : path.startsWith('/admin') ? <Admin /> : path.startsWith('/memoria') ? <Memoria /> : path.startsWith('/overlay') ? <Overlay /> : path.startsWith('/setup') ? <Setup /> : <Hud />
 
 if (path.startsWith('/admin')) document.title = 'Jarvis · Painel'
 else if (path.startsWith('/setup')) document.title = 'Jarvis · Configuração'

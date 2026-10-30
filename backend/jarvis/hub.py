@@ -1,6 +1,7 @@
 """Barramento de eventos: todas as telas conectadas recebem o mesmo estado."""
 
 import asyncio
+import contextvars
 import logging
 import time
 import uuid
@@ -11,6 +12,9 @@ from fastapi import WebSocket
 log = logging.getLogger("jarvis.hub")
 
 MAX_CARDS = 10
+
+# conversa fora da tela (Telegram): os cartões que as ferramentas criam vão para esta lista, e não para as telas
+coletor: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar("coletor", default=None)
 
 
 class Hub:
@@ -25,6 +29,7 @@ class Hub:
         self.pointed: dict[str, Any] | None = None  # o que a mão está apontando no HUD ("isso aqui")
         self.focus_until = 0.0  # modo foco a dois: avisos esperam até aqui
         self.focus_queue: list[dict[str, Any]] = []
+        self.guardados: dict[str, dict[str, Any]] = {}  # cartões das conversas fora da tela (para virar imagem)
         self.plan_card: str | None = None  # cartão do plano que está sendo executado
         # pedidos para o app (mostrar o HUD, ir para o canto, abrir a memória): o app busca em /api/app/comandos,
         # assim funciona mesmo com todas as janelas escondidas
@@ -74,13 +79,20 @@ class Hub:
             "at": time.strftime("%H:%M"),
             "data": data,
         }
+        lista = coletor.get()
+        if lista is not None:
+            lista.append(card)
+            self.guardados[card["id"]] = card
+            if len(self.guardados) > 200:
+                self.guardados.pop(next(iter(self.guardados)))
+            return card
         async with self._lock:
             self.cards = (self.cards + [card])[-MAX_CARDS:]
         await self.broadcast({"type": "card", "card": card})
         return card
 
     async def update_card(self, card_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
-        card = next((c for c in self.cards if c["id"] == card_id), None)
+        card = next((c for c in self.cards if c["id"] == card_id), None) or self.guardados.get(card_id)
         if not card:
             return None
         card["data"] = data

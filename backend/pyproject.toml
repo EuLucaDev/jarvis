@@ -1,6 +1,6 @@
 [project]
 name = "jarvis-core"
-version = "2.8.1"
+version = "2.9.0"
 description = "Núcleo do Jarvis: voz, mãos, ouvido, controle do PC e dados (Mac, Windows e Linux)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -43,6 +43,8 @@ dependencies = [
 
 [dependency-groups]
 build = ["pyinstaller>=6.11"]
+# só no servidor (Jarvis na nuvem): imagens/PDF pelo Chromium, backup no R2 criptografado
+nuvem = ["playwright>=1.48", "boto3>=1.35", "cryptography>=43"]
 
 [tool.uv]
 # o rtmlib (mãos no Windows/Linux) pede o OpenCV completo e o contrib; o Jarvis usa só o opencv-python-headless,
