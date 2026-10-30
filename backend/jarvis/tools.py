@@ -479,11 +479,13 @@ DECLARATIONS = [
         name="financeiro_cadastrar",
         description=(
             "Cadastra uma conta bancária (nome, saldo atual) ou um cartão (cartão de crédito: limite, dia_fechamento, "
-            "dia_vencimento; vale: tipo_cartao 'vale refeição' ou 'vale alimentação' e saldo)."
+            "dia_vencimento; vale: tipo_cartao 'vale refeição' ou 'vale alimentação' e saldo). cor: o nome da cor, se ele disser. "
+            "Para editar um cartão ou conta já cadastrado (cor, limite, dias, nome, ativar/inativar), carregue financeiro_cadastros."
         ),
         parameters={"type": "OBJECT", "properties": {"o_que": {"type": S, "enum": ["conta", "cartao"]}, "nome": {"type": S}, "banco": {"type": S},
                                                       "saldo": {"type": N}, "tipo_cartao": {"type": S}, "limite": {"type": N},
-                                                      "dia_fechamento": {"type": "INTEGER"}, "dia_vencimento": {"type": "INTEGER"}},
+                                                      "dia_fechamento": {"type": "INTEGER"}, "dia_vencimento": {"type": "INTEGER"},
+                                                      "cor": {"type": S}},
                     "required": ["o_que", "nome"]},
     ),
     types.FunctionDeclaration(

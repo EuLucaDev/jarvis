@@ -13,6 +13,7 @@ import unicodedata
 from typing import Any
 
 from .finance import FinErro, chamar, mudou
+from .finance_completo import cor
 from .hub import hub
 
 log = logging.getLogger("jarvis.finance_voz")
@@ -296,10 +297,11 @@ async def cadastrar(a: dict[str, Any]) -> dict[str, Any]:
             return {"erro": "Para cartão de crédito preciso do limite, do dia de fechamento e do dia de vencimento."}
         item = await chamar("cards:create", {"name": nome, "bankName": a.get("banco") or nome, "cardType": "CREDITO" if credito else ("VALE_ALIMENTACAO" if "alim" in _norm(a.get("tipo_cartao") or "") else "VALE_REFEICAO"),
                                              "limit": a.get("limite") or 0, "closingDay": a.get("dia_fechamento") or 0,
-                                             "dueDay": a.get("dia_vencimento") or 0, "benefitBalance": a.get("saldo") or 0})
+                                             "dueDay": a.get("dia_vencimento") or 0, "benefitBalance": a.get("saldo") or 0,
+                                             **({"color": c} if (c := cor(a.get("cor"))) else {})})
     else:
-        item = await chamar("accounts:create", {"name": nome, "bankName": a.get("banco") or nome, "accountType": "CORRENTE",
-                                                "initialBalance": a.get("saldo") or 0})
+        item = await chamar("accounts:create", {"name": nome, "bankName": a.get("banco") or nome, "accountType": "CONTA_CORRENTE",
+                                                "initialBalance": a.get("saldo") or 0, **({"color": c} if (c := cor(a.get("cor"))) else {})})
     await mudou()
     return {"ok": True, "cadastrado": item.get("name"), "instrucao": "Confirme numa frase."}
 

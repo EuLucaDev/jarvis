@@ -61,7 +61,9 @@ DICAS = {
     "cardType": "CREDITO, VALE_ALIMENTACAO, VALE_REFEICAO ou BENEFICIO_FLEXIVEL (crédito pede limit, closingDay e dueDay)",
     "type": "categorias: income, variableExpense, fixedExpense ou investment; investimentos: ACAO, FII, ETF, BDR, STOCK, "
             "CRIPTO, TESOURO_DIRETO, CDB, LCI_LCA, FUNDO, PREVIDENCIA, POUPANCA, RESERVA_EMERGENCIA",
-    "status": "despesas: PAGO ou PENDENTE; contas/cartões: ATIVA/INATIVA; itens de meta: PLANEJADO ou PAGO",
+    "status": "despesas: PAGO ou PENDENTE; cartões e investimentos: ATIVO/INATIVO; contas, metas, fixas e receitas: "
+              "ATIVA/INATIVA; itens de meta: PLANEJADO ou PAGO (só passe status se ele pedir)",
+    "color": "cor em #RRGGBB (o nome da cor, como azul ou laranja, também vale)",
     "date": "AAAA-MM-DD", "dueDate": "AAAA-MM-DD", "month": "AAAA-MM", "year": "número, ex. 2026",
     "amount": "número em reais, ex. 92.5",
 }
@@ -76,6 +78,83 @@ REFERENCIAS = {
     "investmentId": ("investments:list", ("name", "symbol")),
 }
 
+# o status muda de gênero conforme a área (é assim no motor); a voz erra fácil, então o código acerta
+STATUS_MASC = {"cards", "investments"}
+STATUS_FEM = {"accounts", "recurringIncomes", "fixedExpenses", "goals"}
+CORES = {
+    "vermelho": "#ef4444", "vermelha": "#ef4444", "laranja": "#f97316", "amarelo": "#eab308", "amarela": "#eab308",
+    "dourado": "#d4a017", "verde": "#22c55e", "verde escuro": "#15803d", "verde agua": "#14b8a6", "ciano": "#06b6d4",
+    "turquesa": "#14b8a6", "azul": "#3b82f6", "azul claro": "#60a5fa", "azul escuro": "#1e3a8a", "azul marinho": "#1e3a8a",
+    "marinho": "#1e3a8a", "roxo": "#7c3aed", "roxa": "#7c3aed", "lilas": "#a78bfa", "violeta": "#8b5cf6", "rosa": "#ec4899",
+    "pink": "#ec4899", "magenta": "#d946ef", "vinho": "#7f1d1d", "bordo": "#7f1d1d", "marrom": "#92400e", "bege": "#d6c7a1",
+    "cinza": "#6b7280", "prata": "#c0c0c0", "grafite": "#374151", "preto": "#111827", "preta": "#111827", "branco": "#f8fafc",
+    "branca": "#f8fafc", "red": "#ef4444", "orange": "#f97316", "yellow": "#eab308", "green": "#22c55e", "blue": "#3b82f6",
+    "purple": "#7c3aed", "black": "#111827", "white": "#f8fafc", "gray": "#6b7280",
+}
+
+
+def cor(valor: Any) -> str | None:
+    """Nome da cor (pt ou en) ou #RGB/#RRGGBB → #RRGGBB; None se não der para entender."""
+    v = str(valor or "").strip()
+    if re.fullmatch(r"#?[0-9a-fA-F]{6}", v):
+        return "#" + v.lstrip("#").lower()
+    if re.fullmatch(r"#?[0-9a-fA-F]{3}", v):
+        h = v.lstrip("#")
+        return "#" + "".join(c * 2 for c in h).lower()
+    n = _norm(v).replace("-", " ")
+    return CORES.get(n) or next((h for nome, h in sorted(CORES.items(), key=lambda x: -len(x[0])) if nome.strip() in n), None)
+
+
+def normalizar(area: str, dados: dict[str, Any]) -> dict[str, Any]:
+    """Acerta status (gênero da área) e cor antes de mandar ao motor."""
+    d = dados.get("data")
+    if not isinstance(d, dict):
+        return dados
+    st = str(d.get("status") or "").upper()
+    if area in STATUS_MASC and st in ("ATIVA", "INATIVA"):
+        d["status"] = st[:-1] + "O"
+    elif area in STATUS_FEM and st in ("ATIVO", "INATIVO"):
+        d["status"] = st[:-1] + "A"
+    if "color" in d:
+        c = cor(d["color"])
+        if c:
+            d["color"] = c
+        else:
+            d.pop("color")  # cor que não dá para entender: mantém a que estava
+    return dados
+
+
+async def reparar() -> int:
+    """Conserta o que a 2.8 gravou errado: cartão "ATIVA" (a tela lê como inativo), cor por nome, tipo de conta antigo."""
+    from . import finance
+
+    feitos = 0
+    for c in await finance.chamar("cards:list") or []:
+        mudar: dict[str, Any] = {}
+        if c.get("status") in ("ATIVA", "INATIVA"):
+            mudar["status"] = c["status"][:-1] + "O"
+        if c.get("color") and not re.fullmatch(r"#[0-9a-fA-F]{6}", str(c["color"])):
+            mudar["color"] = cor(c["color"]) or "#7c3aed"
+        if mudar:
+            await finance.chamar("cards:update", c["id"], mudar)
+            feitos += 1
+    for a in await finance.chamar("accounts:list") or []:
+        mudar = {}
+        if a.get("accountType") in ("CORRENTE", "POUPANCA", "DIGITAL"):
+            mudar["accountType"] = "CONTA_" + a["accountType"]
+        if a.get("status") in ("ATIVO", "INATIVO"):
+            mudar["status"] = a["status"][:-1] + "A"
+        if a.get("color") and not re.fullmatch(r"#[0-9a-fA-F]{6}", str(a["color"])):
+            mudar["color"] = cor(a["color"]) or "#4ea8ff"
+        if mudar:
+            await finance.chamar("accounts:update", a["id"], mudar)
+            feitos += 1
+    if feitos:
+        await finance.mudou()
+        log.info("financeiro: %d cartões/contas reparados", feitos)
+    return feitos
+
+
 _catalogo: dict[str, dict[str, Any]] = {}
 
 
@@ -89,6 +168,10 @@ async def preparar() -> None:
     for tentativa in range(15):  # o motor pode estar subindo ainda
         try:
             _catalogo = await finance.chamar("app:catalogo") or {}
+            try:
+                await reparar()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("reparo do financeiro falhou: %s", exc)
             return
         except Exception as exc:  # noqa: BLE001
             if tentativa == 14:
@@ -207,7 +290,7 @@ async def run(nome: str, args: dict[str, Any]) -> dict[str, Any]:
     faltam = [o for o in info.get("obrigatorios", []) if not (dados.get("data") or {}).get(o) and o not in dados]
     if faltam and "data" in info.get("parametros", []):
         return {"erro": f"Faltam campos obrigatórios em data: {', '.join(faltam)}.", "assinatura": _assinatura(op, info)}
-    dados = await _resolver(area, dados)
+    dados = normalizar(area, await _resolver(area, dados))
     posicionais = [dados.get(p) for p in info.get("parametros", [])]
     while posicionais and posicionais[-1] is None:
         posicionais.pop()
