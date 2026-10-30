@@ -174,6 +174,10 @@ def _declaracao(sis: dict[str, Any], f: dict[str, Any]) -> types.FunctionDeclara
     return types.FunctionDeclaration(name=nome, description=desc[:1000], parameters_json_schema=schema)
 
 
+def declaracoes_de(s: dict[str, Any]) -> list[types.FunctionDeclaration]:
+    return [_declaracao(s, f) for f in (_cache.get(s["id"]) or {}).get("ferramentas", []) if f["name"] not in (s.get("desligadas") or [])]
+
+
 def declaracoes() -> list[types.FunctionDeclaration]:
     """Ferramentas de todos os sistemas ativos (do que já foi carregado)."""
     out = []

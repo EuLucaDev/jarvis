@@ -47,7 +47,9 @@ const extras = {
     backupPath: backup.backupFolder()
   }),
   'app:setTheme': theme => theme,
-  'app:operacoes': () => Object.keys(handlers)
+  'app:operacoes': () => Object.keys(handlers),
+  // modo avançado do Jarvis: todas as operações, com parâmetros e campos (lidos do código)
+  'app:catalogo': () => require('./catalogo').catalogo()
 };
 
 function responder(res, status, corpo) {

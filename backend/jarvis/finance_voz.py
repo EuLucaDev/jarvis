@@ -6,6 +6,7 @@ Todo lançamento aparece num cartão no HUD com o botão Desfazer.
 """
 
 import datetime as dt
+import json
 import difflib
 import logging
 import unicodedata
@@ -203,6 +204,25 @@ async def fixa(a: dict[str, Any]) -> dict[str, Any]:
         itens = await chamar(canal_lista) or []
         return {"fixas": [f"{i['name']}: {brl(i['estimatedAmount'])} todo dia {i.get('dueDay') or i.get('receiveDay')}"
                           + ("" if i.get("status", "ATIVA") == "ATIVA" else " (pausada)") for i in itens]}
+    if acao in ("pausar", "retomar", "editar"):
+        itens = await chamar(canal_lista) or []
+        alvo = _achar(a.get("nome") or "", itens, ("name",))
+        if not alvo:
+            return {"erro": f"Não achei '{a.get('nome')}' nas {tipo}s fixas.", "fixas": [i["name"] for i in itens]}
+        pre = "fixedExpenses" if tipo == "despesa" else "recurringIncomes"
+        if acao == "editar":
+            novo = {**alvo}
+            if a.get("valor"):
+                novo["estimatedAmount"] = float(a["valor"])
+            if a.get("dia"):
+                novo["dueDay" if tipo == "despesa" else "receiveDay"] = int(a["dia"])
+            if a.get("categoria"):
+                novo["category"] = a["categoria"]
+            await chamar(f"{pre}:update", alvo["id"], novo)
+        elif (alvo.get("status", "ATIVA") == "ATIVA") == (acao == "pausar"):
+            await chamar(f"{pre}:toggle", alvo["id"])
+        await mudou()
+        return {"ok": True, "fixa": alvo["name"], "feito": {"pausar": "pausada", "retomar": "retomada", "editar": "atualizada"}[acao]}
     if acao == "remover":
         itens = await chamar(canal_lista) or []
         alvo = _achar(a.get("nome") or "", itens, ("name",))
@@ -469,3 +489,202 @@ async def importar(a: dict[str, Any]) -> dict[str, Any]:
 def abrir(pagina: str | None) -> dict[str, Any]:
     hub.app_cmd("financeiro", pagina=PAGINAS.get(pagina or "", "dashboard"))
     return {"ok": True, "instrucao": "Diga numa frase que abriu."}
+
+
+# ---------- modo avançado: qualquer operação do motor ----------
+
+_catalogo: dict[str, Any] | None = None
+
+
+async def avancado(a: dict[str, Any]) -> dict[str, Any]:
+    """catalogo(assunto) lista as operações (filtra pelo começo do nome: expenses, budgets, investments…);
+    executar(operacao, args) roda qualquer uma. Escrita só com confirmado=true (o modelo pode errar um campo)."""
+    global _catalogo  # noqa: PLW0603
+    if _catalogo is None:
+        _catalogo = await chamar("app:catalogo")
+    acao = a.get("acao") or "catalogo"
+    if acao == "catalogo":
+        filtro = _norm(a.get("assunto") or "")
+        itens = {k: v for k, v in _catalogo.items() if not filtro or k.lower().startswith(filtro) or filtro in k.lower()}
+        if not filtro:
+            areas: dict[str, int] = {}
+            for k in _catalogo:
+                areas[k.split(":")[0]] = areas.get(k.split(":")[0], 0) + 1
+            return {"areas": areas, "instrucao": "Chame de novo com assunto = uma área para ver as operações e os campos."}
+        return {"operacoes": itens}
+    op = (a.get("operacao") or "").strip()
+    if op not in _catalogo:
+        return {"erro": f"Operação desconhecida: {op}. Veja o catálogo."}
+    try:
+        args = json.loads(a.get("args_json") or "[]")
+    except ValueError:
+        return {"erro": "args_json não é um JSON válido."}
+    if not isinstance(args, list):
+        args = [args]
+    info = _catalogo[op]
+    if not info.get("leitura") and not a.get("confirmado"):
+        return {"precisa_confirmar": True, "operacao": op, "args": args,
+                "instrucao": "Diga em uma frase o que vai mudar no financeiro e pergunte se pode; repita com confirmado=true depois do sim."}
+    res = await chamar(op, *args)
+    if not info.get("leitura"):
+        await mudou()
+    texto = json.dumps(res, ensure_ascii=False, default=str)
+    return {"ok": True, "resultado": res if len(texto) < 12000 else texto[:12000] + "…(cortado)"}
+
+
+# ---------- ver, editar e apagar lançamentos ----------
+
+
+async def _lancamentos(a: dict[str, Any]) -> list[dict[str, Any]]:
+    """Saídas e entradas do período (mês = AAAA-MM, padrão o atual), filtradas por texto, categoria e valor."""
+    mes = _mes(a)
+    filtros = {"year": int(mes[:4]), "month": int(mes[5:7])}
+    saidas = [{**x, "_tipo": "expense", "_desc": x.get("description", "")} for x in await chamar("expenses:list", filtros) or []]
+    entradas = [{**x, "_tipo": "income", "_desc": x.get("source", "")} for x in await chamar("incomes:list", filtros) or []]
+    itens = saidas + entradas if a.get("tipo") != "entrada" else entradas
+    if a.get("tipo") == "gasto":
+        itens = saidas
+    if a.get("texto"):
+        alvo = _norm(a["texto"])
+        itens = [x for x in itens if alvo in _norm(x["_desc"]) or alvo in _norm(x.get("category", ""))]
+    if a.get("categoria"):
+        alvo = _norm(a["categoria"])
+        itens = [x for x in itens if alvo in _norm(x.get("category", ""))]
+    if a.get("data"):
+        itens = [x for x in itens if str(x.get("date", "")).startswith(str(a["data"])[:10])]
+    if a.get("valor"):
+        itens = [x for x in itens if abs(float(x.get("amount") or 0) - float(a["valor"])) < 0.01]
+    return sorted(itens, key=lambda x: (x.get("date") or "", x.get("createdAt") or ""), reverse=True)
+
+
+async def lancamentos(a: dict[str, Any]) -> dict[str, Any]:
+    itens = await _lancamentos(a)
+    total = sum(float(x.get("amount") or 0) * (1 if x["_tipo"] == "income" else -1) for x in itens)
+    linhas = [{"rotulo": f"{x['_desc']} · {_data_br(x.get('date', ''))}", "valor": ("+" if x["_tipo"] == "income" else "−") + brl(x.get("amount")),
+               "detalhe": x.get("category", "")} for x in itens[:20]]
+    await _cartao({"modo": "lista", "titulo": f"Lançamentos · {_mes(a)}", "valor": abs(total), "sinal": "entrada" if total >= 0 else "saida",
+                   "linhas": linhas or [{"rotulo": "Nada encontrado", "valor": ""}]})
+    return {"quantidade": len(itens), "saldo_do_filtro": brl(total),
+            "itens": [f"{x['_desc']} {brl(x.get('amount'))} em {_data_br(x.get('date', ''))} ({x.get('category')})" for x in itens[:25]]}
+
+
+async def editar(a: dict[str, Any]) -> dict[str, Any]:
+    """Acha um lançamento (texto, data, valor; padrão o mais recente que bate) e altera ou apaga."""
+    itens = await _lancamentos(a | {"valor": a.get("valor_atual")})
+    if not itens:
+        return {"erro": "Não achei esse lançamento. Diga o nome, a data ou o valor."}
+    if len(itens) > 1 and not a.get("o_mais_recente", True):
+        return {"varios": [f"{x['_desc']} {brl(x.get('amount'))} em {_data_br(x.get('date', ''))}" for x in itens[:8]],
+                "instrucao": "Pergunte qual deles."}
+    x = itens[0]
+    rotulo = f"{x['_desc']} de {brl(x.get('amount'))} ({_data_br(x.get('date', ''))})"
+    if a.get("acao") == "apagar":
+        if not a.get("confirmado"):
+            return {"precisa_confirmar": True, "instrucao": f"Pergunte se pode apagar {rotulo}."}
+        await chamar("expenses:delete" if x["_tipo"] == "expense" else "incomes:delete", x["id"])
+        await mudou()
+        return {"ok": True, "apagado": rotulo}
+    mudancas: dict[str, Any] = {}
+    if a.get("novo_valor"):
+        mudancas["amount"] = float(a["novo_valor"])
+    if a.get("nova_categoria"):
+        mudancas["category"] = a["nova_categoria"]
+    if a.get("nova_data"):
+        mudancas["date"] = str(a["nova_data"])[:10]
+    if a.get("nova_descricao"):
+        mudancas["description" if x["_tipo"] == "expense" else "source"] = a["nova_descricao"]
+    if not mudancas:
+        return {"erro": "O que mudar? (valor, categoria, data ou descrição)"}
+    base = {k: v for k, v in x.items() if not k.startswith("_")}
+    if x["_tipo"] == "expense":
+        await chamar("expenses:update", x["id"], mudancas)
+    else:
+        await chamar("incomes:update", x["id"], base | mudancas)
+    if a.get("nova_categoria"):  # corrigiu a categoria: vira regra para o mesmo comerciante
+        await chamar("rules:learn", x["_desc"], a["nova_categoria"], "variableExpense" if x["_tipo"] == "expense" else "income")
+    await mudou()
+    return {"ok": True, "alterado": rotulo, "mudancas": {k: (brl(v) if k == "amount" else v) for k, v in mudancas.items()}}
+
+
+# ---------- orçamento, regras, fatura e investimentos ----------
+
+
+async def orcamento(a: dict[str, Any]) -> dict[str, Any]:
+    mes = "" if a.get("todo_mes", True) else _mes(a)  # sem mês = vale para todos os meses
+    if a.get("acao") == "sugerir":
+        sug = await chamar("insights:suggestBudgets", {"months": 6}) or []
+        return {"sugestao": sug, "instrucao": "Resuma a sugestão (por categoria) e pergunte se pode aplicar; aplicar = acao definir para cada uma."}
+    atual = await chamar("budgets:get", mes) or {}
+    if a.get("acao") == "definir":
+        if not a.get("categoria") or not a.get("valor"):
+            return {"erro": "Preciso da categoria e do valor."}
+        atual[a["categoria"]] = float(a["valor"])
+        await chamar("budgets:save", atual, mes)
+        await mudou()
+        return {"ok": True, "categoria": a["categoria"], "valor": brl(a["valor"])}
+    if a.get("acao") == "remover" and a.get("categoria"):
+        alvo = _achar(a["categoria"], [{"name": k} for k in atual], ("name",))
+        if alvo:
+            atual.pop(alvo["name"], None)
+            await chamar("budgets:save", atual, mes)
+            await mudou()
+        return {"ok": bool(alvo)}
+    return await consultar({"assunto": "orcamento"})
+
+
+async def regra(a: dict[str, Any]) -> dict[str, Any]:
+    if a.get("acao") == "listar":
+        regras = await chamar("rules:list") or []
+        return {"regras": [f"{r.get('term')} → {r.get('category')}" for r in regras[:40]], "total": len(regras)}
+    termo, cat = (a.get("termo") or "").strip(), (a.get("categoria") or "").strip()
+    if not termo or not cat:
+        return {"erro": "Diga o nome (ex.: Uber) e a categoria (ex.: Transporte)."}
+    kind = "income" if a.get("tipo") == "entrada" else "variableExpense"
+    existente = next((r for r in await chamar("rules:list") or [] if _norm(r.get("term", "")) == _norm(termo) and r.get("kind") == kind), None)
+    await chamar("rules:save", {"term": termo.lower(), "category": cat, "kind": kind, **({"id": existente["id"]} if existente else {})})
+    aplicadas = await chamar("rules:apply")
+    await mudou()
+    return {"ok": True, "regra": f"{termo} → {cat}", "aplicada_em": aplicadas}
+
+
+async def fatura(a: dict[str, Any]) -> dict[str, Any]:
+    cartoes = [c for c in await chamar("cards:list") or [] if c.get("cardType") == "CREDITO"]
+    cartao = _achar(a.get("cartao") or "", cartoes) or (cartoes[0] if len(cartoes) == 1 else None)
+    if not cartao:
+        return {"erro": "De qual cartão?", "cartoes": [c["name"] for c in cartoes]}
+    usado = await chamar("cards:usedLimit", cartao["id"])
+    faturas = await chamar("invoices:list", cartao["id"]) or []
+    mes = (a.get("mes") or "").strip()[:7] or next((f.get("referenceMonth") for f in sorted(faturas, key=lambda f: f.get("dueDate") or "") if f.get("status") != "PAGA"), None)
+    det = await chamar("invoices:details", cartao["id"], mes) if mes else None
+    compras = (det or {}).get("items") or (det or {}).get("installments") or []
+    linhas = [{"rotulo": c.get("purchaseDescription") or c.get("description") or "Compra", "valor": brl(c.get("amount")),
+               "detalhe": f"parcela {c.get('installmentNumber')}/{c.get('totalInstallments')}" if c.get("totalInstallments") else ""} for c in compras[:20]]
+    await _cartao({"modo": "lista", "titulo": f"Fatura {cartao['name']} · {mes}", "valor": (det or {}).get("total") or sum(float(c.get("amount") or 0) for c in compras),
+                   "sinal": "saida", "linhas": linhas + [{"rotulo": "Limite usado", "valor": f"{brl(usado)} de {brl(cartao.get('limit'))}"}]})
+    return {"cartao": cartao["name"], "mes": mes, "compras": len(compras), "limite_usado": brl(usado), "limite_total": brl(cartao.get("limit")),
+            "disponivel": brl(float(cartao.get("limit") or 0) - float(usado or 0))}
+
+
+async def investir(a: dict[str, Any]) -> dict[str, Any]:
+    acao = a.get("acao") or "resumo"
+    if acao == "resumo":
+        p = await chamar("investments:portfolio") or {}
+        ativos = await chamar("investments:list") or []
+        linhas = [{"rotulo": i.get("name") or i.get("symbol"), "valor": brl(i.get("marketValue") or i.get("currentAmount"))} for i in ativos if i.get("status") == "ATIVO"][:15]
+        await _cartao({"modo": "lista", "titulo": "Investimentos", "valor": p.get("marketValue") or p.get("total"), "sinal": "saldo", "linhas": linhas})
+        return {"total": brl(p.get("marketValue") or p.get("total")), "ativos": [f"{r['rotulo']}: {r['valor']}" for r in linhas]}
+    ativos = await chamar("investments:list") or []
+    alvo = _achar(a.get("investimento") or "", ativos, ("name", "symbol", "institution"))
+    if not alvo:
+        return {"erro": f"Não achei '{a.get('investimento')}'.", "investimentos": [i.get("name") for i in ativos][:20],
+                "instrucao": "Para cadastrar um investimento novo, use financeiro_avancado (investments:create)."}
+    contas = _ativas(await chamar("accounts:list") or [])
+    conta = _achar(a.get("conta") or "", contas) or (contas[0] if contas else None)
+    valor = abs(float(a.get("valor") or 0))
+    if not conta or not valor:
+        return {"erro": "Preciso do valor e de uma conta."}
+    item = await chamar("contributions:create", {"investmentId": alvo["id"], "bankAccountId": conta["id"],
+                                                 "amount": valor if acao == "aportar" else -valor,
+                                                 "date": (a.get("data") or dt.date.today().isoformat())[:10]})
+    await mudou()
+    return {"ok": True, "investimento": alvo.get("name"), "valor": brl(valor), "acao": acao, "id": item.get("id")}

@@ -119,6 +119,22 @@ async def _financas() -> dict | None:
     }
 
 
+async def _sistemas() -> list[dict] | None:
+    """Resumo do dia de cada sistema conectado que oferece a ação resumo_do_dia (ex.: WorkFlow)."""
+    from . import sistemas
+
+    out = []
+    for s in sistemas.lista():
+        if not s.get("ativo", True):
+            continue
+        c = await sistemas.carregar(s)
+        if any(f["name"] == "resumo_do_dia" for f in c.get("ferramentas", [])):
+            r = await sistemas.executar(f"{s['prefixo']}__resumo_do_dia", {})
+            if r.get("ok"):
+                out.append({"sistema": s["nome"], "resumo": r["resultado"]})
+    return out or None
+
+
 def _health() -> dict | None:
     from .sources import health
 
@@ -145,7 +161,7 @@ def _fallback_script(data: dict) -> dict:
 
 
 async def _script(data: dict) -> dict:
-    keys = ["clima", "emails", "agenda"] + (["financas"] if data.get("financas") else []) + (["saude"] if data.get("saude") else []) + [f"noticia:{n['tema']}" for n in data["noticias"]]
+    keys = ["clima", "emails", "agenda"] + (["financas"] if data.get("financas") else []) + (["sistemas"] if data.get("sistemas") else []) + (["saude"] if data.get("saude") else []) + [f"noticia:{n['tema']}" for n in data["noticias"]]
     schema = {
         "type": "OBJECT",
         "properties": {
@@ -174,6 +190,7 @@ async def _script(data: dict) -> dict:
         "configurado": data["configurado"],
         "saude": data.get("saude"),
         "financas": data.get("financas"),
+        "sistemas": data.get("sistemas"),
     }
     try:
         return await llm.generate_json(
@@ -181,7 +198,8 @@ async def _script(data: dict) -> dict:
 Hoje é {data['hoje']}. Escreva em português do Brasil, falado, natural, com um toque de humor seco.
 Duração total de 60 a 90 segundos. Números por extenso só quando ficar mais natural.
 Ordem: comece pelo que exige ação (e-mails importantes, compromissos, contas que vencem hoje ou na semana e orçamento
-apertado, num segmento "financas" com valores em reais), depois clima, depois saúde (sono e passos de ontem, se houver), depois notícias.
+apertado, num segmento "financas" com valores em reais; tarefas atrasadas e de hoje, pedidos novos e aprovações dos
+sistemas da pessoa, como o WorkFlow, num segmento "sistemas"), depois clima, depois saúde (sono e passos de ontem, se houver), depois notícias.
 Um segmento por cartão; cada segmento com 1 a 3 frases. Não cite links. Não invente nada além dos dados.
 Se e-mails ou agenda não estiverem configurados, não crie segmento para eles.
 Feche com uma frase curta de foco para o dia.
@@ -215,12 +233,13 @@ async def build(force: bool = False) -> dict:
             erros.append(f"{name}: {str(exc)[:140]}")
             return default
 
-    clima, emails, semana, noticias, financas = await asyncio.gather(
+    clima, emails, semana, noticias, financas, sist = await asyncio.gather(
         safe("clima", _weather(cfg), None),
         safe("e-mails", _emails(cfg), {"total": 0, "atencao": [], "relevantes": [], "outros": 0}),
         safe("agenda", _agenda(cfg), []),
         safe("notícias", _news(cfg), []),
         safe("finanças", _financas(), None),
+        safe("sistemas", _sistemas(), None),
     )
     now = dt.datetime.now(tz)
     hoje_iso = now.strftime("%Y-%m-%d")
@@ -238,6 +257,7 @@ async def build(force: bool = False) -> dict:
         "configurado": {"gmail": bool(cfg.get("gmail")), "agenda": bool(cfg.get("agendas"))},
         "saude": _health(),
         "financas": financas,
+        "sistemas": sist,
         "erros": erros,
     }
     data["roteiro"] = await _script(data)
@@ -255,6 +275,20 @@ def card_for(key: str, data: dict) -> tuple[str, dict] | None:
         return "emails", {"titulo": "Pedem sua atenção", "total": e["total"], "itens": e["atencao"], "outros": e["outros"], "configurado": data["configurado"]["gmail"]}
     if key == "agenda":
         return "agenda", {"titulo": "Agenda de hoje", "eventos": data["agenda"], "hoje": data["hoje"], "configurado": data["configurado"]["agenda"]}
+    if key == "sistemas" and data.get("sistemas"):
+        linhas = []
+        for s in data["sistemas"]:
+            r = s["resumo"] if isinstance(s["resumo"], dict) else {}
+            for t in (r.get("tarefas_atrasadas") or [])[:4]:
+                linhas.append({"rotulo": t.get("titulo"), "valor": "atrasada", "tom": "perigo", "detalhe": t.get("cliente") or ""})
+            for t in (r.get("tarefas_hoje") or [])[:5]:
+                linhas.append({"rotulo": t.get("titulo"), "valor": "hoje", "tom": "aviso", "detalhe": t.get("cliente") or ""})
+            if r.get("pedidos_novos"):
+                linhas.append({"rotulo": f"{s['sistema']}: pedidos novos na Inbox", "valor": str(r["pedidos_novos"])})
+            if r.get("aprovacoes_pendentes"):
+                linhas.append({"rotulo": f"{s['sistema']}: aprovações pendentes", "valor": str(r["aprovacoes_pendentes"])})
+        return "financeiro", {"modo": "lista", "titulo": "Seu trabalho hoje", "valor": None,
+                              "linhas": linhas or [{"rotulo": "Nada urgente hoje", "valor": ""}]}
     if key == "financas" and data.get("financas"):
         f = data["financas"]
         brl = lambda v: f"R$ {float(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")  # noqa: E731

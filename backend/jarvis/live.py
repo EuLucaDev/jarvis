@@ -38,8 +38,7 @@ Como responder:
 - Você projeta cartões na tela dele (flutuam na área de trabalho e ele arruma com a mão ou o mouse).
   Quando a resposta tiver dados (números, comparações, notícias, fatos), pesquise e chame mostrar_pesquisa;
   fale só o principal. Passos, opções ou recomendações: mostrar_lista. Limpar: fechar_cartoes.
-- Pedido que exige raciocínio (análise, estratégia, decidir, planejar, contas, texto caprichado, "pensa melhor"):
-  pensar, com a pergunta completa e o contexto. Pedido simples ou de ação (abrir, lançar, criar) não precisa.
+{_nivel_pensar()}
 - Antes de agir, confira se a ferramenta é a certa para o que ele pediu (ex.: "fixa/todo mês" ≠ lançamento avulso).
 - Fatos atuais: pesquisar_web. A busca roda em segundo plano: diga numa frase curta que vai verificar e,
   quando chegar, responda e mostre o cartão.
@@ -66,6 +65,12 @@ Como responder:
   caixinhas → financeiro_meta. Extratos → financeiro_importar. "Desfaz" logo depois de um lançamento →
   financeiro_desfazer. "Abre o financeiro / os relatórios" → financeiro_abrir. Sem conta cadastrada, ofereça
   financeiro_cadastrar. Mensagem "[Fechamento do mês]": conduza o fechamento com financeiro_consultar fechamento.
+- Dinheiro da agência x pessoal: o financeiro (financeiro_*) é o dinheiro pessoal dele; faturas, contratos e despesas
+  da agência ficam no WorkFlow. Na dúvida ("paguei 300 de freelancer"), pergunte de qual é. Quando um cliente pagar uma
+  fatura da agência e o dinheiro cair na conta dele, ofereça registrar nos dois (pagamento no WorkFlow e entrada no
+  financeiro).
+- Ação que nenhuma ferramenta pronta cobre: use o modo avançado do sistema (financeiro_avancado; no WorkFlow,
+  api_catalogo para descobrir a rota e api_ler/api_alterar), sempre confirmando antes de alterar.
 - Automações: "toda segunda às 9 abre o e-mail e a agenda", "cria uma rotina de trabalho que…" → rotinas
   criar (diga antes o que ela fará). "Quais rotinas eu tenho" → rotinas listar.
 - "Espelha minha tela", "olha minha tela", "compartilha a tela": espelhar_tela ligar. Com o espelho ligado
@@ -100,9 +105,35 @@ Memória (um mapa: ele no centro, temas ligados a ele e memórias ligadas aos te
 - Siga as correções e lições abaixo.
 
 {_sistemas()}
+{_assuntos()}
 
 O que você já sabe sobre ele, por tema:
 {memory.prompt_block()}"""
+
+
+def _nivel_pensar() -> str:
+    r = raciocinio()
+    if r == "rapido":
+        return "- Use pensar só quando ele pedir ('pensa melhor', 'pensa com calma')."
+    if r == "profundo":
+        return ("- Use pensar para qualquer pergunta que não seja um comando simples (abrir, lançar, criar, tocar): análise, "
+                "dúvida, decisão, plano, conta, texto. Mande a pergunta completa e o contexto.")
+    return ("- Pedido que exige raciocínio (análise, estratégia, decidir, planejar, contas, texto caprichado, \"pensa melhor\"):\n"
+            "  pensar, com a pergunta completa e o contexto. Pedido simples ou de ação (abrir, lançar, criar) não precisa.")
+
+
+def _assuntos() -> str:
+    """Ferramentas por assunto: o que ainda não está carregado precisa de carregar_assunto antes."""
+    if not tools.por_assunto():
+        return ""
+    carregados = voice.assuntos if "voice" in globals() else set()
+    faltam = {k: v for k, v in tools.assuntos_disponiveis().items() if k not in carregados}
+    if not faltam:
+        return ""
+    linhas = "\n".join(f"  - {k}: {v}" for k, v in faltam.items())
+    return ("IMPORTANTE, ferramentas por assunto: estas ainda NÃO estão carregadas nesta conversa:\n" + linhas +
+            "\n  Se o pedido for de um desses assuntos, sua PRIMEIRA ação é chamar carregar_assunto (assunto e o pedido "
+            "inteiro), sem dizer que vai verificar antes. Nunca diga que fez ou vai fazer algo desses assuntos sem carregar.")
 
 
 def _sistemas() -> str:
@@ -128,7 +159,9 @@ def raciocinio() -> str:
 
 
 def modelo_voz() -> str:
-    return settings.live_model if raciocinio() == "rapido" or _sem_modelo_pensa else MODELO_PENSA
+    # o modelo de voz "que pensa" (MODELO_PENSA) não chama ferramentas: testado em 30/10/2026, nem o clima.
+    # Por isso a voz é sempre o modelo comum; o raciocínio vem da ferramenta pensar (mais usada no "profundo").
+    return settings.live_model
 
 
 def build_config(handle: str | None) -> types.LiveConnectConfig:
@@ -142,7 +175,7 @@ def build_config(handle: str | None) -> types.LiveConnectConfig:
         ),
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
-        tools=tools.todas(),
+        tools=tools.todas(voice.assuntos if "voice" in globals() else set()),
         context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
         session_resumption=types.SessionResumptionConfig(handle=handle),
     )
@@ -154,6 +187,10 @@ class Voice:
     def __init__(self) -> None:
         self.session = None
         self.handle: str | None = None
+        # ferramentas por assunto: o que já foi carregado nesta conversa e o pedido a continuar depois de recarregar
+        self.assuntos: set[str] = set()
+        self.recarregar: tuple[str, str] | None = None
+        self.historico: list[tuple[str, str]] = []  # últimas falas desta conversa (vão junto ao recarregar)
         self.task: asyncio.Task | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.mic: asyncio.Queue[bytes] | None = None
@@ -220,6 +257,9 @@ class Voice:
                 pass
         self.task = None
         self.session = None
+        self.assuntos = set()  # conversa nova começa só com as ferramentas essenciais
+        self.recarregar = None
+        self.historico = []
         self._flush_turn()
         if self.sid:
             asyncio.create_task(memory.reflect(self.sid))  # aprende com a conversa que acabou
@@ -234,6 +274,16 @@ class Voice:
             self.pending_ask.append(text)
             await self.start()
 
+    def carregar(self, assunto: str, pedido: str) -> dict:
+        """Ferramenta carregar_assunto: marca o assunto e reconecta ao fim desta fala, com a conversa mantida."""
+        if not assunto:
+            return {"erro": "Qual assunto?"}
+        if assunto in self.assuntos:
+            return {"ok": True, "instrucao": "Já está carregado; use as ferramentas agora."}
+        self.assuntos.add(assunto)
+        self.recarregar = (assunto, pedido)
+        return {"ok": True, "instrucao": "Diga só 'um instante' (ou nada) e termine a fala; as ferramentas chegam em seguida."}
+
     async def send_text(self, text: str) -> None:
         if self.session:
             await hub.broadcast({"type": "user.text", "text": text, "typed": True})
@@ -247,6 +297,9 @@ class Voice:
             await self.session.send_realtime_input(video=types.Blob(data=jpeg, mime_type="image/jpeg"))
 
     def _flush_turn(self) -> None:
+        for papel, buf in (("usuario", self.user_buf), ("jarvis", self.model_buf)):
+            if buf.strip() and not buf.lstrip().startswith("[Aviso do sistema"):
+                self.historico = (self.historico + [(papel, " ".join(buf.split())[:400])])[-12:]
         if self.sid and self.user_buf.strip():
             memory.log_turn(self.sid, "usuario", self.user_buf)
         if self.sid and self.model_buf.strip():
@@ -276,6 +329,12 @@ class Voice:
                                 self.preroll = b""
                             while self.pending_ask:
                                 await self.send_text(self.pending_ask.pop(0))
+                            if self.recarregar:
+                                assunto, pedido = self.recarregar
+                                self.recarregar = None
+                                conversa = "\n".join(f"{'Ele' if p == 'usuario' else 'Você'}: {t}" for p, t in self.historico[-8:])
+                                await self.send_text(f"[Aviso do sistema, não é o usuário falando.] As ferramentas de {assunto} estão "
+                                                     f"carregadas. Conversa até aqui:\n{conversa}\nFaça agora o pedido dele: {pedido}")
                             await self._pump(session)
                         finally:
                             sender.cancel()
@@ -287,6 +346,8 @@ class Voice:
                         _sem_modelo_pensa = True  # tenta de novo já com o modelo comum, sem contar como falha
                         log.warning("modelo de voz que pensa indisponível (%s); usando %s", exc, settings.live_model)
                         continue
+                    if self.handle and any(k in str(exc).lower() for k in ("resum", "handle")):
+                        self.handle = None  # a retomada não aceitou a configuração nova: conversa segue sem o histórico
                     falhas += 1
                     log.warning("sessão de voz caiu: %s", exc)
                     await hub.set_status(voice="error", error=str(exc)[:300])
@@ -317,6 +378,16 @@ class Voice:
                     log.info("servidor pediu reconexão (go_away)")
                     return
                 if msg.tool_call:
+                    carga = next((fc for fc in msg.tool_call.function_calls or [] if fc.name == "carregar_assunto"), None)
+                    if carga and str((carga.args or {}).get("assunto", "")) not in self.assuntos:
+                        # assunto novo: as ferramentas só mudam numa sessão nova (a retomada mantém as antigas).
+                        # Reconecta já, sem histórico do servidor; a conversa recente vai junto no texto de continuação.
+                        self.carregar(str((carga.args or {}).get("assunto", "")), str((carga.args or {}).get("pedido", "")))
+                        audio.flush()
+                        self.pending_text.clear()
+                        self._flush_turn()
+                        self.handle = None
+                        return
                     if any(fc.name not in tools.NON_BLOCKING for fc in msg.tool_call.function_calls or []):
                         self.awaiting_tool_reply = True
                     asyncio.create_task(self._tools(session, msg.tool_call))
@@ -347,6 +418,7 @@ class Voice:
                 if sc.turn_complete:
                     self.turn_done = True
                     self._flush_turn()
+
 
     async def _user_text(self, text: str) -> None:
         novo = self.turn_done or self.last_model > self.last_user

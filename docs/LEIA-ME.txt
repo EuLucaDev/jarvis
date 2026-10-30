@@ -56,12 +56,16 @@ DEPOIS DE INSTALADO
   - Com mais de um monitor, a mão alcança todas as telas (o ponteiro passa de uma para a outra).
   - Seus sistemas: em Painel → Conexões → Seus sistemas, cole o endereço do MCP e um token de acesso
     (no WorkFlow: Configurações → Conta → Tokens de acesso). Depois é só pedir: "Jarvis, como está meu dia
-    no WorkFlow?", "cria uma tarefa para a Marina, KV da Nova Foods, até sexta", "move o KV para aprovação".
+    no WorkFlow?", "cria uma tarefa para a Marina, KV da Nova Foods, até sexta", "move o KV para aprovação",
+    "o que a Nova Foods falou hoje?", "responde dizendo que entrega sexta", "quanto tempo gastei no projeto X?".
+    O que não tiver ação pronta ele faz pelo modo avançado, sempre perguntando antes de alterar.
   - Rotinas: "Jarvis, toda segunda às 9 abre o Gmail e a agenda" (ou em Painel → Operações).
   - Financeiro (ícone → Financeiro, ou "Jarvis, abre o financeiro"): contas, cartões, faturas, metas,
     investimentos e relatórios. Por voz: "paguei 80 no mercado no crédito do Nubank em 2x", "recebi 3 mil
     de salário", "quanto gastei com comida esse mês?", "o que vence essa semana?", "guarda 200 na meta
-    viagem", "importa os extratos da pasta Downloads". Arraste extratos (PDF, CSV, OFX ou foto) para o HUD.
+    viagem", "importa os extratos da pasta Downloads", "muda o mercado de ontem para 92", "apaga o iFood
+    de hoje", "coloca 800 de orçamento para mercado", "Uber é sempre transporte", "detalha a fatura do Nubank",
+    "pausa a academia", "aportei 500 no Tesouro". Arraste extratos (PDF, CSV, OFX ou foto) para o HUD.
     Ele avisa contas vencendo, orçamento passando de 80% e chama para fechar o mês no último dia.
   - Peça coisas no computador: "abre o Notas e escreve…", "olha essa planilha", "minimiza o navegador",
     "fecha essa janela", "põe o Chrome na metade da esquerda", "manda pro outro monitor".

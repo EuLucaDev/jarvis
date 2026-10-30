@@ -1007,9 +1007,9 @@ function IntegracoesPage({ only }: { only?: 'computador' | 'atalhos' | 'cameras'
 /* ---------- sistema ---------- */
 
 const RACIOCINIO = [
-  { id: 'rapido', nome: 'Rápido', desc: 'Responde na hora, pensa pouco.' },
-  { id: 'equilibrado', nome: 'Equilibrado', desc: 'Pensa um pouco antes de agir (padrão).' },
-  { id: 'profundo', nome: 'Profundo', desc: 'Pensa bem antes de falar; demora mais para começar.' },
+  { id: 'rapido', nome: 'Rápido', desc: 'Responde na hora; só pensa a fundo quando você pedir ("pensa melhor").' },
+  { id: 'equilibrado', nome: 'Equilibrado', desc: 'Pensa a fundo nos pedidos difíceis: análise, planos, contas, textos (padrão).' },
+  { id: 'profundo', nome: 'Profundo', desc: 'Pensa a fundo em quase tudo que não for um comando simples; respostas mais lentas e cuidadosas.' },
 ]
 
 function RaciocinioPanel() {

@@ -15,7 +15,7 @@ datas = [
 ]
 # financeiro: o motor (Node + regras da Carteira + dependências) e o próprio Node, se a compilação trouxe
 if (ROOT / "financeiro" / "motor" / "node_modules").exists():
-    for item in ("servidor.js", "package.json", "db", "node_modules", "tessdata"):
+    for item in ("servidor.js", "catalogo.js", "package.json", "db", "node_modules", "tessdata"):
         if (ROOT / "financeiro" / "motor" / item).exists():
             alvo = "financeiro" if item.endswith((".js", ".json")) else f"financeiro/{item}"
             datas.append((str(ROOT / "financeiro" / "motor" / item), alvo))

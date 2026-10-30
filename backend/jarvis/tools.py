@@ -336,7 +336,7 @@ DECLARATIONS = [
         parameters={
             "type": "OBJECT",
             "properties": {
-                "acao": {"type": S, "enum": ["criar", "listar", "remover"]},
+                "acao": {"type": S, "enum": ["criar", "listar", "pausar", "retomar", "editar", "remover"]},
                 "tipo": {"type": S, "enum": ["despesa", "receita"]},
                 "nome": {"type": S, "description": "Ex.: Aluguel, Internet, Salário."},
                 "valor": {"type": N},
@@ -345,11 +345,66 @@ DECLARATIONS = [
                 "conta": {"type": S},
                 "cartao": {"type": S},
                 "forma": {"type": S, "enum": ["pix", "debito", "dinheiro", "credito", "vale"]},
-                "lancar_este_mes": {"type": "BOOLEAN"},
+                "lancar_este_mes": {"type": "BOOLEAN", "description": "NÃO passe, a menos que ele diga explicitamente se já entra neste mês. Sem isto: entra neste mês se o dia ainda não passou, senão no próximo."},
                 "confirmado": {"type": "BOOLEAN"},
             },
             "required": ["tipo"],
         },
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_lancamentos",
+        description="Mostra lançamentos (gastos e entradas) de um mês com filtros: texto (ex.: Uber, mercado), categoria, data, valor, tipo. Use para 'o que eu gastei ontem', 'meus gastos com Uber este mês'.",
+        parameters={"type": "OBJECT", "properties": {"mes": {"type": S, "description": "AAAA-MM; vazio = este mês."}, "texto": {"type": S},
+                                                      "categoria": {"type": S}, "data": {"type": S, "description": "AAAA-MM-DD."},
+                                                      "valor": {"type": N}, "tipo": {"type": S, "enum": ["gasto", "entrada", "todos"]}}},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_editar",
+        description=(
+            "Corrige ou apaga um lançamento já feito: acha pelo texto/data/valor (o mais recente que bater) e muda "
+            "valor, categoria, data ou descrição, ou apaga (pede o sim). Ex.: 'o mercado de ontem foi 92', 'aquele Uber "
+            "era trabalho', 'apaga o iFood de hoje'. Categoria corrigida vira regra para o mesmo lugar."
+        ),
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["alterar", "apagar"]}, "texto": {"type": S},
+                                                      "data": {"type": S}, "valor_atual": {"type": N}, "mes": {"type": S},
+                                                      "novo_valor": {"type": N}, "nova_categoria": {"type": S}, "nova_data": {"type": S},
+                                                      "nova_descricao": {"type": S}, "confirmado": {"type": "BOOLEAN"}},
+                    "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_orcamento",
+        description="Orçamento por categoria: ver (como está), definir (categoria + valor por mês), remover, sugerir (pelo histórico, pela mediana dos últimos meses).",
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["ver", "definir", "remover", "sugerir"]},
+                                                      "categoria": {"type": S}, "valor": {"type": N}}, "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_regra",
+        description="Regras de categoria: 'Uber é sempre transporte' (criar: termo + categoria; já aplica nos lançamentos sem categoria) ou listar.",
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["criar", "listar"]}, "termo": {"type": S},
+                                                      "categoria": {"type": S}, "tipo": {"type": S, "enum": ["gasto", "entrada"]}}, "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_fatura",
+        description="Detalhe da fatura de um cartão (compras e parcelas do mês) e o limite usado/disponível.",
+        parameters={"type": "OBJECT", "properties": {"cartao": {"type": S}, "mes": {"type": S, "description": "AAAA-MM; vazio = a próxima a vencer."}}},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_investir",
+        description="Investimentos: resumo da carteira, aportar ou resgatar (valor, de qual investimento, conta).",
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["resumo", "aportar", "resgatar"]}, "investimento": {"type": S},
+                                                      "valor": {"type": N}, "conta": {"type": S}, "data": {"type": S}}, "required": ["acao"]},
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_avancado",
+        description=(
+            "Modo avançado: qualquer coisa do financeiro que as outras ferramentas não fazem (metas e itens, editar "
+            "contas e cartões, investimentos novos, relatórios, backup, anexos…). catalogo sem assunto lista as áreas; "
+            "com assunto (ex.: goals, reports, investments) mostra as operações e os campos. executar roda uma "
+            "operação com args na ordem dos parametros; escrita só com confirmado=true depois do sim."
+        ),
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["catalogo", "executar"]}, "assunto": {"type": S},
+                                                      "operacao": {"type": S}, "args_json": {"type": S, "description": "Lista JSON com os argumentos na ordem dos parametros, ex.: [\"goal_123\", {\"name\": \"Buffet\", \"plannedAmount\": 800}]"},
+                                                      "confirmado": {"type": "BOOLEAN"}}, "required": ["acao"]},
     ),
     types.FunctionDeclaration(
         name="financeiro_consultar",
@@ -762,15 +817,44 @@ else:
     TOOLS = [types.Tool(function_declarations=[SEARCH_DECL, PENSAR_DECL, *DECLARATIONS])]
 
 
-def todas() -> list[types.Tool]:
-    """As ferramentas do Jarvis mais as dos sistemas conectados (MCP), montadas a cada sessão."""
+def por_assunto() -> bool:
+    """Carregar as ferramentas do financeiro e dos sistemas só quando o assunto aparece (padrão: sim)."""
+    return (store.get("voz") or {}).get("por_assunto", True) is not False
+
+
+def assuntos_disponiveis() -> dict[str, str]:
+    """Assunto → o que ele cobre (para a voz saber quando carregar)."""
     from . import sistemas
 
-    extras = sistemas.declaracoes()
-    if not extras:
-        return TOOLS
+    out = {"financeiro": "dinheiro pessoal: gastos, entradas, contas fixas, cartões e faturas, orçamento, metas, investimentos, extratos"}
+    for s in sistemas.lista():
+        if s.get("ativo", True) and sistemas.declaracoes_de(s):
+            out[s["prefixo"]] = f"o sistema {s['nome']} da pessoa"
+    return out
+
+
+def todas(assuntos: set[str] | None = None) -> list[types.Tool]:
+    """As ferramentas da sessão: as essenciais, mais as dos assuntos carregados (ou tudo, sem o modo por assunto)."""
+    from . import sistemas
+
+    tudo = not por_assunto()
+    carregados = assuntos or set()
     *antes, ultima = TOOLS
-    return [*antes, types.Tool(function_declarations=[*(ultima.function_declarations or []), *extras])]
+    base = [d for d in (ultima.function_declarations or []) if tudo or "financeiro" in carregados or not (d.name or "").startswith("financeiro_")]
+    extras = [d for s in sistemas.lista() if s.get("ativo", True) and (tudo or s["prefixo"] in carregados) for d in sistemas.declaracoes_de(s)]
+    faltam = {k: v for k, v in assuntos_disponiveis().items() if k not in carregados}
+    if not tudo and faltam:
+        base.append(types.FunctionDeclaration(
+            name="carregar_assunto",
+            description=(
+                "Carrega as ferramentas de um assunto antes de usar (leva um segundo; a conversa continua). Assuntos: "
+                + "; ".join(f"{k} = {v}" for k, v in faltam.items())
+                + ". Passe em pedido o que ele pediu, para você continuar logo depois."
+            ),
+            parameters={"type": "OBJECT", "properties": {"assunto": {"type": S, "enum": list(faltam)}, "pedido": {"type": S}},
+                        "required": ["assunto", "pedido"]},
+        ))
+    return [*antes, types.Tool(function_declarations=[*base, *extras])]
 
 
 def _search(consulta: str, tipo: str) -> list[dict[str, Any]]:
@@ -875,6 +959,10 @@ async def run(name: str, args: dict[str, Any]) -> dict[str, Any]:
     args = args or {}
     from . import sistemas
 
+    if name == "carregar_assunto":
+        from .live import voice
+
+        return voice.carregar(str(args.get("assunto", "")), str(args.get("pedido", "")))
     if sistemas.e_do_sistema(name):
         try:
             return await sistemas.executar(name, args)
@@ -1174,7 +1262,9 @@ async def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
                     return fv.abrir(args.get("pagina"))
                 if name == "financeiro_desfazer":
                     return await fv.desfazer()
-                fn = {"financeiro_lancar": fv.lancar, "financeiro_fixa": fv.fixa, "financeiro_consultar": fv.consultar, "financeiro_transferir": fv.transferir,
+                fn = {"financeiro_lancar": fv.lancar, "financeiro_fixa": fv.fixa, "financeiro_lancamentos": fv.lancamentos,
+                      "financeiro_editar": fv.editar, "financeiro_orcamento": fv.orcamento, "financeiro_regra": fv.regra,
+                      "financeiro_fatura": fv.fatura, "financeiro_investir": fv.investir, "financeiro_avancado": fv.avancado, "financeiro_consultar": fv.consultar, "financeiro_transferir": fv.transferir,
                       "financeiro_pagar": fv.pagar, "financeiro_meta": fv.meta, "financeiro_importar": fv.importar,
                       "financeiro_cadastrar": fv.cadastrar}[name]
                 return await fn(args)
