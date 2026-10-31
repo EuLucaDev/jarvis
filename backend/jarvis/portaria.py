@@ -51,6 +51,11 @@ SEGREDO = secrets.token_urlsafe(24)  # entre a portaria e os núcleos (muda a ca
 TG = os.getenv("PORTARIA_TG_API", "https://api.telegram.org")  # trocável só para testes
 BACKUP_HORA = int(os.getenv("PORTARIA_BACKUP_HORA", "4"))
 
+# rodando como programa (python -m jarvis.portaria), este módulo é o __main__: sem isto, o "from . import portaria"
+# de portaria_contas criaria uma segunda cópia, com outra lista de núcleos e outro segredo (núcleos em dobro)
+if __name__ == "__main__":
+    sys.modules.setdefault("jarvis.portaria", sys.modules[__name__])
+
 app = FastAPI(title="Jarvis · portaria", docs_url=None, redoc_url=None, openapi_url=None)
 from . import portaria_contas as contas  # noqa: E402 - o módulo usa funções daqui (import tardio lá dentro)
 

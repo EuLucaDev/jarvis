@@ -16,9 +16,13 @@ import json
 import os
 import stat
 import sys
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+TENTATIVAS = 8
+AO_MESMO_TEMPO = 3  # envios em paralelo por máquina (três máquinas publicam juntas)
 
 
 def sha256(p: Path) -> str:
@@ -49,7 +53,7 @@ def chamar(metodo: str, caminho: str, corpo: bytes | None = None, arquivo: Path 
     if arquivo:
         headers["content-type"] = "application/octet-stream"
         headers["content-length"] = str(arquivo.stat().st_size)
-    for tentativa in range(5):
+    for tentativa in range(TENTATIVAS):
         try:
             if arquivo:
                 with arquivo.open("rb") as f:
@@ -60,9 +64,11 @@ def chamar(metodo: str, caminho: str, corpo: bytes | None = None, arquivo: Path 
             with urllib.request.urlopen(req, timeout=600) as r:
                 return json.loads(r.read() or b"{}")
         except Exception as exc:  # noqa: BLE001
-            if tentativa == 4:
+            if tentativa == TENTATIVAS - 1:
                 raise
-            print(f"  tentando de novo ({exc})", file=sys.stderr)
+            espera = min(60, 2 ** (tentativa + 1))
+            print(f"  tentando de novo em {espera}s ({exc})", file=sys.stderr)
+            time.sleep(espera)
     return {}
 
 
@@ -79,7 +85,7 @@ def publicar(a: argparse.Namespace) -> None:
     print(f"{a.produto}/{a.sistema} {a.versao}: {len(itens)} itens, {total / 1e6:.0f} MB")
     faltam = chamar("POST", "/api/loja/preparar", json.dumps({"hashes": sorted(locais)}).encode())["faltam"]
     print(f"  a loja não tem {len(faltam)} arquivos ({sum(locais[h].stat().st_size for h in faltam) / 1e6:.0f} MB); enviando")
-    with ThreadPoolExecutor(6) as ex:
+    with ThreadPoolExecutor(AO_MESMO_TEMPO) as ex:
         for _ in ex.map(lambda h: chamar("PUT", f"/api/loja/objeto/{h}", arquivo=locais[h]), faltam):
             pass
     corpo = {"produto": a.produto, "sistema": a.sistema, "versao": a.versao, "notas": a.notas or "", "arquivos": itens}
