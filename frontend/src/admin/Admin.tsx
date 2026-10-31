@@ -1084,6 +1084,7 @@ type NuvemEstado = {
   pelo_launcher: boolean
   ponte: boolean
   erro?: string | null
+  bolso?: { ativo: boolean; enviada?: number | null; erro?: string | null }
   conta?: { perfil: string; nome: string; email?: string; dono: boolean; telegram_ligado: boolean; robo?: string; robo_configurado: boolean; telegram_link?: string | null }
 }
 
@@ -1171,6 +1172,28 @@ function NuvemPage() {
               Abrir no Telegram
             </button>
           ) : null}
+        </Panel>
+      )}
+      {e.ligado && e.bolso && (
+        <Panel
+          title="Telegram com o computador desligado"
+          desc="O Jarvis de bolso: este computador deixa na sua conta uma cópia cifrada do financeiro (últimos três meses) e da memória, e a sua chave da Gemini. Com o computador desligado, ele responde por ela; o que você lançar pelo celular entra aqui quando o computador ligar."
+        >
+          <Switch
+            on={e.bolso.ativo}
+            label={e.bolso.ativo ? 'Ligado' : 'Desligado: com o computador desligado, as mensagens esperam'}
+            onChange={async (v) => {
+              await api('/api/nuvem/bolso', { method: 'PUT', json: { ativo: v } })
+              toast(v ? 'Jarvis de bolso ligado' : 'Desligado: a cópia e a chave saem da conta')
+              carregar()
+            }}
+          />
+          {e.bolso.ativo && (
+            <p className="muted">
+              {e.bolso.enviada ? `Última cópia: ${new Date(e.bolso.enviada * 1000).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}.` : 'A primeira cópia sai em alguns minutos.'}
+              {e.bolso.erro ? ` ${e.bolso.erro}` : ''}
+            </p>
+          )}
         </Panel>
       )}
       {toastNode}

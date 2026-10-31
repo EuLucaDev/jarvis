@@ -68,6 +68,12 @@ def _h(token: str) -> str:
 _tentativas: dict[str, list[float]] = {}
 
 
+def ip(request: Request) -> str:
+    """IP de quem pede (atrás do proxy do Coolify, o primeiro do X-Forwarded-For)."""
+    xff = request.headers.get("x-forwarded-for", "")
+    return xff.split(",")[0].strip() if xff else (request.client.host if request.client else "")
+
+
 def _limite(chave: str, maximo: int = 8, janela: int = 600) -> None:
     agora = time.time()
     lista = [t for t in _tentativas.get(chave, []) if agora - t < janela]
@@ -179,7 +185,8 @@ def _publica(cid: str, c: dict[str, Any]) -> dict[str, Any]:
 async def site_entrar(request: Request, response: Response):
     corpo = await request.json()
     email = str(corpo.get("email", "")).strip().lower()
-    _limite(f"site:{request.client.host if request.client else ''}:{email}")
+    _limite(f"site:{ip(request)}:{email}")
+    _limite(f"site-ip:{ip(request)}", 30)
     p = _p()
     r = p.ler()
     cid, c = next(((k, x) for k, x in r["contas"].items() if x["email"] == email), (None, None))
@@ -215,6 +222,8 @@ async def site_eu(request: Request):
     r = p.ler()
     pf = r["perfis"].get(c["perfil"], {})
     return {**_publica(cid, c), "telegram_ligado": bool(pf.get("tg")), "robo": r.get("telegram", {}).get("usuario"),
+            "conectado": p.conectado(c["perfil"]), "bolso": p.bolso.estado(c["perfil"]),
+            "sessoes": sum(1 for v in r["sessoes"].values() if v["conta"] == cid and v["expira"] > time.time()),
             "versoes": {s: _ultima(r, "jarvis", s) for s in SISTEMAS},
             "launcher": {s: bool(_ultima(r, "instalador", s)) for s in SISTEMAS}}
 
@@ -231,7 +240,20 @@ async def site_senha(request: Request):
     p = _p()
     r = p.ler()
     r["contas"][cid]["senha"] = hash_senha(nova)
+    atual = _h(request.cookies.get("jv_sessao", ""))
+    r["sessoes"] = {k: v for k, v in r["sessoes"].items() if v["conta"] != cid or k == atual}  # sai dos outros navegadores
     p.gravar(r)
+    return {"ok": True}
+
+
+@router.post("/api/site/sair-de-todos")
+async def site_sair_todos(request: Request, response: Response):
+    cid, _ = _sessao(request)
+    p = _p()
+    r = p.ler()
+    r["sessoes"] = {k: v for k, v in r["sessoes"].items() if v["conta"] != cid}
+    p.gravar(r)
+    response.delete_cookie("jv_sessao")
     return {"ok": True}
 
 
@@ -294,7 +316,7 @@ async def admin_contas(request: Request):
     _admin(request)
     r = _p().ler()
     p = _p()
-    return [{**_publica(k, c), "conectado": p.conectado(c["perfil"]),
+    return [{**_publica(k, c), "conectado": p.conectado(c["perfil"]), "bolso": p.bolso.estado(c["perfil"])["pronto"],
              "telegram_ligado": bool(r["perfis"].get(c["perfil"], {}).get("tg"))} for k, c in r["contas"].items()]
 
 
@@ -425,7 +447,8 @@ def _acesso(request: Request) -> tuple[str, dict[str, Any], str, dict[str, Any],
 async def launcher_entrar(request: Request):
     corpo = await request.json()
     email = str(corpo.get("email", "")).strip().lower()
-    _limite(f"launcher:{request.client.host if request.client else ''}:{email}")
+    _limite(f"launcher:{ip(request)}:{email}")
+    _limite(f"launcher-ip:{ip(request)}", 30)
     p = _p()
     r = p.ler()
     cid, c = next(((k, x) for k, x in r["contas"].items() if x["email"] == email), (None, None))

@@ -41,7 +41,7 @@ SEM = {"financeiro_abrir"}  # abre janela no computador
 class Resposta:
     texto: str = ""
     cartoes: list[dict[str, Any]] = field(default_factory=list)
-    mensagens: list[str] = field(default_factory=list)  # mensagens prontas (HTML do Telegram), ex.: o relatório
+    mensagens: list[Any] = field(default_factory=list)  # mensagens prontas (HTML do Telegram, ou {texto, teclado}), ex.: o relatório
     ferramentas: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (nome, resultado)
 
     def usou(self, nome: str) -> dict[str, Any] | None:
@@ -83,6 +83,9 @@ def _declaracoes(assuntos: set[str]) -> list[types.Tool]:
     return [types.Tool(function_declarations=[*decls, LEMBRETE_DECL, RELATORIO_DECL, PERFIL_DECL])]
 
 
+from .textos import ESTILO  # noqa: E402 - o mesmo jeito de escrever do Jarvis de bolso
+
+
 def _prompt(nome_canal: str) -> str:
     hoje = time.strftime("%A, %d/%m/%Y, %H:%M")
     nome, chamar = settings.user_name, settings.chamar
@@ -92,17 +95,7 @@ def _prompt(nome_canal: str) -> str:
 Português do Brasil. Seu jeito é o do J.A.R.V.I.S. dos filmes: formal sem ser frio, confiante, curto e preciso,
 uma ironia leve de vez em quando (nunca em assunto sério). Agora são {hoje}. Cidade padrão: {settings.city}.
 
-Como responder no {nome_canal}:
-- Mensagens curtas e bem diagramadas, só com texto (nada de imagens). Use **negrito** para valores e nomes, listas
-  com "•", uma ideia por linha, emojis com moderação como marcadores (📊 💳 ✅ ⚠️). Valores sempre em reais (R$ 1.234,56).
-- Para comparar números, faça um "gráfico" em texto dentro de um bloco ``` (monoespaçado): rótulos alinhados,
-  barras com █ proporcionais e o valor à direita. Ex.:
-  ```
-  Moradia      ██████████  1.800
-  Mercado      █▍            240
-  ```
-- O que as ferramentas mostrariam na tela já vai em texto junto da sua mensagem: não repita, comente o principal.
-- Relatório do mês, fechamento, "me manda o relatório": relatorio_financeiro (ele já manda o relatório pronto).
+Como responder no {nome_canal}: {ESTILO}
 
 O que você faz aqui: financeiro, os sistemas dele (WorkFlow), memória, pesquisa, clima, mercado e lembretes.
 Você NÃO mexe no computador por aqui (abrir apps, clicar, arquivos, tela): se ele pedir, diga que isso é no
@@ -148,7 +141,7 @@ async def _ferramenta(nome: str, args: dict[str, Any], assuntos: set[str], resp:
     if nome == "criar_lembrete":
         from . import telegram
 
-        return telegram.agendar_lembrete(chave, str(args.get("texto", "")), str(args.get("quando", "")))
+        return await telegram.agendar_lembrete(chave, str(args.get("texto", "")), str(args.get("quando", "")))
     if nome == "meus_dados":
         campos = {k2: str(args[k]).strip() for k, k2 in (("nome", "user_name"), ("tratamento", "tratamento"), ("cidade", "city")) if k in args}
         settings.update(**campos)

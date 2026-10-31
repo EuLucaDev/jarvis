@@ -1,6 +1,6 @@
 [project]
 name = "jarvis-core"
-version = "2.11.0"
+version = "2.12.0"
 description = "Núcleo do Jarvis: voz, mãos, ouvido, controle do PC e dados (Mac, Windows e Linux)"
 requires-python = ">=3.12,<3.13"
 dependencies = [

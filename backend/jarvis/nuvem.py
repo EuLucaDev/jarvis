@@ -2,6 +2,8 @@
 
 O Jarvis roda aqui: financeiro, memória e conversas ficam neste computador. A VPS só faz a ponte do Telegram.
 - A conta vem do launcher (nuvem-launcher.json, com o acesso deste computador) ou, à mão, do painel.
+- Com o computador desligado, o Jarvis de bolso (portaria) responde com a última cópia (copia.py); ao conectar,
+  chegam as pendências feitas pelo celular ("pendencias") e o Jarvis aplica e confirma ("pendencias_ok").
 - `loop()` mantém a ponte aberta (WebSocket /api/ponte): as mensagens do Telegram daquela conta chegam aqui e o
   Jarvis responde pelo robô (telegram.py). Sem internet ou com a VPS fora, tenta de novo com espera crescente; o que
   chegar enquanto isso fica na fila da VPS e é entregue quando reconectar.
@@ -59,7 +61,17 @@ def cabecalho() -> dict[str, str]:
     return {"authorization": f"Bearer {cfg()['token']}"}
 
 
-async def _tratar(msg: dict[str, Any]) -> None:
+async def _tratar(msg: dict[str, Any], ws: Any = None) -> None:
+    if msg.get("tipo") == "pendencias":  # o que foi feito pelo celular (Jarvis de bolso) com este computador desligado
+        from . import copia
+
+        try:
+            ids = await copia.aplicar(msg.get("itens") or [], msg.get("conversas"))
+            if ws is not None:
+                await ws.send(json.dumps({"tipo": "pendencias_ok", "ids": ids}))
+        except Exception:  # noqa: BLE001
+            log.exception("pendências do Jarvis de bolso")
+        return
     if msg.get("tipo") == "telegram":
         from . import telegram
 
@@ -88,7 +100,7 @@ async def loop() -> None:
                 log.info("ponte do Telegram aberta")
                 async for bruto in ws:
                     try:
-                        asyncio.create_task(_tratar(json.loads(bruto)))
+                        asyncio.create_task(_tratar(json.loads(bruto), ws))
                     except ValueError:
                         continue
         except Exception as exc:  # noqa: BLE001 - sem internet, VPS fora, conta pausada: tenta de novo depois

@@ -152,13 +152,21 @@ async def lancar(a: dict[str, Any]) -> dict[str, Any]:
             pass
     _ultimos.append({"tipo": tipo, "id": item["id"], "descricao": descricao, "valor": p["amount"]})
     del _ultimos[:-20]
+    linhas = [
+        {"rotulo": "Categoria", "valor": categoria},
+        {"rotulo": "Recebido em" if tipo == "income" else "Pago com", "valor": onde},
+        {"rotulo": "Data", "valor": _data_br(data)},
+    ]
+    if tipo == "income" or forma not in ("CARTAO_CREDITO", "VALE_BENEFICIO"):
+        try:  # o saldo da conta depois do lançamento (crédito não mexe no saldo agora)
+            depois = next((c for c in await chamar("accounts:list") or [] if c["id"] == conta["id"]), None)
+            if depois is not None:
+                linhas.append({"rotulo": f"Saldo após lançamento ({conta['name']})", "valor": brl(depois.get("currentBalance"))})
+        except FinErro:
+            pass
     await _cartao({
         "modo": "lancamento", "titulo": descricao, "sinal": "entrada" if tipo == "income" else "saida",
-        "valor": p["amount"], "linhas": [
-            {"rotulo": "Categoria", "valor": categoria},
-            {"rotulo": "Recebido em" if tipo == "income" else "Pago com", "valor": onde},
-            {"rotulo": "Data", "valor": _data_br(data)},
-        ], "aviso": aviso or None, "desfazer": {"tipo": tipo, "id": item["id"]}})
+        "valor": p["amount"], "linhas": linhas, "aviso": aviso or None, "desfazer": {"tipo": tipo, "id": item["id"]}})
     await mudou()
     return {"ok": True, "lancado": "entrada" if tipo == "income" else "gasto", "valor": brl(p["amount"]), "categoria": categoria,
             "onde": onde, "data": _data_br(data), "aviso_fora_do_padrao": aviso,

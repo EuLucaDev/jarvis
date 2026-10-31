@@ -7,7 +7,9 @@ O Jarvis roda no computador de cada pessoa. A VPS só:
   (a pessoa recebe "guardei, respondo quando o Jarvis ligar") e é entregue quando ele conectar;
 - repassa as respostas do Jarvis ao Telegram (/api/ponte/tg/...), só para as conversas da própria conta. O token do
   robô fica só aqui.
-Nenhum dado de ninguém (financeiro, memória, conversa) fica na VPS. Backup diário do registro de contas (cifrado, no R2).
+- Jarvis de bolso (bolso.py): com o computador desligado, responde com a última cópia que o computador deixou
+  (cifrada) e a chave da Gemini da pessoa; o que ela lançar vira pendência e vai para o computador quando ele ligar.
+  Lembretes ficam aqui (disparam sempre). Backup diário do registro de contas (cifrado, no R2).
 
 Variáveis: PORTARIA_DADOS (/dados), PORTARIA_URL (https pública), PORTARIA_ADMIN_EMAIL / PORTARIA_ADMIN_SENHA /
 PORTARIA_ADMIN_NOME, PORTARIA_TELEGRAM_TOKEN (robô), PORTARIA_BACKUP_CHAVE (Fernet), LOJA_TOKEN,
@@ -53,9 +55,30 @@ if __name__ == "__main__":
     sys.modules.setdefault("jarvis.portaria", sys.modules[__name__])
 
 app = FastAPI(title="Jarvis · portaria", docs_url=None, redoc_url=None, openapi_url=None)
+from . import bolso  # noqa: E402 - Jarvis de bolso (Telegram com o computador desligado)
 from . import portaria_contas as contas  # noqa: E402 - o módulo usa funções daqui (import tardio lá dentro)
 
 app.include_router(contas.router)
+
+
+@app.middleware("http")
+async def protecao(request: Request, call_next):
+    """Site: pedidos que mudam algo só vêm da própria página (cabeçalho que outro site não consegue mandar sem
+    permissão do navegador); e os cabeçalhos de proteção de sempre."""
+    if request.url.path.startswith("/api/site/") and request.method not in ("GET", "HEAD", "OPTIONS") \
+            and request.headers.get("x-jarvis") != "site":
+        return Response('{"detail":"Pedido recusado."}', status_code=403, media_type="application/json")
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "same-origin")
+    resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if URL.startswith("https://"):
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    if request.url.path == "/" or request.url.path.startswith("/site"):
+        resp.headers.setdefault("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                                "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+    return resp
 _ligados: dict[str, list[WebSocket]] = {}  # perfil → conexões do Jarvis (um por computador ligado)
 _http: httpx.AsyncClient | None = None
 
@@ -171,16 +194,26 @@ async def _entregar(upd: dict[str, Any]) -> None:
         if not contas.conta_ativa_do_tg(r, pid):
             await tg("sendMessage", {"chat_id": chat["id"], "text": "Sua conta do Jarvis está pausada. Fale com quem cuida dele."})
             return
+        dado = (upd.get("callback_query") or {}).get("data") or ""
+        if dado.startswith("c:") or (dado.startswith("n:d:") and bolso.tem_pendencia(pid, dado[4:])):
+            asyncio.create_task(bolso.tratar(pid, upd))  # botões do Jarvis de bolso
+            return
         for ws in reversed(_ligados.get(pid, [])):  # o computador ligado mais recente
             try:
                 await ws.send_json({"tipo": "telegram", "update": upd})
                 return
             except Exception:  # noqa: BLE001 - conexão caída: tenta o próximo, senão vai para a fila
                 continue
+        documento = bolso.documento_para_o_computador(upd)
+        if bolso.disponivel(pid) and not documento:  # computador desligado: o Jarvis de bolso responde
+            asyncio.create_task(bolso.tratar(pid, upd))
+            return
         # computador desligado: guarda e avisa (uma vez por leva)
         f = _fila(pid)
         linhas = f.read_text().splitlines() if f.exists() else []
-        if not linhas and "callback_query" not in upd:
+        if documento:
+            await tg("sendMessage", {"chat_id": chat["id"], "text": "📎 Guardei o arquivo. Quando o computador ligar, eu leio e mostro o que vou importar."})
+        elif not linhas and "callback_query" not in upd:
             await tg("sendMessage", {"chat_id": chat["id"], "text": "Seu Jarvis está desligado agora. Guardei a mensagem: ele responde assim que o computador ligar."})
         linhas = (linhas + [json.dumps(upd)])[-FILA_MAX:]
         f.write_text("\n".join(linhas) + "\n")
@@ -212,10 +245,13 @@ async def ponte(ws: WebSocket):
                 if linha.strip():
                     await ws.send_json({"tipo": "telegram", "update": json.loads(linha)})
             f.unlink()
+        await bolso.despachar(pid)  # o que foi feito pelo celular enquanto ele estava desligado
         while True:
             msg = await ws.receive_json()
             if msg.get("tipo") == "ping":
                 await ws.send_json({"tipo": "pong"})
+            elif msg.get("tipo") == "pendencias_ok":
+                bolso.confirmar(pid, [str(x) for x in msg.get("ids") or []])
     except (WebSocketDisconnect, RuntimeError):
         pass
     except Exception:  # noqa: BLE001
@@ -257,6 +293,41 @@ async def ponte_tg(metodo: str, request: Request):
             raise HTTPException(403, "conversa de outra conta")
         r = await http().post(url, json=dados)
     return Response(r.content, status_code=200, media_type="application/json")
+
+
+@app.post("/api/ponte/copia")
+async def ponte_copia(request: Request):
+    """A cópia do Jarvis deste computador (e a chave da Gemini) para o Jarvis de bolso; desligar apaga as duas."""
+    pid, _ = perfil_do_token(request)
+    corpo = await request.body()
+    if len(corpo) > 8 * 1024 * 1024:
+        raise HTTPException(413, "Cópia grande demais.")
+    dados = json.loads(corpo or b"{}")
+    if dados.get("desligar"):
+        await asyncio.to_thread(bolso.apagar_copia, pid)
+        return {"ok": True, "ligado": False}
+    copia = dados.get("copia")
+    if not isinstance(copia, dict):
+        raise HTTPException(400)
+    await asyncio.to_thread(bolso.guardar_copia, pid, copia, str(dados.get("chave") or ""))
+    return {"ok": True, "ligado": True}
+
+
+@app.get("/api/ponte/bolso")
+async def ponte_bolso(request: Request):
+    pid, _ = perfil_do_token(request)
+    return bolso.estado(pid)
+
+
+@app.post("/api/ponte/lembrete")
+async def ponte_lembrete(request: Request):
+    """Lembrete pedido no Jarvis do computador: dispara daqui, com o computador ligado ou não."""
+    pid, perfil = perfil_do_token(request)
+    d = await request.json()
+    if str(d.get("chat")) not in {str(x) for x in perfil["tg"]}:
+        raise HTTPException(403, "conversa de outra conta")
+    bolso.agendar(pid, d["chat"], str(d.get("texto", ""))[:500], float(d["em"]))
+    return {"ok": True}
 
 
 @app.get("/api/ponte/tg-arquivo")
@@ -386,6 +457,8 @@ async def inicio() -> None:
     contas.migrar_e_iniciar()
     asyncio.create_task(backups())
     asyncio.create_task(_robo_da_variavel())
+    asyncio.create_task(bolso.lembretes_loop())
+    asyncio.create_task(bolso.avisos_loop())
 
 
 def main() -> None:

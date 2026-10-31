@@ -91,6 +91,9 @@ async def startup():
 
         asyncio.create_task(nuvem.loop())  # ponte do Telegram com a conta (jarvis.agcunae.com)
         asyncio.create_task(telegram.loop())  # lembretes pedidos pelo Telegram
+        from . import copia
+
+        asyncio.create_task(copia.loop())  # cópia para o Jarvis de bolso (Telegram com o computador desligado)
     if finance.motor.disponivel():
         await asyncio.to_thread(finance.motor.start)
         asyncio.create_task(finance.motor.vigiar())
@@ -413,8 +416,11 @@ async def nuvem_estado():
     from . import nuvem
 
     c = nuvem.cfg()
+    from . import copia
+
     out: dict[str, Any] = {"ligado": nuvem.ligado(), "url": c.get("url", ""), "pelo_launcher": bool(c.get("pelo_launcher")),
-                           "ponte": nuvem.estado.get("conectado", False), "erro": nuvem.estado.get("erro")}
+                           "ponte": nuvem.estado.get("conectado", False), "erro": nuvem.estado.get("erro"),
+                           "bolso": {"ativo": copia.ligado(), "enviada": (store.get("bolso_envio") or {}).get("em"), "erro": copia.estado.get("erro")}}
     if nuvem.ligado():
         try:
             import httpx
@@ -449,6 +455,17 @@ async def nuvem_ligar(body: dict = Body(...)):
         return {"ok": False, "erro": f"Não consegui falar com o Jarvis: {str(exc)[:140]}"}
     store.put("nuvem", {"url": url, "token": token, "perfil": eu["perfil"], "ativo": True})
     return {"ok": True, "conta": eu}
+
+
+@app.put("/api/nuvem/bolso")
+async def nuvem_bolso(body: dict = Body(...)):
+    """Liga/desliga o Jarvis de bolso (Telegram com o computador desligado, com a cópia e a chave na conta)."""
+    from . import copia
+
+    store.put("bolso", {"ativo": bool(body.get("ativo"))})
+    store.put("bolso_envio", {})
+    copia.pedir_copia()
+    return {"ok": True}
 
 
 @app.delete("/api/nuvem")

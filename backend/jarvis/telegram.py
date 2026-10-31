@@ -132,13 +132,15 @@ def _teclado(botoes: list[tuple[str, str]]) -> dict[str, Any] | None:
     return {"inline_keyboard": [linha]}
 
 
-async def enviar(chat: int | str, texto: str, botoes: list[tuple[str, str]] | None = None, pronto: bool = False) -> None:
-    """Manda uma mensagem (em partes, se for longa). pronto=True: o texto já está em HTML do Telegram."""
+async def enviar(chat: int | str, texto: str, botoes: list[tuple[str, str]] | None = None, pronto: bool = False,
+                 teclado: dict[str, Any] | None = None) -> None:
+    """Manda uma mensagem (em partes, se for longa). pronto=True: o texto já está em HTML do Telegram.
+    teclado: teclado embutido pronto (ex.: o do relatório), no lugar dos botões."""
     partes = [texto[i:i + LIMITE] for i in range(0, len(texto), LIMITE)] or [""]
     for n, p in enumerate(partes):
         dados: dict[str, Any] = {"chat_id": chat, "text": p if pronto else html_de(p), "parse_mode": "HTML", "disable_web_page_preview": True}
-        if n == len(partes) - 1 and botoes:
-            dados["reply_markup"] = _teclado(botoes)
+        if n == len(partes) - 1 and (botoes or teclado):
+            dados["reply_markup"] = teclado or _teclado(botoes or [])
         r = await api("sendMessage", dados)
         if not r.get("ok"):  # HTML que o Telegram não aceitou: vai como texto simples
             dados.pop("parse_mode")
@@ -169,7 +171,17 @@ async def tratar(update: dict[str, Any]) -> None:
     if "callback_query" in update:
         cq = update["callback_query"]
         chat = cq["message"]["chat"]["id"]
+        dado = cq.get("data") or ""
+        if dado.startswith("r:"):  # relatório: troca a seção na mesma mensagem
+            await _secao_relatorio(cq)
+            return
         await api("answerCallbackQuery", {"callback_query_id": cq["id"]})
+        if dado.startswith("n:d:"):  # desfazer um lançamento feito pelo celular com o computador desligado
+            await api("editMessageReplyMarkup", {"chat_id": chat, "message_id": cq["message"]["message_id"], "reply_markup": {"inline_keyboard": []}})
+            from . import copia
+
+            await enviar(chat, await copia.desfazer(dado[4:]))
+            return
         await api("editMessageReplyMarkup", {"chat_id": chat, "message_id": cq["message"]["message_id"], "reply_markup": {"inline_keyboard": []}})
         k = (cq.get("data") or "").removeprefix("b:")
         b = (store.get("tg_botoes") or {}).get(k)
@@ -219,6 +231,22 @@ async def tratar(update: dict[str, Any]) -> None:
         return
     if texto:
         await _conversar(chat, [types.Part(text=texto)], texto)
+
+
+async def _secao_relatorio(cq: dict[str, Any]) -> None:
+    from . import finance, textos
+
+    _, secao, mes = (cq.get("data") or "r:resumo:").split(":", 2)
+    msg = cq["message"]
+    try:
+        dados = await textos.dados_mes(finance.chamar, mes or time.strftime("%Y-%m"))
+        texto = textos.relatorio_secao(dados, secao)
+    except Exception as exc:  # noqa: BLE001
+        await api("answerCallbackQuery", {"callback_query_id": cq["id"], "text": f"Não consegui abrir: {str(exc)[:80]}"})
+        return
+    await api("answerCallbackQuery", {"callback_query_id": cq["id"]})
+    await api("editMessageText", {"chat_id": msg["chat"]["id"], "message_id": msg["message_id"], "text": texto, "parse_mode": "HTML",
+                                  "disable_web_page_preview": True, "reply_markup": textos.teclado_relatorio(mes, secao)})
 
 
 async def _acao_direta(chat: int | str, acao: str) -> None:
@@ -336,7 +364,10 @@ async def _entregar(chat: int | str, r, comprovante: bool = False) -> None:
         if t:
             await enviar(chat, t, pronto=True)
     for m in r.mensagens:
-        await enviar(chat, m, pronto=True)
+        if isinstance(m, dict):
+            await enviar(chat, m["texto"], pronto=True, teclado=m.get("teclado"))
+        else:
+            await enviar(chat, m, pronto=True)
     await enviar(chat, r.texto or "Pronto.", _botoes(r, comprovante))
 
 
@@ -354,7 +385,10 @@ def _fuso():
         return ZoneInfo("America/Sao_Paulo")
 
 
-def agendar_lembrete(chat: str, texto: str, quando: str) -> dict[str, Any]:
+async def agendar_lembrete(chat: str, texto: str, quando: str) -> dict[str, Any]:
+    """Guarda o lembrete na portaria (dispara mesmo com o computador desligado); sem conta, fica neste computador."""
+    from . import nuvem
+
     try:
         t = dt.datetime.fromisoformat(quando.strip())
     except ValueError:
@@ -363,6 +397,14 @@ def agendar_lembrete(chat: str, texto: str, quando: str) -> dict[str, Any]:
         t = t.replace(tzinfo=_fuso())
     if t.timestamp() < time.time() - 60:
         return {"erro": "Esse horário já passou."}
+    if nuvem.ligado() and not TOKEN_DIRETO:
+        try:
+            async with httpx.AsyncClient(timeout=20) as c:
+                r = await c.post(nuvem.url("/api/ponte/lembrete"), json={"chat": chat, "texto": texto, "em": t.timestamp()}, headers=nuvem.cabecalho())
+            if r.status_code == 200:
+                return {"ok": True, "quando": t.strftime("%d/%m às %H:%M"), "instrucao": "Confirme numa frase o dia e a hora."}
+        except httpx.HTTPError as exc:
+            log.warning("lembrete na portaria: %s", exc)
     lista = (store.get("lembretes") or {}).get("itens", [])
     lista.append({"id": uuid.uuid4().hex[:8], "chat": chat, "texto": texto, "em": t.timestamp()})
     store.put("lembretes", {"itens": lista})
