@@ -50,6 +50,7 @@ BACKUP_HORA = int(os.getenv("PORTARIA_BACKUP_HORA", "4"))
 
 app = FastAPI(title="Jarvis · portaria", docs_url=None, redoc_url=None, openapi_url=None)
 _nucleos: dict[str, subprocess.Popen] = {}
+_trava_fd: int | None = None  # dona dos dados: só uma portaria por vez sobe os núcleos
 _http: httpx.AsyncClient | None = None
 
 
@@ -149,7 +150,34 @@ def _subir(pid: str, p: dict[str, Any]) -> None:
     log.info("núcleo %s (%s) na porta %s", pid, p["nome"], p["porta"])
 
 
+def _pegar_trava() -> bool:
+    """Trava exclusiva no volume. Numa atualização o Coolify sobe o container novo antes de parar o antigo: os dois
+    abrindo os mesmos bancos ao mesmo tempo corrompem o SQLite. O novo espera o antigo sair (a trava cai sozinha
+    quando o processo termina)."""
+    global _trava_fd
+    import fcntl
+
+    if _trava_fd is not None:
+        return True
+    DADOS.mkdir(parents=True, exist_ok=True)
+    fd = os.open(DADOS / "portaria.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return False
+    _trava_fd = fd
+    return True
+
+
 async def vigiar() -> None:
+    espera = 0
+    while not _pegar_trava():  # outra portaria (a versão anterior) ainda está com os dados
+        if espera % 30 == 0:
+            log.info("esperando a versão anterior soltar os dados…")
+        espera += 2
+        await asyncio.sleep(2)
+    log.info("dados travados para esta portaria; subindo os núcleos")
     while True:
         for pid, p in ler()["perfis"].items():
             proc = _nucleos.get(pid)
@@ -293,7 +321,8 @@ async def interno_arquivo(file_id: str, request: Request):
 @app.get("/health")
 @app.get("/saude")
 async def saude():
-    return {"ok": True, "perfis": len(ler()["perfis"]), "nucleos": sum(1 for p in _nucleos.values() if p.poll() is None)}
+    return {"ok": True, "perfis": len(ler()["perfis"]), "nucleos": sum(1 for p in _nucleos.values() if p.poll() is None),
+            "dona_dos_dados": _trava_fd is not None}
 
 
 @app.get("/nuvem/eu")
@@ -432,7 +461,7 @@ async def backups() -> None:
     feito = ""
     while True:
         hoje = time.strftime("%Y-%m-%d")
-        if time.localtime().tm_hour >= BACKUP_HORA and feito != hoje and (DADOS / "perfis").exists():
+        if _trava_fd is not None and time.localtime().tm_hour >= BACKUP_HORA and feito != hoje and (DADOS / "perfis").exists():
             try:
                 dados = await asyncio.to_thread(montar_backup)
                 nome = f"jarvis-{hoje}.zip{'.enc' if os.getenv('PORTARIA_BACKUP_CHAVE') else ''}"
@@ -451,15 +480,21 @@ async def backups() -> None:
 
 @app.on_event("startup")
 async def inicio() -> None:
-    iniciar_registro()
+    iniciar_registro()  # só lê/cria o registro; os bancos só abrem com a trava (vigiar)
     asyncio.create_task(vigiar())
     asyncio.create_task(backups())
 
 
 @app.on_event("shutdown")
 async def fim() -> None:
+    # os núcleos (e o motor do financeiro de cada um) fecham os bancos antes de a trava cair
     for proc in _nucleos.values():
         proc.terminate()
+    for proc in _nucleos.values():
+        try:
+            await asyncio.to_thread(proc.wait, 15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def main() -> None:
