@@ -1,6 +1,6 @@
 [package]
 name = "jarvis-launcher"
-version = "1.0.0"
+version = "1.0.1"
 description = "Jarvis Launcher: instala e atualiza o Jarvis"
 edition = "2021"
 

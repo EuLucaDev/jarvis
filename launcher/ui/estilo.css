@@ -12,6 +12,10 @@
 * {
   box-sizing: border-box;
 }
+/* as telas usam display: flex; sem isto o atributo hidden não esconde (a tela principal ficava embaixo do login) */
+[hidden] {
+  display: none !important;
+}
 html,
 body {
   margin: 0;

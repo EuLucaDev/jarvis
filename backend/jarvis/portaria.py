@@ -81,6 +81,7 @@ async def protecao(request: Request, call_next):
     return resp
 _ligados: dict[str, list[WebSocket]] = {}  # perfil → conexões do Jarvis (um por computador ligado)
 _http: httpx.AsyncClient | None = None
+_avisado: dict[str, float] = {}  # perfil → último aviso de "computador desligado"
 
 
 def http() -> httpx.AsyncClient:
@@ -152,6 +153,8 @@ async def _sem_perfil(tg_id: int, chat: int, texto: str) -> None:
         await tg("sendMessage", {"chat_id": chat, "text": "Este é um Jarvis particular. Para usar, entre no site do Jarvis com a sua conta e toque em \"Abrir no Telegram\"."})
         return
     pid = c["perfil"]
+    for outro in r["perfis"].values():  # um Telegram fala com uma conta só: o código novo manda
+        outro["tg"] = [x for x in outro.get("tg", []) if x != tg_id]
     r["perfis"][pid]["tg"] = sorted(set(r["perfis"][pid]["tg"]) | {tg_id})
     del r["codigos"][cod]
     gravar(r)
@@ -188,6 +191,9 @@ async def _entregar(upd: dict[str, Any]) -> None:
         r = ler()
         pid = next((k for k, p in r["perfis"].items() if tg_id in p["tg"]), None)
         texto = (origem.get("text") or "").strip()
+        if texto.startswith("/start ") and len(texto.split()[-1]) >= 6:  # código da conta: liga (ou troca) sempre
+            await _sem_perfil(tg_id, chat["id"], texto)
+            return
         if not pid:
             await _sem_perfil(tg_id, chat["id"], texto)
             return
@@ -213,7 +219,8 @@ async def _entregar(upd: dict[str, Any]) -> None:
         linhas = f.read_text().splitlines() if f.exists() else []
         if documento:
             await tg("sendMessage", {"chat_id": chat["id"], "text": "📎 Guardei o arquivo. Quando o computador ligar, eu leio e mostro o que vou importar."})
-        elif not linhas and "callback_query" not in upd:
+        elif "callback_query" not in upd and time.time() - _avisado.get(pid, 0) > 1800:  # no máximo um aviso a cada 30 min
+            _avisado[pid] = time.time()
             await tg("sendMessage", {"chat_id": chat["id"], "text": "Seu Jarvis está desligado agora. Guardei a mensagem: ele responde assim que o computador ligar."})
         linhas = (linhas + [json.dumps(upd)])[-FILA_MAX:]
         f.write_text("\n".join(linhas) + "\n")
