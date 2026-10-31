@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "launcher",
+  "description": "A janela do launcher chama os comandos dele.",
+  "windows": ["principal"],
+  "permissions": [
+    "core:default",
+    "allow-estado-local",
+    "allow-entrar",
+    "allow-sair",
+    "allow-estado-remoto",
+    "allow-instalar",
+    "allow-abrir-jarvis",
+    "allow-abrir-link",
+    "allow-atualizar-launcher"
+  ]
+}

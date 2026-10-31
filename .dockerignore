@@ -17,3 +17,4 @@ data
 .env
 .env.*
 !.env.example
+launcher

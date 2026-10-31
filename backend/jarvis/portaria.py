@@ -10,8 +10,11 @@
   novo, vazio, só dele. "/token" no Telegram dá o acesso para ligar o Jarvis do computador da pessoa a esse perfil.
 - Backup diário de todos os perfis, criptografado, no R2 (ou na própria pasta, se o R2 não estiver configurado).
 
-Variáveis: PORTARIA_DADOS (/dados), PORTARIA_URL (https pública), PORTARIA_ADMIN_TOKEN (acesso do dono),
-PORTARIA_ADMIN_NOME, PORTARIA_BACKUP_CHAVE (Fernet), R2_ENDPOINT / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET.
+Contas, site, launcher e loja de versões: portaria_contas.py.
+
+Variáveis: PORTARIA_DADOS (/dados), PORTARIA_URL (https pública), PORTARIA_ADMIN_EMAIL / PORTARIA_ADMIN_SENHA /
+PORTARIA_ADMIN_NOME (a conta do administrador, criada na primeira vez), PORTARIA_BACKUP_CHAVE (Fernet),
+LOJA_TOKEN (a compilação publica versões com ele), R2_ENDPOINT / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET.
 Rodar: `python -m jarvis.portaria` (porta 8700).
 """
 
@@ -49,6 +52,9 @@ TG = os.getenv("PORTARIA_TG_API", "https://api.telegram.org")  # trocável só p
 BACKUP_HORA = int(os.getenv("PORTARIA_BACKUP_HORA", "4"))
 
 app = FastAPI(title="Jarvis · portaria", docs_url=None, redoc_url=None, openapi_url=None)
+from . import portaria_contas as contas  # noqa: E402 - o módulo usa funções daqui (import tardio lá dentro)
+
+app.include_router(contas.router)
 _nucleos: dict[str, subprocess.Popen] = {}
 _trava_fd: int | None = None  # dona dos dados: só uma portaria por vez sobe os núcleos
 _http: httpx.AsyncClient | None = None
@@ -90,49 +96,31 @@ def _novo_perfil(r: dict[str, Any], nome: str, token: str | None = None) -> tupl
     r["perfis"][pid] = {"nome": nome, "token": _hash(token), "porta": porta, "tg": [], "criado": time.strftime("%Y-%m-%d %H:%M")}
     pasta = DADOS / "perfis" / pid
     pasta.mkdir(parents=True, exist_ok=True)
-    # a chave da Gemini do dono vale para os perfis novos até a pessoa ter a dela
-    adm = r.get("admin")
-    conf_adm = DADOS / "perfis" / adm / "config.json" if adm else None
-    conf = {"configurado": True, "user_name": nome, "tratamento": ""}  # pelo nome; a pessoa pode pedir "senhora" etc.
-    if conf_adm and conf_adm.exists():
-        chave = json.loads(conf_adm.read_text()).get("gemini_api_key")
-        if chave:
-            conf["gemini_api_key"] = chave
-        conf["fuso"] = json.loads(conf_adm.read_text()).get("fuso", "America/Sao_Paulo")
+    # cada pessoa usa a própria chave da Gemini: o Jarvis do computador dela manda (configuração inicial)
+    conf = {"configurado": True, "user_name": nome, "tratamento": "", "fuso": os.getenv("TZ", "America/Sao_Paulo")}
     (pasta / "config.json").write_text(json.dumps(conf, ensure_ascii=False))
     os.chmod(pasta / "config.json", 0o600)
     return pid, token
 
 
 def iniciar_registro() -> None:
-    r = ler()
-    adm_token = os.getenv("PORTARIA_ADMIN_TOKEN", "")
-    if not r["perfis"] and adm_token:
-        pid, _ = _novo_perfil(r, os.getenv("PORTARIA_ADMIN_NOME", "Dono"), adm_token)
-        r["admin"] = pid
-        log.info("perfil do dono criado: %s", pid)
-    if not r.get("telegram", {}).get("segredo"):
-        r.setdefault("telegram", {})["segredo"] = secrets.token_urlsafe(24)
-    gravar(r)
+    contas.migrar_e_iniciar()
 
 
 def perfil_do_token(request: Request) -> tuple[str, dict[str, Any]]:
-    auth = request.headers.get("authorization", "")
-    token = auth.removeprefix("Bearer ").strip()
-    if not token:
+    """Acesso de um computador (dado pelo launcher, ou pelo /token do Telegram) → perfil, se a conta estiver ativa."""
+    token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    achado = contas.perfil_do_acesso(token) if token else None
+    if not achado:
         raise HTTPException(401)
-    h = _hash(token)
-    r = ler()
-    for pid, p in r["perfis"].items():
-        if secrets.compare_digest(p["token"], h):
-            return pid, p
-    raise HTTPException(401)
+    return achado
 
 
 def _admin(request: Request) -> str:
     pid, _ = perfil_do_token(request)
-    if pid != ler().get("admin"):
-        raise HTTPException(403, "Só o dono do Jarvis pode fazer isso.")
+    cc = contas.conta_do_perfil(ler(), pid)
+    if not cc or not cc[1].get("admin"):
+        raise HTTPException(403, "Só o administrador do Jarvis pode fazer isso.")
     return pid
 
 
@@ -278,6 +266,9 @@ async def _entregar(upd: dict[str, Any]) -> None:
         if not pid:
             await _sem_perfil(tg_id, chat["id"], texto, de.get("first_name") or "")
             return
+        if not contas.conta_ativa_do_tg(r, pid):
+            await tg("sendMessage", {"chat_id": chat["id"], "text": "Sua conta do Jarvis está pausada. Fale com quem cuida dele."})
+            return
         if texto.split(" ")[0] == "/token":
             await _token_pelo_telegram(pid, chat["id"])
             return
@@ -330,14 +321,24 @@ async def eu(request: Request):
     pid, p = perfil_do_token(request)
     r = ler()
     tgc = r.get("telegram", {})
-    return {"perfil": pid, "nome": p["nome"], "dono": pid == r.get("admin"), "telegram_ligado": bool(p["tg"]),
-            "robo": tgc.get("usuario"), "robo_configurado": bool(tgc.get("token"))}
+    cc = contas.conta_do_perfil(r, pid)
+    link = None
+    if not p["tg"] and tgc.get("usuario"):  # código da conta para ligar o Telegram com um toque
+        link = contas._codigo_telegram(r, pid)["link"]  # noqa: SLF001
+        gravar(r)
+    return {"perfil": pid, "nome": p["nome"], "dono": bool(cc and cc[1].get("admin")), "telegram_ligado": bool(p["tg"]),
+            "robo": tgc.get("usuario"), "robo_configurado": bool(tgc.get("token")), "telegram_link": link,
+            "email": cc[1]["email"] if cc else None}
 
 
 @app.put("/nuvem/telegram")
 async def config_telegram(request: Request):
     _admin(request)
-    token = str((await request.json()).get("token", "")).strip()
+    return await configurar_robo(str((await request.json()).get("token", "")).strip())
+
+
+async def configurar_robo(token: str) -> dict[str, Any]:
+    """Token do robô (do @BotFather): confere, guarda, liga o webhook e os comandos. Um robô para todas as contas."""
     me = (await http().get(f"{TG}/bot{token}/getMe")).json()
     if not me.get("ok"):
         return {"ok": False, "erro": "O Telegram não reconheceu esse token. Copie de novo do @BotFather."}
@@ -377,7 +378,8 @@ async def novo_codigo(request: Request):
 async def perfis(request: Request):
     _admin(request)
     r = ler()
-    return [{"perfil": k, "nome": p["nome"], "telegram": bool(p["tg"]), "criado": p["criado"], "dono": k == r.get("admin"),
+    return [{"perfil": k, "nome": p["nome"], "telegram": bool(p["tg"]), "criado": p["criado"],
+             "dono": bool((cc := contas.conta_do_perfil(r, k)) and cc[1].get("admin")),
              "no_ar": bool(_nucleos.get(k) and _nucleos[k].poll() is None)} for k, p in r["perfis"].items()]
 
 
@@ -475,6 +477,7 @@ async def backups() -> None:
                 log.info("backup %s (%d KB)", nome, len(dados) // 1024)
             except Exception:  # noqa: BLE001
                 log.exception("backup falhou")
+            contas.limpar_apagados()
         await asyncio.sleep(600)
 
 

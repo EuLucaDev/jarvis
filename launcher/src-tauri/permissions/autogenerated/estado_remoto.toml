@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-estado-remoto"
+description = "Enables the estado_remoto command without any pre-configured scope."
+commands.allow = ["estado_remoto"]
+
+[[permission]]
+identifier = "deny-estado-remoto"
+description = "Denies the estado_remoto command without any pre-configured scope."
+commands.deny = ["estado_remoto"]

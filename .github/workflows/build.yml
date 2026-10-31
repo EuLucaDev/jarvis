@@ -1,7 +1,7 @@
-# Compila o Jarvis para Mac (Apple Silicon), Windows e Linux e junta tudo num zip só.
-# Nada é publicado: o zip fica guardado por 1 dia só para ser baixado (scripts/baixar-zip.sh baixa para a Mesa
-# e apaga daqui). Os dados de quem usa o Jarvis nunca passam pelo GitHub: ficam no computador da pessoa.
-# Roda quando uma tag v* é enviada (ex.: v2.0.0) ou à mão (Actions → Compilar o Jarvis → Run workflow).
+# Compila o Jarvis e o Jarvis Launcher para Mac (Apple Silicon), Windows e Linux e publica na loja do Jarvis
+# (jarvis.agcunae.com, scripts/loja.py): o launcher de cada pessoa mostra a atualização e baixa só o que mudou.
+# O GitHub só compila: nada é publicado aqui (os pacotes ficam 1 dia, para conferência). Os dados de quem usa
+# nunca passam pelo GitHub. Roda numa tag v* (ex.: v2.10.0) ou à mão (Actions → Compilar o Jarvis → Run workflow).
 name: Compilar o Jarvis
 
 on:
@@ -11,6 +11,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  LOJA_URL: ${{ secrets.LOJA_URL }}
+  LOJA_TOKEN: ${{ secrets.LOJA_TOKEN }}
 
 jobs:
   build:
@@ -112,26 +116,8 @@ jobs:
           B=app/src-tauri/target/release/bundle
           case "${{ matrix.nome }}" in
             mac)
-              # assinatura com o certificado próprio "Jarvis Local" (sem conta da Apple): sempre o mesmo, então
-              # as permissões do macOS (microfone, câmera, Acessibilidade) não caem a cada versão nova
-              if [ -n "$MAC_CERT_P12" ]; then
-                echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/c.p12"
-                KC="$RUNNER_TEMP/assinatura.keychain-db"
-                security create-keychain -p ci "$KC"
-                security set-keychain-settings "$KC"
-                security unlock-keychain -p ci "$KC"
-                security import "$RUNNER_TEMP/c.p12" -k "$KC" -P "$MAC_CERT_PASS" -T /usr/bin/codesign
-                security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
-                security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KC" > /dev/null
-                openssl pkcs12 -in "$RUNNER_TEMP/c.p12" -clcerts -nokeys -passin pass:"$MAC_CERT_PASS" -legacy -out "$RUNNER_TEMP/c.pem" 2>/dev/null \
-                  || openssl pkcs12 -in "$RUNNER_TEMP/c.p12" -clcerts -nokeys -passin pass:"$MAC_CERT_PASS" -out "$RUNNER_TEMP/c.pem"
-                sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$RUNNER_TEMP/c.pem"
-                codesign --force --deep --keychain "$KC" --sign "Jarvis Local" "$B/macos/Jarvis.app"
-              else
-                codesign --force --deep --sign - "$B/macos/Jarvis.app"
-              fi
-              codesign --verify --deep "$B/macos/Jarvis.app"
-              codesign -dvv "$B/macos/Jarvis.app" 2>&1 | grep -E "Authority|Signature" || true
+              # assinatura com o certificado próprio "Jarvis Local": as permissões não caem a cada versão
+              scripts/assinar-mac.sh "$B/macos/Jarvis.app"
               # instalador de verdade: Continuar → Instalar, coloca em Aplicativos e abre a configuração
               scripts/pacote-mac.sh "$B/macos/Jarvis.app" "$(cat VERSION)" "out/Instalar Jarvis.pkg" ;;
             windows)
@@ -142,37 +128,113 @@ jobs:
           esac
           ls -la out
 
+      - name: Publicar na loja (o launcher de cada pessoa recebe a atualização)
+        if: env.LOJA_TOKEN != ''
+        env:
+          MSYS2_ARG_CONV_EXCL: "*"
+        run: |
+          V=$(cat VERSION)
+          NOTAS="$(git log -1 --format=%s)"
+          B=app/src-tauri/target/release/bundle
+          case "${{ matrix.nome }}" in
+            mac) RAIZ="$B/macos/Jarvis.app" ;;
+            windows)
+              # a árvore exata que o instalador põe no computador: instala em silêncio numa pasta e publica ela
+              RAIZ="$RUNNER_TEMP/jarvis-arvore"
+              WIN=$(cygpath -w "$RAIZ")
+              "./out/Instalar Jarvis.exe" /S "/D=$WIN"
+              for i in $(seq 1 60); do [ -d "$RAIZ/core" ] && break; sleep 2; done
+              sleep 5
+              ls "$RAIZ" ;;
+            linux)
+              # o AppImage aberto (AppDir): o launcher instala a pasta e roda o AppRun
+              (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/out/Jarvis-Linux.AppImage" --appimage-extract > /dev/null)
+              RAIZ="$RUNNER_TEMP/squashfs-root" ;;
+          esac
+          python scripts/loja.py publicar --produto jarvis --sistema ${{ matrix.nome }} --versao "$V" --raiz "$RAIZ" --notas "$NOTAS"
+
       - uses: actions/upload-artifact@v4
         with:
           name: jarvis-${{ matrix.nome }}
           path: out/*
           retention-days: 1
 
-  zip:
-    needs: build
-    runs-on: macos-15
+  launcher:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            nome: mac
+            bundles: app
+          - os: windows-latest
+            nome: windows
+            bundles: nsis
+          - os: ubuntu-22.04
+            nome: linux
+            bundles: appimage
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: art
-      - name: Montar o zip único
+      - name: Dependências do sistema (Linux)
+        if: matrix.nome == 'linux'
         run: |
-          V=$(cat VERSION)
-          D="Jarvis-$V"
-          mkdir -p "$D/Mac" "$D/Windows" "$D/Linux"
-          cp "art/jarvis-mac/Instalar Jarvis.pkg" "$D/Mac/"
-          cp "art/jarvis-windows/Instalar Jarvis.exe" "$D/Windows/"
-          cp art/jarvis-linux/Jarvis-Linux.AppImage art/jarvis-linux/Jarvis-Linux.deb "$D/Linux/"
-          chmod +x "$D/Linux/Jarvis-Linux.AppImage"
-          cp docs/LEIA-ME.txt "$D/LEIA-ME.txt"
-          ditto -c -k --keepParent "$D" "$D.zip"
-          ls -la "$D.zip"
-          echo "ZIP=$D.zip" >> $GITHUB_ENV
-          echo "V=$V" >> $GITHUB_ENV
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libgtk-3-dev file
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Launcher (Tauri)
+        working-directory: launcher
+        run: |
+          npm ci
+          npx tauri build --bundles ${{ matrix.bundles }}
+      - name: Assinar, empacotar e publicar
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASS: ${{ secrets.MAC_CERT_PASS }}
+          MSYS2_ARG_CONV_EXCL: "*"
+        run: |
+          V=$(cat launcher/VERSION)
+          B=launcher/src-tauri/target/release/bundle
+          mkdir -p out
+          case "${{ matrix.nome }}" in
+            mac)
+              scripts/assinar-mac.sh "$B/macos/Jarvis Launcher.app"
+              # instalador do site: imagem de disco com o app e o atalho para Aplicativos
+              mkdir -p "$RUNNER_TEMP/dmg" && cp -R "$B/macos/Jarvis Launcher.app" "$RUNNER_TEMP/dmg/" && ln -s /Applications "$RUNNER_TEMP/dmg/Aplicativos"
+              hdiutil create -volname "Jarvis Launcher" -srcfolder "$RUNNER_TEMP/dmg" -ov -format UDZO "out/Jarvis Launcher.dmg"
+              RAIZ="$B/macos/Jarvis Launcher.app"; INST="out/Jarvis Launcher.dmg" ;;
+            windows)
+              cp $B/nsis/*-setup.exe "out/Instalar Jarvis Launcher.exe"
+              RAIZ="$RUNNER_TEMP/launcher-arvore"
+              "./out/Instalar Jarvis Launcher.exe" /S "/D=$(cygpath -w "$RAIZ")"
+              for i in $(seq 1 60); do ls "$RAIZ"/*.exe > /dev/null 2>&1 && break; sleep 2; done
+              sleep 3
+              INST="out/Instalar Jarvis Launcher.exe" ;;
+            linux)
+              cp $B/appimage/*.AppImage out/Jarvis-Launcher.AppImage
+              chmod +x out/Jarvis-Launcher.AppImage
+              INST="out/Jarvis-Launcher.AppImage" ;;
+          esac
+          ls -la out
+          if [ -n "$LOJA_TOKEN" ]; then
+            if [ "${{ matrix.nome }}" = "linux" ]; then
+              python scripts/loja.py publicar --produto launcher --sistema linux --versao "$V" --arquivo "$INST"
+            else
+              python scripts/loja.py publicar --produto launcher --sistema ${{ matrix.nome }} --versao "$V" --raiz "$RAIZ"
+            fi
+            python scripts/loja.py publicar --produto instalador --sistema ${{ matrix.nome }} --versao "$V" --arquivo "$INST"
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: Jarvis-zip
-          path: ${{ env.ZIP }}
+          name: launcher-${{ matrix.nome }}
+          path: out/*
           retention-days: 1
-          compression-level: 0

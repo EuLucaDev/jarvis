@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-atualizar-launcher"
+description = "Enables the atualizar_launcher command without any pre-configured scope."
+commands.allow = ["atualizar_launcher"]
+
+[[permission]]
+identifier = "deny-atualizar-launcher"
+description = "Denies the atualizar_launcher command without any pre-configured scope."
+commands.deny = ["atualizar_launcher"]

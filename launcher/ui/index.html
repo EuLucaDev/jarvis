@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jarvis Launcher</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="estilo.css" />
+  </head>
+  <body>
+    <main id="entrar" class="tela" hidden>
+      <div class="esfera" aria-hidden="true"></div>
+      <form id="form-entrar" class="cartao entrar">
+        <small class="rotulo">J.A.R.V.I.S. · launcher</small>
+        <h1>Entre com a sua conta</h1>
+        <p class="apagado">A mesma do site jarvis.agcunae.com. Quem cria as contas é o administrador.</p>
+        <label>E-mail<input id="email" type="email" autocomplete="username" required /></label>
+        <label>Senha<input id="senha" type="password" autocomplete="current-password" required /></label>
+        <p id="erro-entrar" class="erro" role="alert"></p>
+        <button class="primario" type="submit">Entrar</button>
+      </form>
+    </main>
+
+    <main id="principal" class="tela" hidden>
+      <header class="topo">
+        <div>
+          <small class="rotulo">J.A.R.V.I.S. · launcher</small>
+          <h1 id="ola">Olá</h1>
+        </div>
+        <button id="sair" class="fantasma">Sair</button>
+      </header>
+
+      <div id="aviso-launcher" class="faixa" hidden>
+        <span>Há uma versão nova do launcher.</span>
+        <button id="atualizar-launcher" class="fantasma">Atualizar o launcher</button>
+      </div>
+
+      <section class="cartao jarvis">
+        <div class="esfera pequena" aria-hidden="true"></div>
+        <div class="info">
+          <h2>Jarvis</h2>
+          <p id="jarvis-estado" class="apagado">Conferindo…</p>
+          <p id="jarvis-notas" class="notas"></p>
+          <div id="progresso" class="progresso" hidden>
+            <div class="barra"><span id="barra"></span></div>
+            <small id="progresso-texto"></small>
+          </div>
+          <p id="erro-jarvis" class="erro" role="alert"></p>
+        </div>
+        <div class="acoes">
+          <button id="instalar" class="primario" hidden>Instalar</button>
+          <button id="abrir" class="fantasma" hidden>Abrir o Jarvis</button>
+        </div>
+      </section>
+
+      <section class="cartao telegram">
+        <div class="info">
+          <h2>Telegram</h2>
+          <p id="tg-estado" class="apagado">Conferindo…</p>
+        </div>
+        <div class="acoes"><button id="tg-abrir" class="fantasma" hidden>Abrir no Telegram</button></div>
+      </section>
+
+      <footer class="rodape"><span id="rodape"></span></footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

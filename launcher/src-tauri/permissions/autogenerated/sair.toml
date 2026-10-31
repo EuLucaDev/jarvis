@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sair"
+description = "Enables the sair command without any pre-configured scope."
+commands.allow = ["sair"]
+
+[[permission]]
+identifier = "deny-sair"
+description = "Denies the sair command without any pre-configured scope."
+commands.deny = ["sair"]

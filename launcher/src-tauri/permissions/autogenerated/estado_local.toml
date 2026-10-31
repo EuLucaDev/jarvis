@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-estado-local"
+description = "Enables the estado_local command without any pre-configured scope."
+commands.allow = ["estado_local"]
+
+[[permission]]
+identifier = "deny-estado-local"
+description = "Denies the estado_local command without any pre-configured scope."
+commands.deny = ["estado_local"]

@@ -4,7 +4,7 @@ Assistente de voz para Mac, Windows e Linux: diga "Jarvis" (ou bata duas palmas)
 
 ## Instalar
 
-Baixe o `Jarvis-<versão>.zip` em **Releases**, extraia e siga o `LEIA-ME.txt` da pasta do seu sistema. Na primeira vez abre a configuração inicial (chave grátis da Gemini, nome, cidade, voz e permissões).
+Entre em **jarvis.agcunae.com** com a conta que o administrador criou para você, baixe o **Jarvis Launcher** do seu sistema, entre com a mesma conta e clique em Instalar. As atualizações aparecem no launcher. Na primeira vez abre a configuração inicial (chave grátis da Gemini, nome, cidade, voz e permissões).
 
 ## Como funciona
 
@@ -14,7 +14,7 @@ Baixe o `Jarvis-<versão>.zip` em **Releases**, extraia e siga o `LEIA-ME.txt` d
 
 ## Compilar
 
-A compilação dos três sistemas roda no GitHub Actions (`.github/workflows/build.yml`) ao enviar uma tag `v*`; o zip final sai como versão. Detalhes para desenvolver estão no `CLAUDE.md`.
+A compilação dos três sistemas roda no GitHub Actions (`.github/workflows/build.yml`) ao enviar uma tag `v*` e publica na loja do Jarvis (jarvis.agcunae.com), de onde o launcher atualiza. Detalhes para desenvolver estão no `CLAUDE.md`.
 
 ## Créditos
 

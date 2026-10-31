@@ -36,7 +36,31 @@ VIDA_S = 60
 
 
 def cfg() -> dict[str, Any]:
-    return store.get("nuvem") or {}
+    c = store.get("nuvem") or {}
+    if not NA_NUVEM:
+        c = _do_launcher(c)
+    return c
+
+
+def _do_launcher(c: dict[str, Any]) -> dict[str, Any]:
+    """O launcher deixa o acesso da conta em nuvem-launcher.json: o Jarvis já nasce ligado (e segue a conta se trocar)."""
+    from .config import HOME
+
+    f = HOME / "nuvem-launcher.json"
+    try:
+        dados = json.loads(f.read_text()) if f.exists() else None
+    except (OSError, ValueError):
+        dados = None
+    if not dados or not dados.get("token"):
+        return c
+    if c.get("token") == dados["token"] and c.get("ativo", True):
+        return c
+    trocou_conta = c.get("perfil") and c.get("perfil") != dados.get("perfil")
+    novo = {**({} if trocou_conta else c), "url": dados["url"], "token": dados["token"], "perfil": dados["perfil"], "ativo": True,
+            "pelo_launcher": True}
+    store.put("nuvem", novo)
+    log.info("ligado à nuvem pela conta do launcher (%s)", dados.get("email", ""))
+    return novo
 
 
 def ligado() -> bool:
@@ -207,12 +231,37 @@ async def subir_tudo(substituir: bool = False) -> dict[str, Any]:
     return out
 
 
+async def _mandar_ajustes() -> None:
+    """Ajustes e chave da Gemini mudaram (configuração inicial, painel): a nuvem da conta recebe."""
+    from .config import CONFIG_FILE
+
+    conf = json.loads(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
+    enviar = {k: conf.get(k) for k in ("gemini_api_key", "user_name", "tratamento", "city", "voice", "text_model") if conf.get(k)}
+    try:
+        from .config import settings
+
+        enviar["fuso"] = settings.fuso
+    except Exception:  # noqa: BLE001
+        pass
+    await chamar("POST", "/api/nuvem/config", json={"config": enviar, "sistemas": store.get("sistemas") or {},
+                                                    "proativo": store.get("proativo") or {}})
+
+
 async def loop() -> None:
-    """Notebook: sinal de vida (quando a pessoa está na frente) e memória sincronizada."""
+    """Notebook: na primeira ligação sobe tudo; depois manda os ajustes quando mudam, sinal de vida e memória."""
+    from .config import CONFIG_FILE
+
     ultimo_sync = 0.0
+    conf_em = 0.0
     while True:
         if ligado():
             try:
+                if not cfg().get("subido"):
+                    await subir_tudo()  # o financeiro só sobe se o da nuvem estiver vazio
+                    conf_em = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else 0
+                elif CONFIG_FILE.exists() and CONFIG_FILE.stat().st_mtime != conf_em:
+                    conf_em = CONFIG_FILE.stat().st_mtime
+                    await _mandar_ajustes()
                 from .proativo import presenca
 
                 if presenca.presente:
