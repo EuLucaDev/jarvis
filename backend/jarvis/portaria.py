@@ -481,9 +481,25 @@ async def backups() -> None:
         await asyncio.sleep(600)
 
 
+async def _robo_da_variavel() -> None:
+    """PORTARIA_TELEGRAM_TOKEN (variável do Coolify): liga o robô sem precisar do painel, se ainda não for esse."""
+    token = os.getenv("PORTARIA_TELEGRAM_TOKEN", "").strip()
+    if not token or ler().get("telegram", {}).get("token") == token:
+        return
+    for _ in range(10):  # a rede pode demorar a subir junto com o container
+        try:
+            r = await configurar_robo(token)
+            log.info("robô do Telegram pela variável: %s", r)
+            return
+        except Exception as exc:  # noqa: BLE001
+            log.warning("robô do Telegram: %s", exc)
+            await asyncio.sleep(10)
+
+
 @app.on_event("startup")
 async def inicio() -> None:
     iniciar_registro()  # só lê/cria o registro; os bancos só abrem com a trava (vigiar)
+    asyncio.create_task(_robo_da_variavel())
     asyncio.create_task(vigiar())
     asyncio.create_task(backups())
 
