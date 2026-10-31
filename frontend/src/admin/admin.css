@@ -832,6 +832,14 @@
   font-size: 13.5px;
   animation: pop-in 0.18s var(--ease-out-expo) both;
 }
+.toast.erro {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 107 138 / 0.5),
+    var(--shadow-float);
+}
+.toast.erro svg {
+  color: #ff6b8a;
+}
 .toast svg {
   color: var(--success);
 }

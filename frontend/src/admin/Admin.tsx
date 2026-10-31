@@ -201,14 +201,14 @@ function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
 }
 
 function useToast() {
-  const [msg, setMsg] = useState<string | null>(null)
-  const show = useCallback((m: string) => {
-    setMsg(m)
-    setTimeout(() => setMsg(null), 2600)
+  const [msg, setMsg] = useState<{ texto: string; erro: boolean } | null>(null)
+  const show = useCallback((m: string, erro = false) => {
+    setMsg({ texto: m, erro })
+    setTimeout(() => setMsg(null), erro ? 6000 : 2600)
   }, [])
   const node = msg ? (
-    <div className="toast" role="status">
-      <Check size={14} /> {msg}
+    <div className={`toast ${msg.erro ? 'erro' : ''}`} role={msg.erro ? 'alert' : 'status'}>
+      {msg.erro ? <X size={14} /> : <Check size={14} />} {msg.texto}
     </div>
   ) : null
   return [show, node] as const
@@ -1116,7 +1116,8 @@ function NuvemPage() {
     setBusy(true)
     try {
       const r = await fn()
-      toast(r?.ok === false ? (r.erro ?? 'Não deu certo') : ok)
+      if (r?.ok === false) toast(r.erro ?? 'Não deu certo', true)
+      else toast(ok)
       await carregar()
       return r
     } finally {
@@ -1150,7 +1151,7 @@ function NuvemPage() {
                 onClick={() =>
                   passo(async () => {
                     const r = await api<any>('/api/nuvem/subir', { method: 'POST', json: {} })
-                    if (r.financeiro?.ok === false) toast(r.financeiro.motivo)
+                    if (r.financeiro?.ok === false) toast(r.financeiro.motivo, true)
                     return r
                   }, 'Ajustes, financeiro e memória enviados')
                 }
