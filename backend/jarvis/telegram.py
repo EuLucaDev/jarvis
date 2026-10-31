@@ -1,15 +1,17 @@
-"""O Jarvis no Telegram (dentro do núcleo de um perfil, na nuvem).
+"""O Jarvis no Telegram, rodando no computador da pessoa.
 
-A portaria (portaria.py) recebe as mensagens do robô e entrega aqui (/api/telegram/update) só as da pessoa dona
-deste perfil. Daqui saem as respostas, pela portaria também (ela guarda o token do robô; o núcleo não).
+A portaria (VPS) recebe as mensagens do robô e entrega aqui, pela ponte (nuvem.py), só as da conta deste computador.
+As respostas voltam pela portaria (/api/ponte/tg/...), que guarda o token do robô e só deixa responder nas conversas
+da própria conta. Financeiro, memória e conversa ficam neste computador.
 
 - Texto, áudio (a Gemini ouve direto), foto (nota fiscal, cupom, Pix) e documento (extrato PDF/CSV/OFX → prévia da
   importação; outro PDF → a Gemini lê).
 - Respostas em HTML do Telegram, com botões: Confirmar/Cancelar quando uma ferramenta pede o sim, Desfazer depois de
   um lançamento, Lançar/Descartar para comprovantes, Importar/Cancelar para extratos.
-- Cartões das ferramentas viram imagem (impressao.py); relatórios vêm como imagem e PDF.
-- Lembretes agendados e avisos (contas, orçamento, sistemas) chegam aqui; os avisos só quando o notebook não está
-  em uso (o notebook manda sinal de vida para /api/nuvem/presenca).
+- Tudo em texto diagramado (textos.py): cartões das ferramentas e o relatório do mês viram mensagens com valores
+  alinhados e barras de caracteres. Nenhuma imagem é gerada.
+- Lembretes agendados e avisos (contas, orçamento, sistemas) chegam aqui quando a pessoa não está na frente do
+  computador (presença pela câmera).
 - Comandos: /hoje, /mes, /contas, /desfazer, /esquecer, /ajuda.
 """
 
@@ -33,10 +35,7 @@ from . import store
 
 log = logging.getLogger("jarvis.telegram")
 
-PORTARIA = os.getenv("JARVIS_PORTARIA_URL", "")
-SEGREDO = os.getenv("JARVIS_PORTARIA_SEGREDO", "")
 TOKEN_DIRETO = os.getenv("JARVIS_TELEGRAM_TOKEN", "")  # sem portaria (desenvolvimento): fala direto com o Telegram
-NOTEBOOK_ATIVO_S = 180
 LIMITE = 3900
 
 AJUDA = (
@@ -44,14 +43,14 @@ AJUDA = (
     "• Escreva ou mande <b>áudio</b>: \"gastei 80 no mercado no crédito do Nubank em 2x\"\n"
     "• Mande <b>foto</b> de nota fiscal, cupom ou comprovante de Pix: eu leio e proponho o lançamento\n"
     "• Mande o <b>extrato</b> (PDF, CSV ou OFX): eu mostro o que vou importar\n"
-    "• Peça o <b>relatório do mês</b> (imagem ou PDF), metas, faturas, investimentos, tarefas do WorkFlow\n"
+    "• Peça o <b>relatório do mês</b>, metas, faturas, investimentos, tarefas do WorkFlow\n"
     "• \"Me lembra amanhã às 9h de pagar o boleto\"\n\n"
     "/hoje · resumo do dia\n/mes · relatório do mês\n/contas · o que vence\n/desfazer · desfaz o último lançamento\n"
     "/esquecer · começa a conversa do zero"
 )
 COMANDOS = {
     "/hoje": "Me dê o resumo de hoje: saldo, o que vence nos próximos dias, orçamento apertado e, se houver, minhas tarefas de hoje no WorkFlow.",
-    "/mes": "Me manda o relatório do financeiro deste mês em imagem.",
+    "/mes": "Me manda o relatório do financeiro deste mês.",
     "/contas": "O que vence nos próximos 7 dias?",
     "/desfazer": "Desfaz o último lançamento que você fez.",
 }
@@ -62,12 +61,14 @@ COMANDOS = {
 
 async def api(metodo: str, dados: dict[str, Any] | None = None, arquivos: dict[str, tuple[str, bytes, str]] | None = None) -> dict[str, Any]:
     """Chama a API do robô (pela portaria, que tem o token)."""
+    from . import nuvem
+
     if TOKEN_DIRETO:
         url, headers = f"https://api.telegram.org/bot{TOKEN_DIRETO}/{metodo}", {}
-    elif PORTARIA:
-        url, headers = f"{PORTARIA}/interno/tg/{metodo}", {"x-segredo": SEGREDO}
+    elif nuvem.ligado():
+        url, headers = nuvem.url(f"/api/ponte/tg/{metodo}"), nuvem.cabecalho()
     else:
-        raise RuntimeError("Telegram não configurado neste Jarvis")
+        raise RuntimeError("Jarvis sem conta: entre pelo Jarvis Launcher")
     async with httpx.AsyncClient(timeout=60) as c:
         if arquivos:
             campos = {k: (json.dumps(v) if isinstance(v, (dict, list)) else str(v)) for k, v in (dados or {}).items()}
@@ -86,8 +87,10 @@ async def baixar(file_id: str) -> bytes:
         caminho = info["result"]["file_path"]
         async with httpx.AsyncClient(timeout=60) as c:
             return (await c.get(f"https://api.telegram.org/file/bot{TOKEN_DIRETO}/{caminho}")).content
-    async with httpx.AsyncClient(timeout=60) as c:
-        r = await c.get(f"{PORTARIA}/interno/tg-arquivo", params={"file_id": file_id}, headers={"x-segredo": SEGREDO})
+    from . import nuvem
+
+    async with httpx.AsyncClient(timeout=120) as c:
+        r = await c.get(nuvem.url("/api/ponte/tg-arquivo"), params={"file_id": file_id}, headers=nuvem.cabecalho())
         r.raise_for_status()
         return r.content
 
@@ -321,24 +324,19 @@ def _botoes(r, comprovante: bool) -> list[tuple[str, str]]:
 
 
 async def _entregar(chat: int | str, r, comprovante: bool = False) -> None:
-    from . import impressao
+    """Primeiro o que as ferramentas mostrariam (cartões e relatório, em texto), depois a fala do Jarvis com os botões."""
+    from . import textos
 
-    fotos = []
-    for card in r.cartoes[:10]:
+    for card in r.cartoes[:4]:
         try:
-            fotos.append(await impressao.cartao(card))
+            t = textos.cartao(card)
         except Exception as exc:  # noqa: BLE001
-            log.warning("cartão em imagem falhou: %s", exc)
-    if len(fotos) == 1:
-        await api("sendPhoto", {"chat_id": chat}, {"photo": ("cartao.png", fotos[0], "image/png")})
-    elif fotos:  # vários cartões (ex.: quatro lançamentos de uma vez): um álbum só
-        await api("sendMediaGroup", {"chat_id": chat, "media": [{"type": "photo", "media": f"attach://c{i}"} for i in range(len(fotos))]},
-                  {f"c{i}": (f"cartao{i}.png", f, "image/png") for i, f in enumerate(fotos)})
-    for nome, dados, tipo in r.anexos:
-        if tipo == "imagem":
-            await api("sendPhoto", {"chat_id": chat}, {"photo": (nome, dados, "image/png")})
-        else:
-            await api("sendDocument", {"chat_id": chat}, {"document": (nome, dados, "application/pdf")})
+            log.warning("cartão em texto falhou: %s", exc)
+            t = None
+        if t:
+            await enviar(chat, t, pronto=True)
+    for m in r.mensagens:
+        await enviar(chat, m, pronto=True)
     await enviar(chat, r.texto or "Pronto.", _botoes(r, comprovante))
 
 
@@ -371,14 +369,12 @@ def agendar_lembrete(chat: str, texto: str, quando: str) -> dict[str, Any]:
     return {"ok": True, "quando": t.strftime("%d/%m às %H:%M"), "instrucao": "Confirme numa frase o dia e a hora."}
 
 
-def notebook_ativo() -> bool:
-    return time.time() - float((store.get("nuvem_presenca") or {}).get("em", 0)) < NOTEBOOK_ATIVO_S
-
-
 async def avisar(titulo: str, texto: str) -> bool:
-    """Aviso do Jarvis (contas, orçamento, sistemas): vai para o Telegram se o notebook não estiver em uso."""
+    """Aviso do Jarvis (contas, orçamento, sistemas) no Telegram da pessoa. Devolve se mandou."""
+    from . import nuvem
+
     chat = (store.get("telegram") or {}).get("chat")
-    if not chat or notebook_ativo() or not (PORTARIA or TOKEN_DIRETO):
+    if not chat or not (nuvem.ligado() or TOKEN_DIRETO):
         return False
     await enviar(chat, f"<b>{html.escape(titulo)}</b>\n{html.escape(texto)}" if titulo else html.escape(texto), pronto=True)
     return True

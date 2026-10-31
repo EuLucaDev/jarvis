@@ -62,12 +62,7 @@ class Motor:
         return bool(self.proc and self.proc.poll() is None)
 
     def disponivel(self, local: bool = False) -> bool:
-        """O motor deste computador pode subir? Com a nuvem ligada, o financeiro é o de lá (local=True ignora isso)."""
-        if not local:
-            from . import nuvem
-
-            if nuvem.ligado():
-                return False
+        """O motor deste computador pode subir? (o financeiro mora sempre neste computador)"""
         return settings.public().get("financeiro", True) is not False and (MOTOR / "servidor.js").exists() and bool(_node())
 
     def start(self) -> None:
@@ -140,10 +135,6 @@ motor = Motor()
 
 
 async def chamar(canal: str, *args: Any) -> Any:
-    from . import nuvem
-
-    if nuvem.ligado():  # o financeiro mora na nuvem: a operação vai para lá
-        return await nuvem.fin(canal, *args)
     return await motor.chamar(canal, *args)
 
 

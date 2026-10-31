@@ -19,7 +19,7 @@ type Conta = {
   senha_definida?: boolean
   dispositivos: Disp[]
   telegram_ligado?: boolean
-  nuvem_no_ar?: boolean
+  conectado?: boolean
 }
 type Eu = Conta & { robo?: string; versoes: Record<string, { versao: string; data: string } | null>; launcher: Record<string, boolean> }
 
@@ -317,7 +317,7 @@ function Admin({ eu, avisar, recarregar }: { eu: Eu; avisar: (m: string) => void
         <h2>
           <UserPlus size={18} /> Contas
         </h2>
-        <p className="apagado">Cada conta tem o próprio Jarvis na nuvem (financeiro, memória e Telegram). Você vê só quem usa e onde, nunca os dados de ninguém.</p>
+        <p className="apagado">Cada pessoa tem o Jarvis no próprio computador (os dados ficam lá). Você vê só quem usa, onde e qual versão, nunca os dados de ninguém.</p>
         <div className="site-tabela" role="table">
           {contas.map((c) => (
             <div key={c.id} className={`site-conta ${c.ativa ? '' : 'pausada'}`} role="row">
@@ -327,7 +327,7 @@ function Admin({ eu, avisar, recarregar }: { eu: Eu; avisar: (m: string) => void
                   {!c.senha_definida && <span className="selo">sem senha ainda</span>}
                 </b>
                 <small>
-                  {c.email} · desde {c.criado} {c.ultimo_uso ? `· último uso ${c.ultimo_uso}` : ''} {c.telegram_ligado ? '· Telegram ligado' : ''}
+                  {c.email} · desde {c.criado} {c.ultimo_uso ? `· último uso ${c.ultimo_uso}` : ''} {c.telegram_ligado ? '· Telegram ligado' : ''} {c.conectado ? '· Jarvis conectado agora' : ''}
                 </small>
                 {c.dispositivos.map((d) => (
                   <small key={d.id} className="site-disp">
@@ -356,7 +356,7 @@ function Admin({ eu, avisar, recarregar }: { eu: Eu; avisar: (m: string) => void
                   <button
                     className="fantasma perigo"
                     onClick={() => {
-                      const conf = prompt(`Apagar a conta de ${c.nome} e os dados dela na nuvem (financeiro, memória)? Ficam 30 dias na lixeira do servidor.\\n\\nDigite o e-mail da conta para confirmar:`)
+                      const conf = prompt(`Apagar a conta de ${c.nome}? Ela perde o acesso ao launcher e ao Telegram (os dados no computador dela não são tocados).\\n\\nDigite o e-mail da conta para confirmar:`)
                       if (conf) tentar(() => chamar(`/api/site/admin/contas/${c.id}`, 'DELETE', { confirmar_email: conf }), 'Conta apagada')
                     }}
                   >

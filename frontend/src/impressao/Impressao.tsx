@@ -68,7 +68,7 @@ export function Impressao() {
       </main>
     )
   if (!rel) return <main className="imp" />
-  return <Relatorio r={rel} />
+  return <Relatorio r={rel} soResumo={q.get('so') === 'resumo'} />
 }
 
 function Kpi({ rotulo, valor, sub, tom }: { rotulo: string; valor: string; sub?: string; tom?: string }) {
@@ -157,7 +157,7 @@ function Rosca({ itens }: { itens: { name: string; value: number }[] }) {
   )
 }
 
-function Relatorio({ r }: { r: Rel }) {
+function Relatorio({ r, soResumo }: { r: Rel; soResumo?: boolean }) {
   const d = r.d
   const cats: { name: string; value: number }[] = (d.expensesByCategory ?? []).slice(0, 8)
   const meses = (d.incomesVsOutflowsByMonth ?? []).filter((x: any) => x.month <= Number(r.mes.slice(5, 7))).slice(-6)
@@ -208,6 +208,8 @@ function Relatorio({ r }: { r: Rel }) {
         </div>
         <footer className="imp-rodape">Gerado pelo Jarvis em {r.gerado}</footer>
       </section>
+      {!soResumo && (
+        <>
 
       <section className="imp-pagina">
         <h2 className="imp-h">Contas e cartões</h2>
@@ -316,6 +318,8 @@ function Relatorio({ r }: { r: Rel }) {
         </table>
         <footer className="imp-rodape">J.A.R.V.I.S. · {r.rotulo} · os dados ficam no seu Jarvis</footer>
       </section>
+        </>
+      )}
     </main>
   )
 }

@@ -1,6 +1,6 @@
 """Contas, site, launcher e loja de versões da portaria (jarvis.agcunae.com).
 
-- Contas: uma conta = um Jarvis na nuvem (perfil). O administrador cria a conta (nome e e-mail) e a pessoa define
+- Contas: uma conta = uma pessoa com o Jarvis no computador dela (o perfil é a identidade dela no Telegram). O administrador cria a conta (nome e e-mail) e a pessoa define
   a senha num link de primeiro acesso. Senha guardada com scrypt. Conta pausada perde o acesso na hora (site,
   launcher, nuvem e Telegram).
 - Site (/site): entrar, baixar o launcher, código do Telegram, trocar a senha; o admin cria, pausa e apaga contas,
@@ -294,7 +294,7 @@ async def admin_contas(request: Request):
     _admin(request)
     r = _p().ler()
     p = _p()
-    return [{**_publica(k, c), "nuvem_no_ar": bool(p._nucleos.get(c["perfil"]) and p._nucleos[c["perfil"]].poll() is None),  # noqa: SLF001
+    return [{**_publica(k, c), "conectado": p.conectado(c["perfil"]),
              "telegram_ligado": bool(r["perfis"].get(c["perfil"], {}).get("tg"))} for k, c in r["contas"].items()]
 
 
@@ -320,7 +320,6 @@ async def admin_criar(request: Request):
     cid = _criar_conta(r, nome, email)
     link = _novo_link(r, cid)
     p.gravar(r)
-    p._subir(r["contas"][cid]["perfil"], r["perfis"][r["contas"][cid]["perfil"]])  # noqa: SLF001
     return {"ok": True, "conta": _publica(cid, r["contas"][cid]), "link": link}
 
 
@@ -366,14 +365,7 @@ async def admin_apagar(cid: str, request: Request):
     if str(corpo.get("confirmar_email", "")).strip().lower() != c["email"]:
         raise HTTPException(400, "Para apagar, digite o e-mail da conta.")
     pid = c["perfil"]
-    proc = p._nucleos.pop(pid, None)  # noqa: SLF001
-    if proc and proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(15)
-        except Exception:  # noqa: BLE001
-            proc.kill()
-    # os dados vão para a lixeira da portaria por 30 dias (o backup diário também os tem)
+    # pastas de versões antigas (quando a nuvem guardava dados) vão para a lixeira por 30 dias
     lixo = p.DADOS / "apagados"
     lixo.mkdir(exist_ok=True)
     pasta = p.DADOS / "perfis" / pid

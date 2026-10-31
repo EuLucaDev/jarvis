@@ -1,21 +1,17 @@
-"""Portaria do Jarvis na nuvem: o processo principal do servidor.
+"""Portaria do Jarvis (jarvis.agcunae.com): o único processo da VPS, e leve.
 
-- Um núcleo do Jarvis por pessoa (perfil), cada um com a sua pasta (financeiro, memória, ajustes), em
-  `<dados>/perfis/<id>`. A portaria sobe os núcleos, reinicia se caírem e é a única porta para fora.
-- Telegram: recebe as mensagens do robô (webhook) e entrega ao núcleo da pessoa que escreveu (pelo número da conta
-  do Telegram). Quem não é de nenhum perfil só consegue usar um código de convite. Guarda o token do robô: os núcleos
-  falam com o Telegram por aqui (/interno/tg/...).
-- Notebook: /p/<perfil>/... encaminha para o núcleo daquele perfil, com o token da pessoa (Bearer).
-- Convites: o dono cria um convite (Painel → Nuvem e Telegram); quem abre o robô com o código ganha um perfil
-  novo, vazio, só dele. "/token" no Telegram dá o acesso para ligar o Jarvis do computador da pessoa a esse perfil.
-- Backup diário de todos os perfis, criptografado, no R2 (ou na própria pasta, se o R2 não estiver configurado).
-
-Contas, site, launcher e loja de versões: portaria_contas.py.
+O Jarvis roda no computador de cada pessoa. A VPS só:
+- guarda as contas e o site (portaria_contas.py): login, admin, launcher e os links da loja de versões (R2);
+- faz a ponte do Telegram: recebe as mensagens do robô (webhook) e entrega ao Jarvis do computador daquela conta,
+  por uma conexão que o próprio Jarvis abre (WebSocket /api/ponte). Computador desligado: a mensagem fica numa fila
+  (a pessoa recebe "guardei, respondo quando o Jarvis ligar") e é entregue quando ele conectar;
+- repassa as respostas do Jarvis ao Telegram (/api/ponte/tg/...), só para as conversas da própria conta. O token do
+  robô fica só aqui.
+Nenhum dado de ninguém (financeiro, memória, conversa) fica na VPS. Backup diário do registro de contas (cifrado, no R2).
 
 Variáveis: PORTARIA_DADOS (/dados), PORTARIA_URL (https pública), PORTARIA_ADMIN_EMAIL / PORTARIA_ADMIN_SENHA /
-PORTARIA_ADMIN_NOME (a conta do administrador, criada na primeira vez), PORTARIA_BACKUP_CHAVE (Fernet),
-LOJA_TOKEN (a compilação publica versões com ele), R2_ENDPOINT / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET.
-Rodar: `python -m jarvis.portaria` (porta 8700).
+PORTARIA_ADMIN_NOME, PORTARIA_TELEGRAM_TOKEN (robô), PORTARIA_BACKUP_CHAVE (Fernet), LOJA_TOKEN,
+R2_ENDPOINT / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET. Rodar: `python -m jarvis.portaria` (porta 8700).
 """
 
 from __future__ import annotations
@@ -27,18 +23,15 @@ import json
 import logging
 import os
 import secrets
-import sqlite3
-import subprocess
 import sys
-import tempfile
 import time
 import zipfile
 from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("jarvis.portaria")
@@ -47,12 +40,15 @@ DADOS = Path(os.getenv("PORTARIA_DADOS", "/dados"))
 URL = os.getenv("PORTARIA_URL", "").rstrip("/")
 PORTA = int(os.getenv("PORTARIA_PORTA", "8700"))
 REGISTRO = DADOS / "portaria.json"
-SEGREDO = secrets.token_urlsafe(24)  # entre a portaria e os núcleos (muda a cada início)
 TG = os.getenv("PORTARIA_TG_API", "https://api.telegram.org")  # trocável só para testes
 BACKUP_HORA = int(os.getenv("PORTARIA_BACKUP_HORA", "4"))
+FILA_MAX = 50
+# o que o Jarvis de um computador pode pedir ao robô (sempre numa conversa da própria conta)
+METODOS = {"sendMessage", "sendPhoto", "sendDocument", "sendMediaGroup", "sendChatAction", "answerCallbackQuery",
+           "editMessageReplyMarkup", "editMessageText", "deleteMessage", "sendVoice"}
 
 # rodando como programa (python -m jarvis.portaria), este módulo é o __main__: sem isto, o "from . import portaria"
-# de portaria_contas criaria uma segunda cópia, com outra lista de núcleos e outro segredo (núcleos em dobro)
+# de portaria_contas criaria uma segunda cópia (outro estado na memória)
 if __name__ == "__main__":
     sys.modules.setdefault("jarvis.portaria", sys.modules[__name__])
 
@@ -60,15 +56,14 @@ app = FastAPI(title="Jarvis · portaria", docs_url=None, redoc_url=None, openapi
 from . import portaria_contas as contas  # noqa: E402 - o módulo usa funções daqui (import tardio lá dentro)
 
 app.include_router(contas.router)
-_nucleos: dict[str, subprocess.Popen] = {}
-_trava_fd: int | None = None  # dona dos dados: só uma portaria por vez sobe os núcleos
+_ligados: dict[str, list[WebSocket]] = {}  # perfil → conexões do Jarvis (um por computador ligado)
 _http: httpx.AsyncClient | None = None
 
 
 def http() -> httpx.AsyncClient:
     global _http
     if _http is None:
-        _http = httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10))
+        _http = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10))
     return _http
 
 
@@ -82,7 +77,7 @@ def _hash(token: str) -> str:
 def ler() -> dict[str, Any]:
     if REGISTRO.exists():
         return json.loads(REGISTRO.read_text())
-    return {"perfis": {}, "codigos": {}, "telegram": {}, "admin": None}
+    return {"perfis": {}, "codigos": {}, "telegram": {}}
 
 
 def gravar(r: dict[str, Any]) -> None:
@@ -94,104 +89,19 @@ def gravar(r: dict[str, Any]) -> None:
 
 
 def _novo_perfil(r: dict[str, Any], nome: str, token: str | None = None) -> tuple[str, str]:
+    """Perfil = a identidade de uma conta para o Telegram (os dados ficam no computador da pessoa)."""
     pid = f"p{secrets.token_hex(4)}"
-    token = token or f"jv_{secrets.token_urlsafe(32)}"
-    portas = {p["porta"] for p in r["perfis"].values()}
-    porta = next(n for n in range(8800, 8900) if n not in portas)
-    r["perfis"][pid] = {"nome": nome, "token": _hash(token), "porta": porta, "tg": [], "criado": time.strftime("%Y-%m-%d %H:%M")}
-    pasta = DADOS / "perfis" / pid
-    pasta.mkdir(parents=True, exist_ok=True)
-    # cada pessoa usa a própria chave da Gemini: o Jarvis do computador dela manda (configuração inicial)
-    conf = {"configurado": True, "user_name": nome, "tratamento": "", "fuso": os.getenv("TZ", "America/Sao_Paulo")}
-    (pasta / "config.json").write_text(json.dumps(conf, ensure_ascii=False))
-    os.chmod(pasta / "config.json", 0o600)
-    return pid, token
-
-
-def iniciar_registro() -> None:
-    contas.migrar_e_iniciar()
+    r["perfis"][pid] = {"nome": nome, "tg": [], "criado": time.strftime("%Y-%m-%d %H:%M")}
+    return pid, ""
 
 
 def perfil_do_token(request: Request) -> tuple[str, dict[str, Any]]:
-    """Acesso de um computador (dado pelo launcher, ou pelo /token do Telegram) → perfil, se a conta estiver ativa."""
+    """Acesso de um computador (dado pelo launcher) → perfil, se a conta estiver ativa."""
     token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
     achado = contas.perfil_do_acesso(token) if token else None
     if not achado:
         raise HTTPException(401)
     return achado
-
-
-def _admin(request: Request) -> str:
-    pid, _ = perfil_do_token(request)
-    cc = contas.conta_do_perfil(ler(), pid)
-    if not cc or not cc[1].get("admin"):
-        raise HTTPException(403, "Só o administrador do Jarvis pode fazer isso.")
-    return pid
-
-
-# ---------------------------------------------------------------- núcleos
-
-
-def _subir(pid: str, p: dict[str, Any]) -> None:
-    env = {**os.environ, "JARVIS_HOME": str(DADOS / "perfis" / pid), "JARVIS_PORT": str(p["porta"]), "JARVIS_NUVEM": "1",
-           "JARVIS_PORTARIA_URL": f"http://127.0.0.1:{PORTA}", "JARVIS_PORTARIA_SEGREDO": SEGREDO}
-    for k in ("PORTARIA_ADMIN_TOKEN", "PORTARIA_BACKUP_CHAVE", "R2_SECRET_ACCESS_KEY", "R2_ACCESS_KEY_ID"):
-        env.pop(k, None)  # segredos da portaria não descem para os núcleos
-    log_f = open(DADOS / "perfis" / pid / "nucleo.log", "a", encoding="utf-8")  # noqa: SIM115 - fica aberto com o processo
-    _nucleos[pid] = subprocess.Popen([sys.executable, "-m", "jarvis.app"], env=env, stdout=log_f, stderr=subprocess.STDOUT,
-                                     cwd=str(Path(__file__).resolve().parents[1]))
-    log.info("núcleo %s (%s) na porta %s", pid, p["nome"], p["porta"])
-
-
-def _pegar_trava() -> bool:
-    """Trava exclusiva no volume. Numa atualização o Coolify sobe o container novo antes de parar o antigo: os dois
-    abrindo os mesmos bancos ao mesmo tempo corrompem o SQLite. O novo espera o antigo sair (a trava cai sozinha
-    quando o processo termina)."""
-    global _trava_fd
-    import fcntl
-
-    if _trava_fd is not None:
-        return True
-    DADOS.mkdir(parents=True, exist_ok=True)
-    fd = os.open(DADOS / "portaria.lock", os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        os.close(fd)
-        return False
-    _trava_fd = fd
-    return True
-
-
-async def vigiar() -> None:
-    espera = 0
-    while not _pegar_trava():  # outra portaria (a versão anterior) ainda está com os dados
-        if espera % 30 == 0:
-            log.info("esperando a versão anterior soltar os dados…")
-        espera += 2
-        await asyncio.sleep(2)
-    log.info("dados travados para esta portaria; subindo os núcleos")
-    while True:
-        for pid, p in ler()["perfis"].items():
-            proc = _nucleos.get(pid)
-            if proc is None or proc.poll() is not None:
-                if proc is not None:
-                    log.warning("núcleo %s caiu (código %s); subindo de novo", pid, proc.returncode)
-                _subir(pid, p)
-        await asyncio.sleep(10)
-
-
-async def _nucleo(pid: str, metodo: str, caminho: str, **kw: Any) -> httpx.Response:
-    p = ler()["perfis"][pid]
-    headers = {**kw.pop("headers", {}), "x-segredo": SEGREDO}
-    for tentativa in range(30):  # o núcleo pode estar subindo
-        try:
-            return await http().request(metodo, f"http://127.0.0.1:{p['porta']}{caminho}", headers=headers, **kw)
-        except httpx.ConnectError:
-            if tentativa == 29:
-                raise
-            await asyncio.sleep(1)
-    raise RuntimeError("inalcançável")
 
 
 # ---------------------------------------------------------------- Telegram
@@ -210,39 +120,20 @@ def _codigo() -> str:
     return "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(8))
 
 
-async def _sem_perfil(tg_id: int, chat: int, texto: str, nome_tg: str) -> None:
-    """Alguém que ainda não é de nenhum perfil: só um código (de convite ou de ligar a própria conta) entra."""
+async def _sem_perfil(tg_id: int, chat: int, texto: str) -> None:
+    """Quem ainda não é de nenhuma conta: só o código da conta (site ou launcher) liga o Telegram."""
     cod = texto.removeprefix("/start").strip().upper()
     r = ler()
     c = r["codigos"].get(cod)
-    if not c or c["expira"] < time.time():
-        await tg("sendMessage", {"chat_id": chat, "text": "Este é um Jarvis particular. Para entrar, peça um convite a quem cuida dele e mande o código aqui."})
+    if not c or c["expira"] < time.time() or c.get("perfil") not in r["perfis"]:
+        await tg("sendMessage", {"chat_id": chat, "text": "Este é um Jarvis particular. Para usar, entre no site do Jarvis com a sua conta e toque em \"Abrir no Telegram\"."})
         return
-    if c["tipo"] == "vincular":
-        pid = c["perfil"]
-    else:  # convite: perfil novo, só desta pessoa
-        pid, _ = _novo_perfil(r, c.get("nome") or nome_tg)
-        _subir(pid, r["perfis"][pid])
+    pid = c["perfil"]
     r["perfis"][pid]["tg"] = sorted(set(r["perfis"][pid]["tg"]) | {tg_id})
     del r["codigos"][cod]
     gravar(r)
-    nome = r["perfis"][pid]["nome"]
-    boas = (f"Pronto, {nome}. Este Telegram agora é o seu Jarvis." if c["tipo"] == "vincular" else
-            f"Bem-vindo(a), {nome}. Este é o seu Jarvis: o financeiro, a memória e as conversas aqui são só seus.\n\n"
-            "Para começar, me diga quais contas e cartões você usa (ex.: \"tenho conta no Nubank com 1.200 e cartão Inter de 3 mil, "
-            "fecha dia 5 e vence dia 12\"). Mande /ajuda para ver o que eu faço.")
-    await tg("sendMessage", {"chat_id": chat, "text": boas})
-
-
-async def _token_pelo_telegram(pid: str, chat: int) -> None:
-    """/token: acesso novo para ligar o Jarvis do computador a este perfil (o anterior deixa de valer)."""
-    r = ler()
-    token = f"jv_{secrets.token_urlsafe(32)}"
-    r["perfis"][pid]["token"] = _hash(token)
-    gravar(r)
-    await tg("sendMessage", {"chat_id": chat, "parse_mode": "HTML", "text":
-         "Para ligar o Jarvis do seu computador: Painel → Nuvem e Telegram, cole estes dois.\n\n"
-         f"Endereço: <code>{URL}</code>\nToken: <code>{token}</code>\n\nGuarde só no Jarvis. Mandar /token de novo troca o acesso."})
+    nome = r["perfis"][pid]["nome"].split(" ")[0]
+    await tg("sendMessage", {"chat_id": chat, "text": f"Pronto, {nome}. Este Telegram agora fala com o seu Jarvis. Mande /ajuda para ver o que eu faço."})
 
 
 @app.post("/tg/{segredo}")
@@ -253,6 +144,12 @@ async def webhook(segredo: str, request: Request):
     upd = await request.json()
     asyncio.create_task(_entregar(upd))
     return {"ok": True}
+
+
+def _fila(pid: str) -> Path:
+    d = DADOS / "fila"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{pid}.jsonl"
 
 
 async def _entregar(upd: dict[str, Any]) -> None:
@@ -269,56 +166,116 @@ async def _entregar(upd: dict[str, Any]) -> None:
         pid = next((k for k, p in r["perfis"].items() if tg_id in p["tg"]), None)
         texto = (origem.get("text") or "").strip()
         if not pid:
-            await _sem_perfil(tg_id, chat["id"], texto, de.get("first_name") or "")
+            await _sem_perfil(tg_id, chat["id"], texto)
             return
         if not contas.conta_ativa_do_tg(r, pid):
             await tg("sendMessage", {"chat_id": chat["id"], "text": "Sua conta do Jarvis está pausada. Fale com quem cuida dele."})
             return
-        if texto.split(" ")[0] == "/token":
-            await _token_pelo_telegram(pid, chat["id"])
-            return
-        await _nucleo(pid, "POST", "/api/telegram/update", json=upd)
+        for ws in reversed(_ligados.get(pid, [])):  # o computador ligado mais recente
+            try:
+                await ws.send_json({"tipo": "telegram", "update": upd})
+                return
+            except Exception:  # noqa: BLE001 - conexão caída: tenta o próximo, senão vai para a fila
+                continue
+        # computador desligado: guarda e avisa (uma vez por leva)
+        f = _fila(pid)
+        linhas = f.read_text().splitlines() if f.exists() else []
+        if not linhas and "callback_query" not in upd:
+            await tg("sendMessage", {"chat_id": chat["id"], "text": "Seu Jarvis está desligado agora. Guardei a mensagem: ele responde assim que o computador ligar."})
+        linhas = (linhas + [json.dumps(upd)])[-FILA_MAX:]
+        f.write_text("\n".join(linhas) + "\n")
     except Exception:  # noqa: BLE001
         log.exception("entregar mensagem do Telegram")
 
 
-def _interno(request: Request) -> None:
-    if not secrets.compare_digest(request.headers.get("x-segredo", ""), SEGREDO):
+# ---------------------------------------------------------------- ponte com o Jarvis de cada computador
+
+
+@app.websocket("/api/ponte")
+async def ponte(ws: WebSocket):
+    token = ws.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    try:
+        achado = contas.perfil_do_acesso(token) if token else None
+    except HTTPException:
+        achado = None
+    if not achado:
+        await ws.close(code=4401)
+        return
+    pid, _ = achado
+    await ws.accept()
+    _ligados.setdefault(pid, []).append(ws)
+    log.info("Jarvis conectado (%s); %d computador(es)", pid, len(_ligados[pid]))
+    try:
+        f = _fila(pid)
+        if f.exists():  # o que chegou enquanto ele estava desligado
+            for linha in f.read_text().splitlines():
+                if linha.strip():
+                    await ws.send_json({"tipo": "telegram", "update": json.loads(linha)})
+            f.unlink()
+        while True:
+            msg = await ws.receive_json()
+            if msg.get("tipo") == "ping":
+                await ws.send_json({"tipo": "pong"})
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    except Exception:  # noqa: BLE001
+        log.exception("ponte")
+    finally:
+        if ws in _ligados.get(pid, []):
+            _ligados[pid].remove(ws)
+        log.info("Jarvis desconectado (%s)", pid)
+
+
+def conectado(pid: str) -> bool:
+    return bool(_ligados.get(pid))
+
+
+@app.post("/api/ponte/tg/{metodo}")
+async def ponte_tg(metodo: str, request: Request):
+    """O Jarvis do computador responde pelo robô: só métodos de conversa e só nas conversas da própria conta."""
+    pid, perfil = perfil_do_token(request)
+    if metodo not in METODOS or not _tg_token():
         raise HTTPException(403)
-
-
-@app.post("/interno/tg/{metodo}")
-async def interno_tg(metodo: str, request: Request):
-    _interno(request)
-    if not _tg_token():
-        return JSONResponse({"ok": False, "description": "robô sem token"})
     tipo = request.headers.get("content-type", "")
     url = f"{TG}/bot{_tg_token()}/{metodo}"
     if tipo.startswith("multipart/"):
-        r = await http().post(url, content=await request.body(), headers={"content-type": tipo})
+        form = await request.form()
+        campos, arquivos = {}, {}
+        for k, v in form.multi_items():
+            if hasattr(v, "read"):
+                arquivos[k] = (v.filename or k, await v.read(), v.content_type or "application/octet-stream")
+            else:
+                campos[k] = v
+        chat = campos.get("chat_id")
+        if metodo != "answerCallbackQuery" and str(chat) not in {str(x) for x in perfil["tg"]}:
+            raise HTTPException(403, "conversa de outra conta")
+        r = await http().post(url, data=campos, files=arquivos, timeout=120)
     else:
-        r = await http().post(url, json=await request.json())
-    return JSONResponse(r.json(), status_code=200)
+        dados = await request.json()
+        chat = dados.get("chat_id")
+        if metodo != "answerCallbackQuery" and str(chat) not in {str(x) for x in perfil["tg"]}:
+            raise HTTPException(403, "conversa de outra conta")
+        r = await http().post(url, json=dados)
+    return Response(r.content, status_code=200, media_type="application/json")
 
 
-@app.get("/interno/tg-arquivo")
-async def interno_arquivo(file_id: str, request: Request):
-    _interno(request)
+@app.get("/api/ponte/tg-arquivo")
+async def ponte_arquivo(file_id: str, request: Request):
+    perfil_do_token(request)
     info = (await http().get(f"{TG}/bot{_tg_token()}/getFile", params={"file_id": file_id})).json()
     if not info.get("ok"):
         raise HTTPException(404)
-    r = await http().get(f"{TG}/file/bot{_tg_token()}/{info['result']['file_path']}")
+    r = await http().get(f"{TG}/file/bot{_tg_token()}/{info['result']['file_path']}", timeout=120)
     return Response(r.content, media_type="application/octet-stream")
 
 
-# ---------------------------------------------------------------- painel do dono (pelo notebook)
+# ---------------------------------------------------------------- status para o Jarvis e o robô
 
 
 @app.get("/health")
 @app.get("/saude")
 async def saude():
-    return {"ok": True, "perfis": len(ler()["perfis"]), "nucleos": sum(1 for p in _nucleos.values() if p.poll() is None),
-            "dona_dos_dados": _trava_fd is not None}
+    return {"ok": True, "contas": len(ler().get("contas", {})), "computadores_ligados": sum(len(v) for v in _ligados.values())}
 
 
 @app.get("/nuvem/eu")
@@ -336,19 +293,14 @@ async def eu(request: Request):
             "email": cc[1]["email"] if cc else None}
 
 
-@app.put("/nuvem/telegram")
-async def config_telegram(request: Request):
-    _admin(request)
-    return await configurar_robo(str((await request.json()).get("token", "")).strip())
-
-
 async def configurar_robo(token: str) -> dict[str, Any]:
     """Token do robô (do @BotFather): confere, guarda, liga o webhook e os comandos. Um robô para todas as contas."""
     me = (await http().get(f"{TG}/bot{token}/getMe")).json()
     if not me.get("ok"):
         return {"ok": False, "erro": "O Telegram não reconheceu esse token. Copie de novo do @BotFather."}
     r = ler()
-    r["telegram"].update(token=token, usuario=me["result"]["username"])
+    r.setdefault("telegram", {}).update(token=token, usuario=me["result"]["username"])
+    r["telegram"].setdefault("segredo", secrets.token_urlsafe(24))
     gravar(r)
     if not URL.startswith("https://"):
         return {"ok": False, "erro": "A portaria precisa de um endereço https (PORTARIA_URL) para o Telegram entregar as mensagens."}
@@ -361,83 +313,32 @@ async def configurar_robo(token: str) -> dict[str, Any]:
     return {"ok": bool(w.get("ok")), "robo": me["result"]["username"], "erro": None if w.get("ok") else w.get("description")}
 
 
-@app.post("/nuvem/codigo")
-async def novo_codigo(request: Request):
-    """vincular: liga o Telegram de quem pede ao próprio perfil. convite (só o dono): perfil novo para outra pessoa."""
-    pid, _ = perfil_do_token(request)
-    corpo = await request.json()
-    tipo = corpo.get("tipo", "vincular")
-    if tipo == "convite":
-        _admin(request)
-    r = ler()
-    cod = _codigo()
-    r["codigos"] = {k: v for k, v in r["codigos"].items() if v["expira"] > time.time()}
-    r["codigos"][cod] = {"tipo": tipo, "perfil": pid if tipo == "vincular" else None, "nome": corpo.get("nome", ""),
-                         "expira": time.time() + 7 * 86400}
-    gravar(r)
-    robo = r.get("telegram", {}).get("usuario")
-    return {"codigo": cod, "link": f"https://t.me/{robo}?start={cod}" if robo else None, "vale_dias": 7}
+async def _robo_da_variavel() -> None:
+    """PORTARIA_TELEGRAM_TOKEN (variável do Coolify): liga o robô sem precisar do painel, se ainda não for esse."""
+    token = os.getenv("PORTARIA_TELEGRAM_TOKEN", "").strip()
+    if not token or ler().get("telegram", {}).get("token") == token:
+        return
+    for _ in range(10):
+        try:
+            log.info("robô do Telegram pela variável: %s", await configurar_robo(token))
+            return
+        except Exception as exc:  # noqa: BLE001
+            log.warning("robô do Telegram: %s", exc)
+            await asyncio.sleep(10)
 
 
-@app.get("/nuvem/perfis")
-async def perfis(request: Request):
-    _admin(request)
-    r = ler()
-    return [{"perfil": k, "nome": p["nome"], "telegram": bool(p["tg"]), "criado": p["criado"],
-             "dono": bool((cc := contas.conta_do_perfil(r, k)) and cc[1].get("admin")),
-             "no_ar": bool(_nucleos.get(k) and _nucleos[k].poll() is None)} for k, p in r["perfis"].items()]
-
-
-@app.delete("/nuvem/perfis/{alvo}/telegram")
-async def desligar_telegram(alvo: str, request: Request):
-    _admin(request)
-    r = ler()
-    if alvo in r["perfis"]:
-        r["perfis"][alvo]["tg"] = []
-        gravar(r)
-    return {"ok": True}
-
-
-# ---------------------------------------------------------------- notebook → núcleo do perfil
-
-SEM_CABECALHO = {"host", "authorization", "content-length", "connection", "accept-encoding"}
-
-
-@app.api_route("/p/{pid}/{caminho:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def encaminhar(pid: str, caminho: str, request: Request):
-    dono, _ = perfil_do_token(request)
-    if dono != pid:
-        raise HTTPException(403)
-    if not caminho.startswith("api/"):
-        raise HTTPException(404)
-    cab = {k: v for k, v in request.headers.items() if k.lower() not in SEM_CABECALHO}
-    r = await _nucleo(pid, request.method, f"/{caminho}", content=await request.body(), headers=cab, params=dict(request.query_params))
-    return Response(r.content, status_code=r.status_code, media_type=r.headers.get("content-type"))
-
-
-# ---------------------------------------------------------------- backup diário
-
-
-def _copia_consistente(origem: Path, zf: zipfile.ZipFile, nome: str) -> None:
-    if origem.suffix in (".db", ".sqlite", ".sqlite3"):
-        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
-            src, dst = sqlite3.connect(origem), sqlite3.connect(tmp.name)
-            with dst:
-                src.backup(dst)
-            src.close()
-            dst.close()
-            zf.write(tmp.name, nome)
-    else:
-        zf.write(origem, nome)
+# ---------------------------------------------------------------- backup diário (só o registro de contas)
 
 
 def montar_backup() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.write(REGISTRO, "portaria.json")
-        for f in (DADOS / "perfis").rglob("*"):
-            if f.is_file() and not any(p in f.parts for p in ("ocr", "entrada")) and f.suffix not in (".log", ".tmp") and not f.name.endswith(("-wal", "-shm")):
-                _copia_consistente(f, zf, str(f.relative_to(DADOS)))
+        conhecidos = DADOS / "loja" / "conhecidos.txt"
+        if conhecidos.exists():
+            zf.write(conhecidos, "loja/conhecidos.txt")
+        for m in (DADOS / "loja" / "manifestos").glob("*.json") if (DADOS / "loja" / "manifestos").exists() else []:
+            zf.write(m, f"loja/manifestos/{m.name}")
     dados = buf.getvalue()
     chave = os.getenv("PORTARIA_BACKUP_CHAVE", "")
     if chave:
@@ -448,18 +349,12 @@ def montar_backup() -> bytes:
 
 
 async def _enviar_r2(nome: str, dados: bytes) -> bool:
-    if not all(os.getenv(k) for k in ("R2_ENDPOINT", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET")):
+    s3, bucket = contas._r2()  # noqa: SLF001
+    if not s3:
         return False
-    import boto3
-
-    s3 = boto3.client("s3", endpoint_url=os.getenv("R2_ENDPOINT"), aws_access_key_id=os.getenv("R2_ACCESS_KEY_ID"),
-                      aws_secret_access_key=os.getenv("R2_SECRET_ACCESS_KEY"), region_name="auto")
-    bucket = os.getenv("R2_BUCKET")
     await asyncio.to_thread(s3.put_object, Bucket=bucket, Key=f"jarvis/{nome}", Body=dados)
-    # mantém 30 dias
     lista = await asyncio.to_thread(s3.list_objects_v2, Bucket=bucket, Prefix="jarvis/")
-    antigos = sorted(o["Key"] for o in lista.get("Contents", []))[:-30]
-    for k in antigos:
+    for k in sorted(o["Key"] for o in lista.get("Contents", []))[:-30]:  # mantém 30 dias
         await asyncio.to_thread(s3.delete_object, Bucket=bucket, Key=k)
     return True
 
@@ -468,7 +363,7 @@ async def backups() -> None:
     feito = ""
     while True:
         hoje = time.strftime("%Y-%m-%d")
-        if _trava_fd is not None and time.localtime().tm_hour >= BACKUP_HORA and feito != hoje and (DADOS / "perfis").exists():
+        if time.localtime().tm_hour >= BACKUP_HORA and feito != hoje and REGISTRO.exists():
             try:
                 dados = await asyncio.to_thread(montar_backup)
                 nome = f"jarvis-{hoje}.zip{'.enc' if os.getenv('PORTARIA_BACKUP_CHAVE') else ''}"
@@ -486,45 +381,17 @@ async def backups() -> None:
         await asyncio.sleep(600)
 
 
-async def _robo_da_variavel() -> None:
-    """PORTARIA_TELEGRAM_TOKEN (variável do Coolify): liga o robô sem precisar do painel, se ainda não for esse."""
-    token = os.getenv("PORTARIA_TELEGRAM_TOKEN", "").strip()
-    if not token or ler().get("telegram", {}).get("token") == token:
-        return
-    for _ in range(10):  # a rede pode demorar a subir junto com o container
-        try:
-            r = await configurar_robo(token)
-            log.info("robô do Telegram pela variável: %s", r)
-            return
-        except Exception as exc:  # noqa: BLE001
-            log.warning("robô do Telegram: %s", exc)
-            await asyncio.sleep(10)
-
-
 @app.on_event("startup")
 async def inicio() -> None:
-    iniciar_registro()  # só lê/cria o registro; os bancos só abrem com a trava (vigiar)
-    asyncio.create_task(_robo_da_variavel())
-    asyncio.create_task(vigiar())
+    contas.migrar_e_iniciar()
     asyncio.create_task(backups())
-
-
-@app.on_event("shutdown")
-async def fim() -> None:
-    # os núcleos (e o motor do financeiro de cada um) fecham os bancos antes de a trava cair
-    for proc in _nucleos.values():
-        proc.terminate()
-    for proc in _nucleos.values():
-        try:
-            await asyncio.to_thread(proc.wait, 15)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+    asyncio.create_task(_robo_da_variavel())
 
 
 def main() -> None:
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=PORTA, log_level="info")  # noqa: S104 - a portaria é a porta de fora
+    uvicorn.run(app, host="0.0.0.0", port=PORTA, log_level="info", ws_ping_interval=25, ws_ping_timeout=20)  # noqa: S104
 
 
 if __name__ == "__main__":

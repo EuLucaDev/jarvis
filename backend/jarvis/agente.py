@@ -41,7 +41,7 @@ SEM = {"financeiro_abrir"}  # abre janela no computador
 class Resposta:
     texto: str = ""
     cartoes: list[dict[str, Any]] = field(default_factory=list)
-    anexos: list[tuple[str, bytes, str]] = field(default_factory=list)  # (nome, bytes, tipo: imagem|documento)
+    mensagens: list[str] = field(default_factory=list)  # mensagens prontas (HTML do Telegram), ex.: o relatório
     ferramentas: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (nome, resultado)
 
     def usou(self, nome: str) -> dict[str, Any] | None:
@@ -64,12 +64,10 @@ PERFIL_DECL = types.FunctionDeclaration(
 RELATORIO_DECL = types.FunctionDeclaration(
     name="relatorio_financeiro",
     description=(
-        "Monta o relatório do financeiro de um mês, diagramado no visual do Jarvis, e manda na conversa: imagem "
-        "(um cartão com totais, gráfico e categorias), pdf (documento completo de várias páginas) ou os dois."
+        "Manda na conversa o relatório do financeiro de um mês, diagramado em texto: resumo, entradas × saídas, para "
+        "onde foi o dinheiro (barras), formas de pagamento, faturas, orçamento, metas e maiores gastos."
     ),
-    parameters={"type": "OBJECT", "properties": {
-        "mes": {"type": "STRING", "description": "AAAA-MM; sem dizer, o mês atual."},
-        "formato": {"type": "STRING", "enum": ["imagem", "pdf", "ambos"]}}},
+    parameters={"type": "OBJECT", "properties": {"mes": {"type": "STRING", "description": "AAAA-MM; sem dizer, o mês atual."}}},
 )
 
 
@@ -95,10 +93,16 @@ Português do Brasil. Seu jeito é o do J.A.R.V.I.S. dos filmes: formal sem ser 
 uma ironia leve de vez em quando (nunca em assunto sério). Agora são {hoje}. Cidade padrão: {settings.city}.
 
 Como responder no {nome_canal}:
-- Mensagens curtas e bem organizadas. Use **negrito** para valores e nomes importantes, listas com "•", uma ideia
-  por linha. Nada de tabelas. Valores sempre em reais (R$ 1.234,56).
-- Cartões que as ferramentas mostram chegam como imagem junto da sua mensagem: não repita tudo o que está neles.
-- Relatório do mês, fechamento, "me manda o relatório": relatorio_financeiro (imagem; pdf se ele pedir documento).
+- Mensagens curtas e bem diagramadas, só com texto (nada de imagens). Use **negrito** para valores e nomes, listas
+  com "•", uma ideia por linha, emojis com moderação como marcadores (📊 💳 ✅ ⚠️). Valores sempre em reais (R$ 1.234,56).
+- Para comparar números, faça um "gráfico" em texto dentro de um bloco ``` (monoespaçado): rótulos alinhados,
+  barras com █ proporcionais e o valor à direita. Ex.:
+  ```
+  Moradia      ██████████  1.800
+  Mercado      █▍            240
+  ```
+- O que as ferramentas mostrariam na tela já vai em texto junto da sua mensagem: não repita, comente o principal.
+- Relatório do mês, fechamento, "me manda o relatório": relatorio_financeiro (ele já manda o relatório pronto).
 
 O que você faz aqui: financeiro, os sistemas dele (WorkFlow), memória, pesquisa, clima, mercado e lembretes.
 Você NÃO mexe no computador por aqui (abrir apps, clicar, arquivos, tela): se ele pedir, diga que isso é no
@@ -150,15 +154,14 @@ async def _ferramenta(nome: str, args: dict[str, Any], assuntos: set[str], resp:
         settings.update(**campos)
         return {"ok": True, "guardado": campos, "instrucao": "Confirme numa frase, já usando o novo jeito de chamar."}
     if nome == "relatorio_financeiro":
-        from . import impressao
+        from . import textos
 
         try:
-            arquivos = await impressao.relatorio(args.get("mes") or time.strftime("%Y-%m"), args.get("formato") or "imagem")
+            resp.mensagens += await textos.relatorio(args.get("mes") or time.strftime("%Y-%m"), settings.user_name)
         except Exception as exc:  # noqa: BLE001
             log.warning("relatório falhou: %s", exc)
             return {"erro": f"Não consegui montar o relatório ({str(exc)[:120]})."}
-        resp.anexos += arquivos
-        return {"ok": True, "enviado": [n for n, _, _ in arquivos], "instrucao": "O relatório vai junto. Comente em uma ou duas frases o principal."}
+        return {"ok": True, "instrucao": "O relatório já vai na conversa. Comente em uma ou duas frases o principal, sem repetir os números."}
     if nome not in PERMITIDAS and not nome.startswith(("financeiro_", "fin_")) and "__" not in nome:
         return {"erro": "Isso não está disponível por aqui."}
     return await tools.run(nome, args)
@@ -173,7 +176,7 @@ def _limpo(r: Any) -> Any:
 
 
 async def responder(chave: str, partes: list[types.Part], resumo_usuario: str, canal: str = "Telegram") -> Resposta:
-    """Uma mensagem dele (texto, áudio, imagem…) → a resposta do Jarvis, com cartões e anexos."""
+    """Uma mensagem dele (texto, áudio, imagem…) → a resposta do Jarvis, com cartões e mensagens prontas."""
     from .llm import FALLBACK, client
 
     c = client()
@@ -211,6 +214,7 @@ async def responder(chave: str, partes: list[types.Part], resumo_usuario: str, c
             respostas = []
             for fc in chamadas:
                 args = dict(fc.args or {})
+                antes = len(cartoes)
                 try:
                     res = await _ferramenta(fc.name, args, assuntos, resp, chave)
                 except Exception as exc:  # noqa: BLE001
@@ -218,6 +222,9 @@ async def responder(chave: str, partes: list[types.Part], resumo_usuario: str, c
                     res = {"erro": str(exc)[:300]}
                 res = _limpo(res if isinstance(res, dict) else {"resultado": res})
                 res.pop("_imagem", None)
+                if len(cartoes) > antes:  # o cartão já vai em texto para ele: a fala só comenta
+                    res["ja_mostrado"] = ("Estes números já aparecem para ele numa mensagem própria (com barras). NÃO repita "
+                                          "os valores nem faça outro gráfico: comente o principal em uma ou duas frases.")
                 resp.ferramentas.append((fc.name, res))
                 respostas.append(types.Part(function_response=types.FunctionResponse(id=fc.id, name=fc.name, response=res)))
             contents.append(types.Content(role="user", parts=respostas))
@@ -226,7 +233,7 @@ async def responder(chave: str, partes: list[types.Part], resumo_usuario: str, c
     finally:
         coletor.reset(token)
     resp.cartoes = cartoes
-    if not resp.texto and (resp.cartoes or resp.anexos):
+    if not resp.texto and (resp.cartoes or resp.mensagens):
         resp.texto = "Pronto."
     _guardar(chave, resumo_usuario, resp.texto)
     return resp

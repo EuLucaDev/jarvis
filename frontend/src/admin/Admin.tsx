@@ -1079,17 +1079,15 @@ const RACIOCINIO = [
 ]
 
 type NuvemEstado = {
-  na_nuvem: boolean
   ligado: boolean
   url: string
-  perfil: string
-  subido?: string
-  tem_token: boolean
-  erro?: string
-  portaria?: { perfil: string; nome: string; email?: string; dono: boolean; telegram_ligado: boolean; robo?: string; robo_configurado: boolean; telegram_link?: string | null }
+  pelo_launcher: boolean
+  ponte: boolean
+  erro?: string | null
+  conta?: { perfil: string; nome: string; email?: string; dono: boolean; telegram_ligado: boolean; robo?: string; robo_configurado: boolean; telegram_link?: string | null }
 }
 
-/** Sua conta do Jarvis (ligada pelo launcher), o Telegram e o envio dos dados. Contas e o robô ficam no site. */
+/** A conta deste computador (o launcher liga sozinho) e a ponte do Telegram. Contas e o robô ficam no site. */
 function NuvemPage() {
   const [e, setE] = useState<NuvemEstado | null>(null)
   const [url, setUrl] = useState('https://jarvis.agcunae.com')
@@ -1100,65 +1098,39 @@ function NuvemPage() {
   const carregar = async () => setE(await api<NuvemEstado>('/api/nuvem'))
   useEffect(() => {
     carregar()
+    const t = setInterval(carregar, 15000)
+    return () => clearInterval(t)
   }, [])
   if (!e) return <p className="muted">Carregando…</p>
-  if (e.na_nuvem) return <p className="muted">Este é o Jarvis da nuvem. A configuração fica no Jarvis do computador.</p>
-  const passo = async (fn: () => Promise<any>, ok: string) => {
-    setBusy(true)
-    try {
-      const r = await fn()
-      if (r?.ok === false) toast(r.erro ?? 'Não deu certo', true)
-      else toast(ok)
-      await carregar()
-      return r
-    } finally {
-      setBusy(false)
-    }
-  }
-  const p = e.portaria
+  const c = e.conta
   const site = (e.url || 'https://jarvis.agcunae.com').replace(/\/$/, '')
   return (
     <div className="stack">
       <Panel
         title="Sua conta do Jarvis"
-        desc="Com a conta ligada, o financeiro e a memória moram na nuvem: o mesmo Jarvis aqui e no Telegram, sempre ligado. Quem cria as contas é o administrador, no site."
+        desc="O Jarvis trabalha neste computador: financeiro, memória e conversas ficam aqui. A conta serve para o launcher (instalar e atualizar) e para o Telegram."
       >
         {e.ligado ? (
           <>
             <dl className="kv-a">
               <dt>Conta</dt>
               <dd>
-                {p?.nome ?? e.perfil} {p?.email ? `· ${p.email}` : ''} {p?.dono ? '· administrador' : ''}
+                {c ? `${c.nome}${c.email ? ` · ${c.email}` : ''}${c.dono ? ' · administrador' : ''}` : '—'}
               </dd>
-              <dt>Dados deste computador</dt>
-              <dd>{e.subido ? `enviados em ${e.subido}` : 'enviando…'}</dd>
+              <dt>Telegram</dt>
+              <dd>{e.ponte ? 'conectado: as mensagens chegam neste computador' : 'desconectado (tentando de novo)'}</dd>
             </dl>
             {e.erro && <p className="muted">{e.erro}</p>}
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn" onClick={() => window.open(`${site}/site`, '_blank')}>
-                Abrir o site {p?.dono ? '(contas e robô)' : ''}
-              </button>
-              <button
-                className="btn"
-                disabled={busy}
-                onClick={() =>
-                  passo(async () => {
-                    const r = await api<any>('/api/nuvem/subir', { method: 'POST', json: {} })
-                    if (r.financeiro?.ok === false) toast(r.financeiro.motivo, true)
-                    return r
-                  }, 'Ajustes e memória enviados')
-                }
-              >
-                Enviar ajustes de novo
-              </button>
-            </div>
+            <button className="btn" onClick={() => window.open(`${site}/site`, '_blank')}>
+              Abrir o site {c?.dono ? '(contas e robô)' : ''}
+            </button>
           </>
         ) : (
           <>
             <p className="muted">Instale e entre pelo Jarvis Launcher: ele liga este Jarvis à sua conta sozinho.</p>
             {!mao ? (
               <button className="btn" onClick={() => setMao(true)}>
-                Ligar à mão (com um token do /token do Telegram)
+                Ligar à mão
               </button>
             ) : (
               <div className="form-row">
@@ -1167,10 +1139,21 @@ function NuvemPage() {
                   <input value={url} onChange={(x) => setUrl(x.target.value)} />
                 </label>
                 <label className="field-a">
-                  <span>Token</span>
+                  <span>Acesso</span>
                   <input value={token} onChange={(x) => setToken(x.target.value)} placeholder="jv_…" type="password" />
                 </label>
-                <button className="btn primary" disabled={busy || !url || !token} onClick={() => passo(() => api('/api/nuvem', { method: 'PUT', json: { url, token } }), 'Ligado à sua conta')}>
+                <button
+                  className="btn primary"
+                  disabled={busy || !url || !token}
+                  onClick={async () => {
+                    setBusy(true)
+                    const r = await api<any>('/api/nuvem', { method: 'PUT', json: { url, token } })
+                    setBusy(false)
+                    if (r.ok) toast('Ligado à sua conta')
+                    else toast(r.erro ?? 'Não deu certo', true)
+                    carregar()
+                  }}
+                >
                   Ligar
                 </button>
               </div>
@@ -1179,12 +1162,12 @@ function NuvemPage() {
         )}
       </Panel>
 
-      {e.ligado && p && (
-        <Panel title="Telegram" desc={p.robo_configurado ? `O robô @${p.robo}: a conversa com ele é o seu Jarvis, com o seu financeiro.` : 'O administrador ainda não configurou o robô no site.'}>
-          {p.telegram_ligado ? (
+      {e.ligado && c && (
+        <Panel title="Telegram" desc={c.robo_configurado ? `O robô @${c.robo}: a conversa com ele é este Jarvis, com o seu financeiro.` : 'O administrador ainda não configurou o robô no site.'}>
+          {c.telegram_ligado ? (
             <p className="muted">Seu Telegram está ligado a esta conta.</p>
-          ) : p.telegram_link ? (
-            <button className="btn primary" onClick={() => window.open(p.telegram_link!, '_blank')}>
+          ) : c.telegram_link ? (
+            <button className="btn primary" onClick={() => window.open(c.telegram_link!, '_blank')}>
               Abrir no Telegram
             </button>
           ) : null}

@@ -60,13 +60,13 @@ async def notify(titulo: str, texto: str, nivel: str = "info", falar: bool = Tru
     await hub.broadcast({"type": "alerta", **alert, "silencioso": quiet})
     if quiet:
         return alert
-    from . import nuvem
+    from . import proativo
 
-    if nuvem.NA_NUVEM:  # na nuvem não há tela nem voz: o aviso vai para o Telegram (se o notebook não estiver em uso)
+    if not proativo.presenca.presente:  # a pessoa não está na frente do computador: o aviso vai para o Telegram
         from . import telegram
 
-        await telegram.avisar(titulo, texto)
-        return alert
+        if await telegram.avisar(titulo, texto):
+            return alert
     if cfg.get("notificacao_mac", True) and sys.platform == "darwin":
         safe = lambda s: s.replace('"', "'")  # noqa: E731
         subprocess.run(
