@@ -538,8 +538,22 @@ def _chave(sha: str) -> str:
     return f"versoes/objetos/{sha[:2]}/{sha}"
 
 
+def _conhecidos() -> set[str]:
+    """Hashes que a loja já tem (lista local): conferir no R2 arquivo por arquivo pesava na VPS."""
+    f = _loja() / "conhecidos.txt"
+    return set(f.read_text().split()) if f.exists() else set()
+
+
+def _anotar(hashes: set[str]) -> None:
+    f = _loja() / "conhecidos.txt"
+    novos = hashes - _conhecidos()
+    if novos:
+        with f.open("a") as out:
+            out.write("".join(f"{h}\n" for h in sorted(novos)))
+
+
 def _tem(sha: str) -> bool:
-    if (_loja() / "objetos" / sha).exists():
+    if sha in _conhecidos() or (_loja() / "objetos" / sha).exists():
         return True
     s3, b = _r2()
     if not s3:
@@ -572,13 +586,17 @@ def _ci(request: Request) -> None:
 
 @router.post("/api/loja/preparar")
 async def loja_preparar(request: Request):
-    """A compilação manda os hashes; a loja responde quais ainda faltam."""
+    """A compilação manda os hashes; a loja responde quais faltam e, para cada um, um link assinado de envio
+    direto para o R2 (os arquivos não passam pela VPS; aqui só se assina um texto)."""
     _ci(request)
     hashes = sorted({h for h in (await request.json()).get("hashes", []) if re.fullmatch(r"[0-9a-f]{64}", h)})
-    import asyncio
-
-    faltam = [h for h, tem in zip(hashes, await asyncio.gather(*[asyncio.to_thread(_tem, h) for h in hashes])) if not tem]
-    return {"faltam": faltam}
+    conhecidos = _conhecidos()
+    faltam = [h for h in hashes if h not in conhecidos and not (_loja() / "objetos" / h).exists()]
+    s3, b = _r2()
+    if not s3:  # sem R2 (testes): o envio vem para cá mesmo
+        return {"faltam": faltam, "envio": {h: None for h in faltam}}
+    envio = {h: s3.generate_presigned_url("put_object", Params={"Bucket": b, "Key": _chave(h)}, ExpiresIn=6 * 3600) for h in faltam}
+    return {"faltam": faltam, "envio": envio}
 
 
 @router.put("/api/loja/objeto/{sha}")
@@ -602,6 +620,7 @@ async def loja_objeto(sha: str, request: Request):
         os.unlink(tmp.name)
     else:
         os.replace(tmp.name, _loja() / "objetos" / sha)
+    _anotar({sha})
     return {"ok": True}
 
 
@@ -613,9 +632,14 @@ async def loja_publicar(request: Request):
     produto, sistema, versao = m.get("produto"), m.get("sistema"), str(m.get("versao", ""))
     if produto not in PRODUTOS or sistema not in SISTEMAS or not versao:
         raise HTTPException(400)
-    faltando = [a["sha"] for a in m.get("arquivos", []) if a.get("sha") and not _tem(a["sha"])]
-    if faltando:
-        raise HTTPException(400, f"{len(faltando)} arquivos ainda não foram enviados")
+    hashes = {a["sha"] for a in m.get("arquivos", []) if a.get("sha")}
+    # a compilação conferiu cada envio (o R2 recusa link vencido e o hash vai no nome); sem R2, confere aqui
+    s3, _ = _r2()
+    if not s3:
+        faltando = [h for h in hashes if not (_loja() / "objetos" / h).exists()]
+        if faltando:
+            raise HTTPException(400, f"{len(faltando)} arquivos ainda não foram enviados")
+    _anotar(hashes)
     _manifesto_arquivo(produto, sistema, versao).write_text(json.dumps(m, ensure_ascii=False))
     p = _p()
     r = p.ler()

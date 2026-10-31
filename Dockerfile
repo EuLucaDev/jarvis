@@ -20,9 +20,13 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# dependências do núcleo (com o grupo da nuvem: Chromium para imagens/PDF, backup no R2)
+# dependências do núcleo (com o grupo da nuvem: Chromium para imagens/PDF, backup no R2), SEM o que a nuvem não
+# usa (câmera, mãos, voz offline, áudio): imagem com metade do tamanho e montagem leve para a VPS
 COPY backend/pyproject.toml backend/uv.lock backend/
-RUN cd backend && uv sync --frozen --group nuvem --no-install-project \
+RUN cd backend && uv export --frozen --group nuvem --no-hashes --no-emit-project \
+      | grep -viE "^(mediapipe|opencv|onnxruntime|rtmlib|vosk|sounddevice|jax|jaxlib|scipy|matplotlib|ml-dtypes|opt-einsum|flatbuffers|sentencepiece|absl-py)" > /tmp/req.txt \
+ && uv venv .venv --python 3.12 \
+ && uv pip install --python .venv/bin/python -r /tmp/req.txt \
  && .venv/bin/playwright install --with-deps chromium
 
 # motor do financeiro
@@ -36,8 +40,8 @@ RUN mkdir -p financeiro/motor/tessdata \
 COPY frontend/package.json frontend/package-lock.json frontend/
 RUN cd frontend && npm ci
 COPY . .
-RUN cd frontend && npm run build \
- && cd ../backend && uv sync --frozen --group nuvem
+# a interface é montada com memória limitada (a VPS roda outros sites)
+RUN cd frontend && NODE_OPTIONS=--max-old-space-size=768 npm run build
 
 VOLUME /dados
 EXPOSE 8700

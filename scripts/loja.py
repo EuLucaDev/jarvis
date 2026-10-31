@@ -5,7 +5,8 @@
   loja.py publicar --produto instalador --sistema mac --versao 1.0.0 --arquivo "Instalar Jarvis Launcher.pkg"
 
 Monta o manifesto (cada arquivo com o sha256, o tamanho e se é executável; links simbólicos como links), pergunta à
-loja quais arquivos ela ainda não tem, envia só esses e publica. Variáveis: LOJA_URL e LOJA_TOKEN.
+loja quais arquivos ela ainda não tem e recebe um link assinado para cada um: o arquivo vai DIRETO para o R2, sem
+passar pela VPS (que só assina e, no fim, registra a versão). Variáveis: LOJA_URL e LOJA_TOKEN.
 """
 
 from __future__ import annotations
@@ -21,8 +22,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-TENTATIVAS = 8
-AO_MESMO_TEMPO = 3  # envios em paralelo por máquina (três máquinas publicam juntas)
+TENTATIVAS = 10  # com espera crescente: ~15 min no total, se a VPS estiver ocupada
+AO_MESMO_TEMPO = 6  # envios em paralelo ao R2 (direto, sem passar pela VPS)
 
 
 def sha256(p: Path) -> str:
@@ -72,6 +73,23 @@ def chamar(metodo: str, caminho: str, corpo: bytes | None = None, arquivo: Path 
     return {}
 
 
+def enviar_direto(url: str, arquivo: Path) -> None:
+    """PUT no link assinado do R2 (com novas tentativas, esperando cada vez mais)."""
+    for tentativa in range(TENTATIVAS):
+        try:
+            with arquivo.open("rb") as f:
+                req = urllib.request.Request(url, data=f, method="PUT", headers={"content-length": str(arquivo.stat().st_size)})
+                with urllib.request.urlopen(req, timeout=900) as r:
+                    if r.status in (200, 201, 204):
+                        return
+        except Exception as exc:  # noqa: BLE001
+            if tentativa == TENTATIVAS - 1:
+                raise
+            espera = min(60, 2 ** (tentativa + 1))
+            print(f"  R2: tentando de novo em {espera}s ({exc})", file=sys.stderr)
+            time.sleep(espera)
+
+
 def publicar(a: argparse.Namespace) -> None:
     if a.arquivo:
         f = Path(a.arquivo)
@@ -83,10 +101,18 @@ def publicar(a: argparse.Namespace) -> None:
         locais = {i["sha"]: raiz / i["caminho"] for i in itens if "sha" in i}
     total = sum(i.get("tamanho", 0) for i in itens)
     print(f"{a.produto}/{a.sistema} {a.versao}: {len(itens)} itens, {total / 1e6:.0f} MB")
-    faltam = chamar("POST", "/api/loja/preparar", json.dumps({"hashes": sorted(locais)}).encode())["faltam"]
-    print(f"  a loja não tem {len(faltam)} arquivos ({sum(locais[h].stat().st_size for h in faltam) / 1e6:.0f} MB); enviando")
+    resp = chamar("POST", "/api/loja/preparar", json.dumps({"hashes": sorted(locais)}).encode())
+    faltam, envio = resp["faltam"], resp.get("envio") or {}
+    print(f"  a loja não tem {len(faltam)} arquivos ({sum(locais[h].stat().st_size for h in faltam) / 1e6:.0f} MB); enviando direto ao R2")
+
+    def um(h: str) -> None:
+        if envio.get(h):
+            enviar_direto(envio[h], locais[h])
+        else:  # loja sem R2 (testes): pela portaria
+            chamar("PUT", f"/api/loja/objeto/{h}", arquivo=locais[h])
+
     with ThreadPoolExecutor(AO_MESMO_TEMPO) as ex:
-        for _ in ex.map(lambda h: chamar("PUT", f"/api/loja/objeto/{h}", arquivo=locais[h]), faltam):
+        for _ in ex.map(um, faltam):
             pass
     corpo = {"produto": a.produto, "sistema": a.sistema, "versao": a.versao, "notas": a.notas or "", "arquivos": itens}
     chamar("POST", "/api/loja/publicar", json.dumps(corpo).encode())
