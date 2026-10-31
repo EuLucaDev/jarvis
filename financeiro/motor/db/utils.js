@@ -41,7 +41,10 @@ const monthKey = value => dateOnly(value).slice(0, 7);
 
 function addMonths(value, amount) {
   const parts = dateOnly(value).split('-').map(Number);
-  const date = new Date(parts[0], (parts[1] || 1) - 1 + Number(amount || 0), parts[2] || 1, 12);
+  const mes = (parts[1] || 1) - 1 + Number(amount || 0);
+  // 31/10 menos um mês é 30/09 (e não "31/09", que o Date vira 01/10 e pula setembro)
+  const ultimo = new Date(parts[0], mes + 1, 0, 12).getDate();
+  const date = new Date(parts[0], mes, Math.min(parts[2] || 1, ultimo), 12);
   return dateOnly(date);
 }
 
