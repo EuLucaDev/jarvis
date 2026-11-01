@@ -14,6 +14,7 @@ como partes da mensagem (a Gemini entende os três).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -29,6 +30,8 @@ from .hub import coletor
 log = logging.getLogger("jarvis.agente")
 
 PASSOS = 10
+ESPERA = 20  # segundos por modelo: passou disso (ou deu cota/sobrecarga), vai para o próximo
+_pausados: dict[str, float] = {}  # modelo → até quando pular (10 min depois de falhar)
 HISTORICO = 16
 PERMITIDAS = {
     "mostrar_pesquisa", "consultar_clima", "mostrar_lista", "lembrar", "buscar_memorias", "esquecer",
@@ -181,19 +184,21 @@ async def responder(chave: str, partes: list[types.Part], resumo_usuario: str, c
     contents = [*_historico(chave), types.Content(role="user", parts=partes)]
     cartoes: list[dict[str, Any]] = []
     token = coletor.set(cartoes)
-    modelos = [settings.text_model, "gemini-3.5-flash", FALLBACK]
+    agora = time.time()
+    modelos = [m for m in [settings.text_model, "gemini-3.5-flash", FALLBACK] if _pausados.get(m, 0) < agora] or [FALLBACK]
     try:
         for _ in range(PASSOS):
             r = None
-            for m in modelos:
+            for m in list(modelos):
                 try:
-                    r = await c.aio.models.generate_content(
+                    r = await asyncio.wait_for(c.aio.models.generate_content(
                         model=m, contents=contents,
                         config=types.GenerateContentConfig(system_instruction=_prompt(canal), tools=_declaracoes(assuntos),
-                                                           automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)))
+                                                           automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))), ESPERA)
                     break
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("%s falhou: %s", m, str(exc)[:160])
+                except Exception as exc:  # noqa: BLE001 - cota, sobrecarga (503) ou lento: pula e deixa pausado um tempo
+                    log.warning("%s falhou: %s", m, (str(exc) or type(exc).__name__)[:160])
+                    _pausados[m] = time.time() + 600
                     modelos = [x for x in modelos if x != m] or [FALLBACK]
             if r is None or not r.candidates:
                 resp.texto = "Os modelos da Gemini não responderam agora. Tente de novo em um minuto."

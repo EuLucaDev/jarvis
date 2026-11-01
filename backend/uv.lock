@@ -477,7 +477,7 @@ wheels = [
 
 [[package]]
 name = "jarvis-core"
-version = "2.12.1"
+version = "2.12.2"
 source = { virtual = "." }
 dependencies = [
     { name = "comtypes", marker = "sys_platform == 'win32'" },
