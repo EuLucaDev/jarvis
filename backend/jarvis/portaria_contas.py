@@ -177,6 +177,7 @@ def _admin(request: Request) -> tuple[str, dict[str, Any]]:
 def _publica(cid: str, c: dict[str, Any]) -> dict[str, Any]:
     return {"id": cid, "nome": c["nome"], "email": c["email"], "admin": c.get("admin", False), "ativa": c.get("ativa", True),
             "criado": c.get("criado"), "ultimo_uso": c.get("ultimo_uso"), "senha_definida": bool(c.get("senha")),
+            "so_telegram": bool(c.get("so_telegram")),
             "dispositivos": [{"id": k, "sistema": d.get("sistema"), "nome": d.get("nome"), "jarvis": d.get("jarvis"),
                               "launcher": d.get("launcher"), "visto": d.get("visto")} for k, d in c.get("dispositivos", {}).items()]}
 
@@ -223,9 +224,27 @@ async def site_eu(request: Request):
     pf = r["perfis"].get(c["perfil"], {})
     return {**_publica(cid, c), "telegram_ligado": bool(pf.get("tg")), "robo": r.get("telegram", {}).get("usuario"),
             "conectado": p.conectado(c["perfil"]), "bolso": p.bolso.estado(c["perfil"]),
+            "chave_ok": (p.DADOS / "bolso" / c["perfil"] / "chave.bin").exists(),
             "sessoes": sum(1 for v in r["sessoes"].values() if v["conta"] == cid and v["expira"] > time.time()),
             "versoes": {s: _ultima(r, "jarvis", s) for s in SISTEMAS},
             "launcher": {s: bool(_ultima(r, "instalador", s)) for s in SISTEMAS}}
+
+
+@router.post("/api/site/chave")
+async def site_chave(request: Request):
+    """Conta só Telegram: a chave da Gemini da pessoa (conferida no Google antes de guardar, cifrada)."""
+    _, c = _sessao(request)
+    if not c.get("so_telegram"):
+        raise HTTPException(400, "A chave desta conta vem do Jarvis do computador.")
+    chave = str((await request.json()).get("chave", "")).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]{20,120}", chave):
+        raise HTTPException(400, "Isso não parece uma chave da Gemini. Copie de novo do Google AI Studio.")
+    p = _p()
+    r = await p.http().get(f"{p.bolso.GEMINI}/models", headers={"x-goog-api-key": chave}, params={"pageSize": 1})
+    if r.status_code != 200:
+        raise HTTPException(400, "O Google não aceitou essa chave. Confira se copiou inteira.")
+    p.bolso.guardar_chave(c["perfil"], chave)
+    return {"ok": True}
 
 
 @router.post("/api/site/senha")
@@ -340,6 +359,11 @@ async def admin_criar(request: Request):
     if any(c["email"] == email for c in r["contas"].values()):
         raise HTTPException(400, "Já existe uma conta com esse e-mail.")
     cid = _criar_conta(r, nome, email)
+    if corpo.get("so_telegram"):  # sem computador: o financeiro fica na conta (carteira.py) e o Telegram é o Jarvis dela
+        from . import carteira
+
+        r["contas"][cid]["so_telegram"] = True
+        carteira.ativar(r["contas"][cid]["perfil"], nome)
     link = _novo_link(r, cid)
     p.gravar(r)
     return {"ok": True, "conta": _publica(cid, r["contas"][cid]), "link": link}
@@ -390,9 +414,9 @@ async def admin_apagar(cid: str, request: Request):
     # pastas de versões antigas (quando a nuvem guardava dados) vão para a lixeira por 30 dias
     lixo = p.DADOS / "apagados"
     lixo.mkdir(exist_ok=True)
-    pasta = p.DADOS / "perfis" / pid
-    if pasta.exists():
-        shutil.move(str(pasta), str(lixo / f"{pid}-{time.strftime('%Y%m%d-%H%M%S')}"))
+    for pasta in (p.DADOS / "perfis" / pid, p.DADOS / "bolso" / pid):  # carteira e cópia do bolso também
+        if pasta.exists():
+            shutil.move(str(pasta), str(lixo / f"{pasta.parent.name}-{pid}-{time.strftime('%Y%m%d-%H%M%S')}"))
     r["perfis"].pop(pid, None)
     r["contas"].pop(cid, None)
     r["sessoes"] = {k: v for k, v in r["sessoes"].items() if v["conta"] != cid}

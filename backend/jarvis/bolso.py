@@ -25,7 +25,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from . import textos
+from . import carteira, textos
 
 log = logging.getLogger("jarvis.bolso")
 
@@ -95,7 +95,13 @@ def apagar_copia(pid: str) -> None:
 
 
 def copia(pid: str) -> dict[str, Any] | None:
+    if carteira.local(pid):  # conta só Telegram: os números vêm da carteira daqui, sempre atuais
+        return carteira.copia(pid, {**carteira.perfil(pid), "conversas": {}})
     return _ler(_pasta(pid) / "copia.bin")
+
+
+def guardar_chave(pid: str, chave: str) -> None:
+    _gravar(_pasta(pid) / "chave.bin", {"chave": chave})
 
 
 def _chave(pid: str) -> str:
@@ -104,7 +110,7 @@ def _chave(pid: str) -> str:
 
 def disponivel(pid: str) -> bool:
     d = _p().DADOS / "bolso" / pid
-    return (d / "copia.bin").exists() and (d / "chave.bin").exists()
+    return ((d / "copia.bin").exists() or (d / "carteira.bin").exists()) and (d / "chave.bin").exists()
 
 
 def estado(pid: str) -> dict[str, Any]:
@@ -117,11 +123,18 @@ def estado(pid: str) -> dict[str, Any]:
 
 
 def pendencias(pid: str) -> list[dict[str, Any]]:
+    if carteira.local(pid):
+        return []  # conta só Telegram: tudo já está gravado na carteira
     return _ler(_p().DADOS / "bolso" / pid / "pendencias.json", []) or []
 
 
 def _por_pendencia(pid: str, item: dict[str, Any]) -> dict[str, Any]:
     item = {"id": f"b{secrets.token_hex(5)}", "em": time.time(), **item}
+    if carteira.local(pid):  # conta só Telegram: grava na hora
+        res = carteira.aplicar(pid, item["id"], item["ferramenta"], item.get("args") or {})
+        if res.get("erro"):
+            raise ValueError(res["erro"])
+        return item
     lista = pendencias(pid) + [item]
     _gravar(_pasta(pid) / "pendencias.json", lista)
     asyncio.get_event_loop().create_task(despachar(pid))  # computador ligado agora (raro): já vai
@@ -129,10 +142,15 @@ def _por_pendencia(pid: str, item: dict[str, Any]) -> dict[str, Any]:
 
 
 def tem_pendencia(pid: str, ident: str) -> bool:
+    if carteira.local(pid):
+        return carteira.tem(pid, ident)
     return any(x["id"] == ident for x in pendencias(pid))
 
 
 def tirar_pendencia(pid: str, ident: str | None = None) -> dict[str, Any] | None:
+    if carteira.local(pid):
+        x = carteira.desfazer(pid, ident)
+        return {"resumo": carteira.resumo_item(x)} if x else None
     lista = pendencias(pid)
     alvo = next((x for x in reversed(lista) if (x["id"] == ident if ident else x["ferramenta"] != "pedido")), None)
     if alvo:
@@ -266,6 +284,10 @@ DECLS = [
      "parameters": {"type": "OBJECT", "properties": {"texto": {"type": S, "description": "O pedido completo, como ele disse."}}, "required": ["texto"]}},
     {"name": "pendentes", "description": "O que foi registrado aqui pelo celular e ainda vai entrar no computador.", "parameters": {"type": "OBJECT", "properties": {}}},
 ]
+DECL_CADASTRO = {"name": "cadastrar_conta", "description": "Cadastra uma conta bancária (com o saldo atual) ou um cartão (de crédito ou vale).",
+                 "parameters": {"type": "OBJECT", "properties": {"tipo": {"type": S, "enum": ["conta", "credito", "vale"]}, "nome": {"type": S},
+                                                                 "saldo_inicial": {"type": N}, "limite": {"type": N}}, "required": ["tipo", "nome"]}}
+SO_COMPUTADOR = {"pedido_para_o_computador", "pendentes"}
 
 
 class Resposta:
@@ -290,7 +312,9 @@ def _pendentes_txt(pid: str) -> list[str]:
 
 async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict[str, Any], resp: Resposta) -> dict[str, Any]:
     fin = c.get("financeiro")
-    nota = f"Cópia de {_quando(c)}."
+    local = bool(c.get("local"))
+    nota = "" if local else f"Cópia de {_quando(c)}."
+    aviso = "Registrado no seu financeiro." if local else "⏳ Entra no seu financeiro quando o computador ligar."
     if nome in ("consultar", "lancamentos", "relatorio_financeiro", "lancar", "transferir", "meta", "investir") and not fin:
         return {"erro": "O financeiro não veio na cópia deste computador."}
     if nome == "consultar":
@@ -381,12 +405,16 @@ async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict
         onde = f"{cartao['nome']} · {FORMA_NOME.get(forma or '', '')}" + (f" {a['parcelas']}x" if a.get("parcelas") and int(a["parcelas"]) > 1 else "") if cartao \
             else f"{conta['nome'] if conta else '—'} · {FORMA_NOME.get(args.get('forma', ''), 'Pix')}"
         rodape = ""
-        if conta and forma not in ("credito", "vale"):
+        if local:  # conta só Telegram: o saldo de verdade, já com este lançamento
+            nome_conta = args.get("conta") or (carteira.ler(pid)["contas"] or [{"nome": ""}])[0]["nome"]
+            if nome_conta and forma not in ("credito", "vale"):
+                rodape = f"💰 Saldo após lançamento ({textos.e(nome_conta)}): <b>{textos.brl(carteira.saldos(carteira.ler(pid)).get(nome_conta, 0))}</b>"
+        elif conta and forma not in ("credito", "vale"):
             rodape = f"💰 Saldo estimado ({textos.e(conta['nome'])}): <b>{textos.brl(textos.num(conta.get('saldo')) + _efeito(pid, conta['nome']))}</b>"
         msg = textos.registro("entrada" if entrada else "despesa", valor, [
             (textos.emoji_categoria(a.get("categoria") or ""), "Categoria", a.get("categoria")), ("📝", "Descrição", a.get("descricao")),
             ("📅", "Data", textos.data_br(data, _hoje(c))), ("🏦" if entrada else "💳", "Recebido em" if entrada else "Pago com", onde)],
-            rodape=rodape, nota="⏳ Entra no seu financeiro quando o computador ligar.")
+            rodape=rodape, nota=aviso)
         resp.mensagens.append({"texto": msg, "teclado": {"inline_keyboard": [[{"text": "Desfazer", "callback_data": f"n:d:{item['id']}"}]]}})
         return {"ok": True, "ja_mostrado": "O cartão do registro já foi mandado. Responda só com uma frase curta, no máximo."}
     if nome == "transferir":
@@ -399,7 +427,7 @@ async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict
         item = _por_pendencia(pid, {"chat": chat, "ferramenta": "financeiro_transferir", "args": {"valor": valor, "de": de["nome"], "para": para["nome"], "data": data},
                                     "resumo": f"Transferência {de['nome']} → {para['nome']} · {textos.brl(valor)}"})
         msg = textos.registro("transferencia", valor, [("↗️", "De", de["nome"]), ("↘️", "Para", para["nome"]), ("📅", "Data", textos.data_br(data, _hoje(c)))],
-                              nota="Não conta como gasto. ⏳ Entra no seu financeiro quando o computador ligar.")
+                              nota=f"Não conta como gasto. {aviso}")
         resp.mensagens.append({"texto": msg, "teclado": {"inline_keyboard": [[{"text": "Desfazer", "callback_data": f"n:d:{item['id']}"}]]}})
         return {"ok": True, "ja_mostrado": "O cartão já foi mandado. No máximo uma frase curta."}
     if nome == "meta":
@@ -412,7 +440,7 @@ async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict
             msg = textos.registro("meta", 0, [("💰", "Objetivo", textos.brl(valor)), ("📅", "Prazo", textos.data_br(a["prazo"]) if a.get("prazo") else "Não definido"),
                                               ("📌", "Status", "Em andamento")], destaque=a.get("meta"),
                                   rodape=f"Valor acumulado · <b>R$ 0,00</b>\n{textos.progresso(0, valor)}💡 Quer definir um prazo e um aporte mensal?",
-                                  nota="⏳ Entra no seu financeiro quando o computador ligar.")
+                                  nota=aviso)
         else:
             m = _achar(a.get("meta") or "", metas)
             if not m:
@@ -423,12 +451,14 @@ async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict
                                         "resumo": f"{'Guardar em' if acao == 'guardar' else 'Retirar de'} {m['nome']} · {textos.brl(valor)}"})
             msg = textos.registro("meta_deposito" if acao == "guardar" else "meta_retirada", valor, [("🎯", "Meta", m["nome"]), ("🏦", "Conta", conta and conta["nome"])],
                                   rodape=f"Acumulado · <b>{textos.brl(novo)}</b> de {textos.brl(m.get('alvo'))}\n{textos.progresso(novo, textos.num(m.get('alvo')))}",
-                                  nota="⏳ Entra no seu financeiro quando o computador ligar.")
+                                  nota=aviso)
         resp.mensagens.append({"texto": msg, "teclado": {"inline_keyboard": [[{"text": "Desfazer", "callback_data": f"n:d:{item['id']}"}]]}})
         return {"ok": True, "ja_mostrado": "O cartão já foi mandado. No máximo uma frase curta."}
     if nome == "investir":
         inv = (fin.get("investimentos") or {}).get("ativos") or []
         alvo = _achar(a.get("investimento") or "", inv)
+        if not alvo and local:  # conta só Telegram: o primeiro aporte cria o investimento
+            alvo = {"nome": str(a.get("investimento") or "Investimento")[:40], "valor": 0}
         if not alvo:
             return {"erro": f"Não achei '{a.get('investimento')}' nos investimentos dele.", "investimentos": [x["nome"] for x in inv][:20],
                     "instrucao": "Investimento novo: use pedido_para_o_computador."}
@@ -440,7 +470,7 @@ async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict
                                     "resumo": f"{'Aporte' if acao == 'aportar' else 'Resgate'} {alvo['nome']} · {textos.brl(valor)}"})
         msg = textos.registro("investimento" if acao == "aportar" else "resgate", valor, [
             ("📈", "Ativo", alvo["nome"]), ("🏷️", "Operação", "Aplicação" if acao == "aportar" else "Resgate"), ("📅", "Data", textos.data_br(data, _hoje(c))),
-            ("💼", "Posição antes", textos.brl(alvo.get("valor")))], nota="Rentabilidade não incluída. ⏳ Entra no seu financeiro quando o computador ligar.")
+            ("💼", "Posição antes", textos.brl(alvo.get("valor")))], nota=f"Rentabilidade não incluída. {aviso}")
         resp.mensagens.append({"texto": msg, "teclado": {"inline_keyboard": [[{"text": "Desfazer", "callback_data": f"n:d:{item['id']}"}]]}})
         return {"ok": True, "ja_mostrado": "O cartão já foi mandado. No máximo uma frase curta."}
     if nome == "desfazer":
@@ -466,7 +496,22 @@ async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict
             return {"erro": "Esse horário já passou."}
         agendar(pid, chat, str(a.get("texto", "")), t.timestamp())
         return {"ok": True, "quando": t.strftime("%d/%m às %H:%M")}
+    if nome == "cadastrar_conta":
+        if not local:
+            return {"erro": "Cadastros são feitos no Jarvis do computador."}
+        tipo = a.get("tipo") or "conta"
+        res = carteira.cadastrar(pid, tipo, str(a.get("nome") or ""), textos.num(a.get("saldo_inicial")), textos.num(a.get("limite")) or None)
+        if res.get("ok"):
+            conta = tipo == "conta"
+            linhas = [textos.titulo("🏦" if conta else "💳", "Conta cadastrada" if conta else "Cartão cadastrado"),
+                      f"<b>{textos.e(a.get('nome') or 'Conta principal')}</b>", textos.SEP,
+                      textos.campo("💰", "Saldo inicial", textos.brl(a.get("saldo_inicial") or 0)) if conta
+                      else textos.campo("📊", "Limite", textos.brl(a.get("limite")) if a.get("limite") else "não informado")]
+            resp.mensagens.append({"texto": "\n".join(linhas)})
+        return res if not res.get("ok") else {"ok": True, "ja_mostrado": "O cartão já foi mandado. No máximo uma frase curta."}
     if nome == "pedido_para_o_computador":
+        if local:
+            return {"erro": "Essa conta é só Telegram: isso precisa do Jarvis num computador."}
         _por_pendencia(pid, {"chat": chat, "ferramenta": "pedido", "args": {"texto": a.get("texto", "")}, "resumo": a.get("texto", "")[:60]})
         return {"ok": True, "instrucao": "Diga numa frase que ficou guardado e que ele responde aqui assim que o computador ligar."}
     if nome == "pendentes":
@@ -483,16 +528,26 @@ def _prompt(c: dict[str, Any]) -> str:
     nomes_cat = sorted({(x.get("name") if isinstance(x, dict) else str(x)) for v in cats.values() if isinstance(v, list) for x in v} - {None})[:60]
     contas = ", ".join(x["nome"] for x in fin.get("contas") or []) or "nenhuma"
     cartoes = ", ".join(x["nome"] for x in fin.get("cartoes") or []) or "nenhum"
+    if c.get("local"):
+        situacao = """Esta conta é só Telegram: o financeiro mora aqui e tudo que você registra entra na hora. Ela não tem o Jarvis
+num computador. Você tem as contas, os cartões, os lançamentos, as metas, os investimentos e a memória.
+- Se ainda não houver conta cadastrada, no primeiro lançamento pergunte o nome da conta e o saldo atual e use
+  cadastrar_conta (cartão de crédito também: cadastrar_conta com tipo credito). Sem resposta, use "Conta principal".
+- Não existe aqui: importar extrato, faturas detalhadas, orçamento, despesas fixas, sistemas como o WorkFlow. Diga
+  com gentileza que isso vem com o Jarvis num computador.
+- Para corrigir um registro: desfazer (o último) e registrar de novo."""
+    else:
+        situacao = f"""O computador está desligado agora: você responde com a última cópia do Jarvis ({_quando(c)}). Você tem o
+financeiro (últimos três meses, contas, cartões, o que vence, metas, investimentos) e a memória.
+- Registros (lancar, transferir, meta, investir, lembrar) ficam guardados e entram no financeiro quando o computador
+  ligar; o cartão já avisa isso, não repita.
+- Só o computador faz: sistemas (WorkFlow), importar extrato, editar/apagar lançamentos antigos, pagar contas,
+  despesas fixas, abrir coisas no computador. Para isso, pedido_para_o_computador (ele faz e responde aqui depois)."""
     return f"""Você é J.A.R.V.I.S., o assistente pessoal de {nome}. {trato} Vocês conversam pelo Telegram.
 Português do Brasil, jeito do J.A.R.V.I.S. dos filmes: formal sem ser frio, curto e preciso, ironia leve às vezes.
 Agora são {agora}. Cidade: {c.get('cidade') or ''}.
 
-O computador dele está desligado agora: você responde com a última cópia do Jarvis dele ({_quando(c)}). Você tem o
-financeiro (últimos três meses, contas, cartões, o que vence, metas, investimentos) e a memória dele.
-- Registros (lancar, transferir, meta, investir, lembrar) ficam guardados e entram no financeiro quando o computador
-  ligar; o cartão já avisa isso, não repita.
-- Só o computador faz: sistemas (WorkFlow), importar extrato, editar/apagar lançamentos antigos, pagar contas,
-  despesas fixas, abrir coisas no computador. Para isso, pedido_para_o_computador (ele faz e responde aqui depois).
+{situacao}
 - Áudio: entenda e aja. Foto de nota fiscal, cupom ou comprovante de Pix: leia valor, data, estabelecimento e forma,
   proponha o lançamento e só lance depois do sim.
 - Não invente números: consulte. Se a pergunta for sobre algo depois da cópia, diga de quando é a cópia.
@@ -507,19 +562,27 @@ Como responder: {textos.ESTILO}
 # ---------------------------------------------------------------- Gemini (REST, só texto e anexos pequenos)
 
 
+_pausados: dict[str, float] = {}  # modelo → até quando pular (cota estourada ou lento demais)
+
+
 async def _gerar(chave: str, modelos: list[str], corpo: dict[str, Any]) -> dict[str, Any] | None:
-    """Tenta os modelos na ordem; o que falhar (cota, fora do ar) sai da lista desta conversa."""
-    for m in list(modelos):
+    """Tenta os modelos na ordem; o que falhar (cota, lento, fora do ar) sai desta conversa e fica 10 min pausado."""
+    agora = time.time()
+    vivos = [m for m in modelos if _pausados.get(m, 0) < agora] or modelos[-1:]
+    for m in vivos:
         try:
-            r = await _p().http().post(f"{GEMINI}/models/{m}:generateContent", json=corpo, headers={"x-goog-api-key": chave}, timeout=90)
+            r = await _p().http().post(f"{GEMINI}/models/{m}:generateContent", json=corpo, headers={"x-goog-api-key": chave}, timeout=20)
             if r.status_code == 200:
                 return r.json()
+            if r.status_code in (429, 500, 503):
+                _pausados[m] = time.time() + 600
             log.warning("bolso %s: %s %s", m, r.status_code, r.text[:160].replace("\n", " "))
             if r.status_code in (400, 401, 403) and "API key" in r.text:
                 return {"erro_chave": True}
         except Exception as exc:  # noqa: BLE001
-            log.warning("bolso %s: %s", m, exc)
-        if len(modelos) > 1:
+            log.warning("bolso %s: %s", m, repr(exc)[:120])
+            _pausados[m] = time.time() + 600
+        if len(modelos) > 1 and m in modelos:
             modelos.remove(m)
     return None
 
@@ -527,7 +590,7 @@ async def _gerar(chave: str, modelos: list[str], corpo: dict[str, Any]) -> dict[
 def _conversa(pid: str, chat: str, c: dict[str, Any]) -> list[dict[str, Any]]:
     conv = _ler(_pasta(pid) / "conversa.json", {}) or {}
     atual = conv.get(chat) or {}
-    if atual.get("em", 0) < c.get("gerado", 0):  # a cópia é mais nova: a conversa do computador vale
+    if not c.get("local") and atual.get("em", 0) < c.get("gerado", 0):  # a cópia é mais nova: a conversa do computador vale
         return [{"papel": x["papel"], "texto": x["texto"], "em": 0} for x in (c.get("conversas") or {}).get(chat, [])][-HISTORICO:]
     return atual.get("linhas", [])[-HISTORICO:]
 
@@ -547,7 +610,8 @@ async def responder(pid: str, chat: int, partes: list[dict[str, Any]], resumo: s
     modelos = [m for m in [c.get("modelo"), *RESERVA] if m]
     for _ in range(PASSOS):
         r = await _gerar(chave, modelos, {"systemInstruction": {"parts": [{"text": _prompt(c)}]}, "contents": contents,
-                                          "tools": [{"functionDeclarations": DECLS}]})
+                                          "tools": [{"functionDeclarations": ([d for d in DECLS if d["name"] not in SO_COMPUTADOR] + [DECL_CADASTRO])
+                                                     if c.get("local") else DECLS}]})
         if not r or r.get("erro_chave"):
             resp.texto = ("A chave da Gemini do seu Jarvis não foi aceita. Abra o Jarvis no computador para atualizar."
                           if r else "Os modelos da Gemini não responderam agora. Tente de novo em um minuto.")
@@ -636,6 +700,12 @@ AJUDA = ("<b>Jarvis</b> · seu computador está desligado, então quem responde 
          "• Lance gastos e entradas (por texto, áudio ou foto do comprovante): entram no financeiro quando o computador ligar\n"
          "• \"Me lembra amanhã às 9h de pagar o boleto\"\n"
          "• O resto (WorkFlow, importar extrato) fica guardado e o computador faz assim que ligar")
+AJUDA_LOCAL = ("<b>Jarvis</b> · o seu financeiro pelo Telegram.\n\n"
+               "• Lance gastos e entradas por texto, áudio ou foto do comprovante: \"gastei 45 de gasolina\"\n"
+               "• Pergunte: \"quanto gastei com mercado esse mês?\", \"qual meu saldo?\"\n"
+               "• Peça o <b>relatório do mês</b>, crie metas, registre investimentos\n"
+               "• \"Me lembra amanhã às 9h de pagar o boleto\"\n\n"
+               "/mes · relatório do mês\n/desfazer · desfaz o último registro\n/esquecer · começa a conversa do zero")
 COMANDOS = {"/hoje": "Me dê o resumo de hoje: saldo, o que vence nos próximos dias e orçamento apertado.",
             "/contas": "O que vence nos próximos 7 dias?"}
 
@@ -664,7 +734,7 @@ async def _tratar(pid: str, upd: dict[str, Any]) -> None:
                 await p.tg("answerCallbackQuery", {"callback_query_id": cq["id"], "text": "Esse mês não está na cópia; peça com o computador ligado."})
                 return
             await p.tg("answerCallbackQuery", {"callback_query_id": cq["id"]})
-            await p.tg("editMessageText", {"chat_id": chat, "message_id": msg["message_id"], "text": textos.relatorio_secao(dm, secao, f"Cópia de {_quando(c)}."),
+            await p.tg("editMessageText", {"chat_id": chat, "message_id": msg["message_id"], "text": textos.relatorio_secao(dm, secao, "" if c.get("local") else f"Cópia de {_quando(c)}."),
                                            "parse_mode": "HTML", "reply_markup": textos.teclado_relatorio(mes, secao)})
             return
         await p.tg("answerCallbackQuery", {"callback_query_id": cq["id"]})
@@ -690,7 +760,7 @@ async def _tratar(pid: str, upd: dict[str, Any]) -> None:
     if texto.startswith("/"):
         cmd = texto.split()[0].split("@")[0].lower()
         if cmd in ("/start", "/ajuda", "/help"):
-            await _enviar(chat, AJUDA)
+            await _enviar(chat, AJUDA_LOCAL if c.get("local") else AJUDA)
             return
         if cmd == "/esquecer":
             _guardar_conversa(pid, str(chat), [])

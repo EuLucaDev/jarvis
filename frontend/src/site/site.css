@@ -1583,3 +1583,72 @@ html.pagina-site #root {
   gap: 10px;
   justify-items: start;
 }
+
+.jv-opcao {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--canvas) 50%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.jv-opcao b {
+  display: block;
+  font-size: 13.5px;
+}
+.jv-opcao small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+.jv-chave {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.12);
+  transition: background 0.2s;
+}
+.jv-chave::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.25s var(--ease);
+}
+.jv-opcao[aria-checked='true'] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--signal) 45%, transparent);
+}
+.jv-opcao[aria-checked='true'] .jv-chave {
+  background: var(--signal);
+}
+.jv-opcao[aria-checked='true'] .jv-chave::after {
+  transform: translateX(14px);
+}
+.jv-exemplos {
+  margin: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+.jv-exemplos li {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 13.5px;
+}

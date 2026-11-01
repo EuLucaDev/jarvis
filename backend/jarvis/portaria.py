@@ -212,6 +212,10 @@ async def _entregar(upd: dict[str, Any]) -> None:
                 return
             except Exception:  # noqa: BLE001 - conexão caída: tenta o próximo, senão vai para a fila
                 continue
+        if bolso.carteira.local(pid) and not bolso.disponivel(pid):  # conta só Telegram sem a chave ainda
+            if "callback_query" not in upd:
+                await tg("sendMessage", {"chat_id": chat["id"], "text": "Quase pronto: para eu responder, cole a sua chave da Gemini no site do Jarvis (Início → Chave da Gemini). Leva um minuto."})
+            return
         documento = bolso.documento_para_o_computador(upd)
         if bolso.disponivel(pid) and not documento:  # computador desligado: o Jarvis de bolso responde
             asyncio.create_task(bolso.tratar(pid, upd))
@@ -219,6 +223,9 @@ async def _entregar(upd: dict[str, Any]) -> None:
         # computador desligado: guarda e avisa (uma vez por leva)
         f = _fila(pid)
         linhas = f.read_text().splitlines() if f.exists() else []
+        if documento and bolso.carteira.local(pid):
+            await tg("sendMessage", {"chat_id": chat["id"], "text": "📎 Importar extrato ainda não existe na conta só Telegram. Me diga os lançamentos (ou mande a foto do comprovante) que eu registro."})
+            return
         if documento:
             await tg("sendMessage", {"chat_id": chat["id"], "text": "📎 Guardei o arquivo. Quando o computador ligar, eu leio e mostro o que vou importar."})
         elif "callback_query" not in upd and time.time() - _avisado.get(pid, 0) > 300:  # no máximo um aviso a cada 5 min
