@@ -292,6 +292,20 @@ CREATE TABLE IF NOT EXISTS investment_snapshots (
   updated_at        TEXT NOT NULL
 );
 
+-- Perfil do investidor e política da carteira. Cada mudança vira uma versão
+-- nova (nunca se reescreve a anterior): a versão mais alta de cada tipo é a
+-- que vale, e as outras são a trilha de revisão.
+CREATE TABLE IF NOT EXISTS investment_profile_versions (
+  id          TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,            -- PERFIL | POLITICA
+  version     INTEGER NOT NULL,
+  data        TEXT NOT NULL DEFAULT '{}',
+  reason      TEXT DEFAULT '',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  UNIQUE (kind, version)
+);
+
 -- ---------------------------------------------------------------------------
 -- Transferências entre contas
 --

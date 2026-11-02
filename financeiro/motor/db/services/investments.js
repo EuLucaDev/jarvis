@@ -36,6 +36,28 @@ const LEGACY_CLASSES = { FUNDO_IMOBILIARIO: 'FII', RENDA_VARIAVEL: 'ACAO' };
 const classMeta = type => ASSET_CLASSES.find(item => item.value === (LEGACY_CLASSES[type] || type))
   || { value: type || 'OUTROS', label: String(type || 'Outros').replaceAll('_', ' '), quoted: false, market: 'BR' };
 const roundQuantity = value => Math.round(toNumber(value) * 100000000) / 100000000;
+// Preço unitário e câmbio não são dinheiro: cripto, frações e ativos baratos
+// precisam das casas decimais. O arredondamento em centavos fica só nos totais.
+const roundPrice = value => Math.round(toNumber(value) * 100000000) / 100000000;
+const roundRate = value => Math.round(toNumber(value) * 1000000) / 1000000;
+
+// Tipos de operação. Entrada/saída de dinheiro da posição, eventos sem dinheiro
+// e eventos que ainda não têm tratamento próprio (precisam de registro manual
+// em partes, para não criar ganho que não existiu).
+const OPERATION_TYPES = ['COMPRA', 'VENDA', 'APORTE', 'RESGATE', 'AMORTIZACAO', 'BONIFICACAO', 'DESDOBRAMENTO', 'GRUPAMENTO'];
+const BUY_TYPES = ['COMPRA', 'APORTE'];
+const SELL_TYPES = ['VENDA', 'RESGATE'];
+const CASH_IN_TYPES = [...SELL_TYPES, 'AMORTIZACAO'];
+const NO_CASH_TYPES = ['BONIFICACAO', 'DESDOBRAMENTO', 'GRUPAMENTO'];
+const UNSUPPORTED_EVENTS = {
+  INCORPORACAO: 'incorporação', CISAO: 'cisão', CONVERSAO: 'conversão de classe', SUBSCRICAO: 'subscrição',
+  DIREITO: 'direito de subscrição', FUSAO: 'fusão', TROCA: 'troca de ativos'
+};
+// De onde vem o dinheiro de uma compra (ou para onde vai o de uma venda):
+// EXTERNO = de fora da carteira (conta, salário…); CAIXA = do saldo parado na
+// própria carteira (venda anterior, provento que ficou na corretora).
+const CASH_SOURCES = ['EXTERNO', 'CAIXA'];
+const DUPLICATE_WINDOW_MS = 120000;
 
 function rawList() {
   return repo.all('investments', 'status, name COLLATE NOCASE');
@@ -66,8 +88,8 @@ function contractualValue(operations, annualRate) {
   const rate = toNumber(annualRate) / 100;
   let total = 0;
   for (const operation of operations) {
-    const sign = ['VENDA', 'RESGATE'].includes(operation.operationType) ? -1 : 1;
-    if (!['COMPRA', 'APORTE', 'VENDA', 'RESGATE'].includes(operation.operationType)) continue;
+    const sign = CASH_IN_TYPES.includes(operation.operationType) ? -1 : 1;
+    if (![...BUY_TYPES, ...CASH_IN_TYPES].includes(operation.operationType)) continue;
     const principal = toNumber(operation.totalAmount) || toNumber(operation.quantity) * toNumber(operation.unitPrice);
     const factor = rate ? Math.pow(1 + rate, daysBetween(operation.date) / 365) : 1;
     total += sign * principal * factor;
@@ -80,21 +102,35 @@ function calculatePosition(item, operations = [], incomeRows = []) {
   let costBasis = 0;
   let realizedProfit = 0;
   let grossPurchases = 0;
+  let amortized = 0;
+  let fees = 0;
 
-  for (const operation of [...operations].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+  for (const operation of [...operations].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)))) {
+    const type = operation.operationType;
     const qty = Math.abs(toNumber(operation.quantity));
-    const fees = Math.abs(toNumber(operation.fees));
+    const fee = Math.abs(toNumber(operation.fees));
     const exchange = Math.max(0.000001, toNumber(operation.exchangeRate) || 1);
     const gross = qty * toNumber(operation.unitPrice) * exchange;
-    const sale = ['VENDA', 'RESGATE'].includes(operation.operationType);
-    const total = Math.abs(toNumber(operation.totalAmount)) || (sale ? Math.max(0, gross - fees) : gross + fees);
-    if (['COMPRA', 'APORTE'].includes(operation.operationType)) {
+    const cashIn = CASH_IN_TYPES.includes(type);
+    const total = Math.abs(toNumber(operation.totalAmount)) || (cashIn ? Math.max(0, gross - fee) : gross + fee);
+    if (!NO_CASH_TYPES.includes(type)) fees += fee;
+    if (BUY_TYPES.includes(type)) {
       quantity += qty;
       costBasis += total;
       grossPurchases += total;
-    } else if (['BONIFICACAO', 'DESDOBRAMENTO'].includes(operation.operationType)) {
+    } else if (['BONIFICACAO', 'DESDOBRAMENTO'].includes(type)) {
+      // Mais cotas pelo mesmo custo total: o preço médio cai, nenhum ganho aparece.
       quantity += qty;
-    } else if (['VENDA', 'RESGATE'].includes(operation.operationType)) {
+    } else if (type === 'GRUPAMENTO') {
+      // Menos cotas pelo mesmo custo total (quantity = cotas que deixaram de existir).
+      quantity = Math.max(0, quantity - qty);
+    } else if (type === 'AMORTIZACAO') {
+      // Devolução de capital: abate do custo; só o que passar do custo é ganho.
+      const removed = Math.min(costBasis, total);
+      costBasis -= removed;
+      amortized += total;
+      realizedProfit += total - removed;
+    } else if (SELL_TYPES.includes(type)) {
       const sold = Math.min(quantity, qty);
       const average = quantity > 0 ? costBasis / quantity : 0;
       const removedCost = average * sold;
@@ -118,10 +154,38 @@ function calculatePosition(item, operations = [], incomeRows = []) {
   const type = item.assetClass || item.type;
   const quoted = classMeta(type).quoted;
   const exchangeRate = Math.max(0.000001, toNumber(item.exchangeRate) || 1);
-  let marketValue = quoted && quantity > 0 && toNumber(item.currentPrice) > 0
-    ? quantity * toNumber(item.currentPrice) * exchangeRate
-    : toNumber(item.currentAmount);
-  if (!quoted && hasOperations) marketValue = contractualValue(operations, item.annualRate) || costBasis;
+  const price = toNumber(item.currentPrice);
+  // Como a posição foi avaliada. O relatório mostra isso: preço de mercado com
+  // data, preço digitado, só o custo ou o saldo informado — nunca um zero.
+  let valuation;
+  let marketValue;
+  if (quoted && quantity > 0 && price > 0) {
+    marketValue = quantity * price * exchangeRate;
+    valuation = item.quoteSource === 'Operação' ? 'preco_operacao'
+      : item.quoteUpdatedAt && item.quoteSource && item.quoteSource !== 'Informado' ? 'cotacao' : 'preco_informado';
+  } else if (quoted && hasOperations) {
+    marketValue = quantity > 0 ? costBasis : 0;
+    valuation = quantity > 0 ? 'custo' : 'zerada';
+  } else if (!quoted && item.quoteSource === 'Informado' && price > 0) {
+    // Valor que a pessoa leu no app do banco, na data informada; o que entrou
+    // ou saiu depois dessa data é somado/abatido pelo valor da operação.
+    const since = dateOnly(item.quoteUpdatedAt || '');
+    const after = operations.filter(op => since && dateOnly(op.date) > since);
+    marketValue = price + after.reduce((total, op) => {
+      const value = Math.abs(toNumber(op.totalAmount));
+      if (BUY_TYPES.includes(op.operationType)) return total + value;
+      if (CASH_IN_TYPES.includes(op.operationType)) return total - value;
+      return total;
+    }, 0);
+    marketValue = Math.max(0, marketValue);
+    valuation = after.length ? 'informado_ajustado' : 'informado';
+  } else if (!quoted && hasOperations) {
+    marketValue = contractualValue(operations, item.annualRate) || costBasis;
+    valuation = toNumber(item.annualRate) > 0 ? 'contrato' : 'custo';
+  } else {
+    marketValue = toNumber(item.currentAmount);
+    valuation = 'saldo_informado';
+  }
 
   const incomeReceived = sum(incomeRows.filter(row => row.status !== 'PREVISTO'), 'totalAmount');
   const incomeExpected = sum(incomeRows.filter(row => row.status === 'PREVISTO'), 'totalAmount');
@@ -132,13 +196,14 @@ function calculatePosition(item, operations = [], incomeRows = []) {
   return {
     ...item,
     type, assetClass: type, classLabel: classMeta(type).label,
-    quoted, hasOperations, quantity: roundQuantity(quantity),
+    quoted, hasOperations, quantity: roundQuantity(quantity), valuation,
     // O consolidado é sempre em reais; para ativos externos o custo já inclui
     // o câmbio histórico informado em cada operação.
-    averagePrice: quantity > 0 ? roundCurrency(costBasis / quantity) : 0,
+    averagePrice: quantity > 0 ? roundPrice(costBasis / quantity) : 0,
     costBasis: roundCurrency(costBasis), grossPurchases: roundCurrency(grossPurchases),
     currentAmount: roundCurrency(marketValue), marketValue: roundCurrency(marketValue),
     realizedProfit: roundCurrency(realizedProfit), unrealizedProfit: roundCurrency(unrealizedProfit),
+    amortized: roundCurrency(amortized), fees: roundCurrency(fees),
     incomeReceived: roundCurrency(incomeReceived), incomeExpected: roundCurrency(incomeExpected),
     totalProfit: roundCurrency(totalProfit), profitability,
     allocation: 0
@@ -197,8 +262,8 @@ function create(data) {
     goalAmount: roundCurrency(data.goalAmount),
     quantity: 0,
     averagePrice: 0,
-    currentPrice: roundCurrency(data.currentPrice || data.initialPrice || 0),
-    exchangeRate: roundCurrency(data.exchangeRate || 1),
+    currentPrice: roundPrice(data.currentPrice || data.initialPrice || 0),
+    exchangeRate: roundRate(data.exchangeRate || 1),
     currency: data.currency || (meta.market === 'US' ? 'USD' : 'BRL'),
     market: data.market || meta.market,
     benchmark: data.benchmark || '',
@@ -244,7 +309,8 @@ function update(id, data) {
     currentAmount: roundCurrency(merged.currentAmount),
     goalAmount: roundCurrency(merged.goalAmount),
     annualRate: toNumber(merged.annualRate),
-    exchangeRate: toNumber(merged.exchangeRate) || 1,
+    currentPrice: roundPrice(merged.currentPrice),
+    exchangeRate: roundRate(merged.exchangeRate) || 1,
     maturityDate: merged.maturityDate ? dateOnly(merged.maturityDate) : '',
     autoQuote: merged.autoQuote === 'false' || merged.autoQuote === false ? 0 : 1
   });
@@ -253,12 +319,53 @@ function update(id, data) {
 function recalculateInvestment(id) {
   const item = getById(id);
   const position = calculatePosition(item, listOperations({ investmentId: id }), listIncome({ investmentId: id }));
-  repo.update('investments', id, {
+  // Sem operações, current_amount é o próprio registro do saldo aplicado (o
+  // custo): uma avaliação informada não pode sobrescrevê-lo.
+  repo.update('investments', id, position.hasOperations ? {
     quantity: position.quantity,
     averagePrice: position.averagePrice,
     currentAmount: position.marketValue
-  });
+  } : { averagePrice: position.averagePrice });
   return position;
+}
+
+/**
+ * Caixa da carteira: dinheiro que ficou dentro dela (vendas, amortizações e
+ * proventos marcados como CAIXA) menos o que foi usado dela em compras.
+ * Não é saldo bancário — o banco já conta o que saiu para ele.
+ */
+function cashBalance(operations = listOperations(), income = listIncome()) {
+  let cash = 0;
+  for (const op of operations) {
+    if ((op.cashSource || 'EXTERNO') !== 'CAIXA') continue;
+    const value = Math.abs(toNumber(op.totalAmount));
+    if (BUY_TYPES.includes(op.operationType)) cash -= value;
+    else if (CASH_IN_TYPES.includes(op.operationType)) cash += value;
+  }
+  for (const row of income) {
+    if (row.status !== 'PREVISTO' && (row.destination || 'EXTERNO') === 'CAIXA') cash += toNumber(row.totalAmount);
+  }
+  return roundCurrency(cash);
+}
+
+function operationKey(data) {
+  return String(data.externalKey || data.chave || '').trim().slice(0, 160);
+}
+
+/** Operação igual já gravada: pela chave, ou idêntica e gravada há instantes (repetição de voz/Telegram). */
+function findDuplicate(data, operationType, quantity, unitPrice) {
+  const key = operationKey(data);
+  if (key) {
+    const found = repo.query('SELECT * FROM investment_operations WHERE external_key = ?', [key])[0];
+    return found ? repo.findById('investment_operations', found.id) : null;
+  }
+  const since = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+  const rows = repo.query(
+    `SELECT id FROM investment_operations WHERE investment_id = ? AND operation_type = ? AND date = ?
+       AND ABS(quantity - ?) < 0.000000001 AND ABS(unit_price - ?) < 0.000000001 AND created_at >= ?`,
+    [data.investmentId, operationType, dateOnly(data.date), quantity, unitPrice, since]
+  );
+  return rows[0] ? repo.findById('investment_operations', rows[0].id) : null;
 }
 
 function createOperationCore(data) {
@@ -266,25 +373,41 @@ function createOperationCore(data) {
   const investment = getById(data.investmentId);
   if (investment.status !== 'ATIVO') throw new Error('O investimento selecionado está inativo.');
   const operationType = String(data.operationType).toUpperCase();
-  const allowed = ['COMPRA', 'VENDA', 'APORTE', 'RESGATE', 'BONIFICACAO', 'DESDOBRAMENTO'];
-  if (!allowed.includes(operationType)) throw new Error('Tipo de operação inválido.');
+  if (UNSUPPORTED_EVENTS[operationType]) {
+    throw new Error(`A carteira ainda não calcula ${UNSUPPORTED_EVENTS[operationType]} sozinha. Registre em partes (venda/compra ou bonificação) conforme o informe da empresa, para não criar ganho que não existiu.`);
+  }
+  if (!OPERATION_TYPES.includes(operationType)) throw new Error('Tipo de operação inválido.');
 
   const quantity = roundQuantity(data.quantity);
-  const unitPrice = roundCurrency(data.unitPrice);
-  const exchangeRate = Math.max(0.000001, toNumber(data.exchangeRate) || toNumber(investment.exchangeRate) || 1);
+  const unitPrice = roundPrice(data.unitPrice);
+  const exchangeRate = Math.max(0.000001, roundRate(data.exchangeRate) || toNumber(investment.exchangeRate) || 1);
   const fees = roundCurrency(Math.abs(toNumber(data.fees)));
-  if (!(quantity > 0)) throw new Error('Informe uma quantidade maior que zero.');
-  if (!['BONIFICACAO', 'DESDOBRAMENTO'].includes(operationType) && !(unitPrice > 0)) {
-    throw new Error('Informe o preço unitário da operação.');
+  const isFinancial = !NO_CASH_TYPES.includes(operationType);
+  if (operationType === 'AMORTIZACAO') {
+    if (!(toNumber(data.totalAmount) > 0 || (quantity > 0 && unitPrice > 0))) throw new Error('Informe o valor recebido na amortização.');
+  } else {
+    if (!(quantity > 0)) throw new Error('Informe uma quantidade maior que zero.');
+    if (isFinancial && !(unitPrice > 0)) throw new Error('Informe o preço unitário da operação.');
   }
-  const isOutflow = ['COMPRA', 'APORTE'].includes(operationType);
-  const isFinancial = !['BONIFICACAO', 'DESDOBRAMENTO'].includes(operationType);
+  const cashSource = String(data.cashSource || 'EXTERNO').toUpperCase();
+  if (!CASH_SOURCES.includes(cashSource)) throw new Error('Origem do dinheiro inválida (EXTERNO ou CAIXA).');
+  const bankAccountId = cashSource === 'CAIXA' ? '' : (data.bankAccountId || '');
+  if (cashSource === 'CAIXA' && data.bankAccountId) {
+    throw new Error('Com o dinheiro do caixa da carteira, não informe conta bancária: o banco não é movimentado.');
+  }
+
+  const isOutflow = BUY_TYPES.includes(operationType);
   const grossAmount = quantity * unitPrice * exchangeRate;
-  const totalAmount = isFinancial
-    ? roundCurrency(isOutflow ? grossAmount + fees : Math.max(0, grossAmount - fees))
-    : 0;
+  const totalAmount = !isFinancial ? 0
+    : operationType === 'AMORTIZACAO' && toNumber(data.totalAmount) > 0 ? roundCurrency(data.totalAmount)
+    : roundCurrency(isOutflow ? grossAmount + fees : Math.max(0, grossAmount - fees));
+  if (cashSource === 'CAIXA' && isOutflow) {
+    const cash = cashBalance();
+    if (totalAmount - cash > 0.005) {
+      throw new Error(`O caixa da carteira tem ${formatBRL(cash)}; a compra custa ${formatBRL(totalAmount)}. Registre a diferença como dinheiro de fora (EXTERNO).`);
+    }
+  }
   let contributionId = '';
-  const bankAccountId = data.bankAccountId || '';
   if (bankAccountId && isFinancial) {
     const account = accounts.getById(bankAccountId);
     if (account.status !== 'ATIVA') throw new Error('A conta selecionada está inativa.');
@@ -304,9 +427,18 @@ function createOperationCore(data) {
     id: generateId('investment-operation'), investmentId: investment.id, contributionId,
     operationType, quantity, unitPrice, exchangeRate, fees, totalAmount,
     date: dateOnly(data.date), bankAccountId, institution: data.institution || investment.institution || '',
+    cashSource: isFinancial ? cashSource : 'EXTERNO', externalKey: operationKey(data),
     description: data.description || '', notes: data.notes || '', createdAt: now(), updatedAt: now()
   };
   repo.insert('investment_operations', item);
+  // Sem cotação mais nova que a operação, o preço negociado é o último preço
+  // conhecido do ativo (com a data): evita avaliar pelo preço digitado antigo e
+  // mostrar ganho/prejuízo que não existiu.
+  const quoted = classMeta(investment.assetClass || investment.type).quoted;
+  if (quoted && [...BUY_TYPES, ...SELL_TYPES].includes(operationType) && unitPrice > 0
+      && (!investment.quoteUpdatedAt || dateOnly(item.date) >= dateOnly(investment.quoteUpdatedAt))) {
+    repo.update('investments', investment.id, { currentPrice: unitPrice, exchangeRate, quoteSource: 'Operação', quoteUpdatedAt: item.date });
+  }
   recalculateInvestment(investment.id);
   if (bankAccountId) accounts.syncBalances();
   syncLinkedGoals();
@@ -315,6 +447,9 @@ function createOperationCore(data) {
 
 function createOperation(data) {
   return repo.transaction(() => {
+    const operationType = String(data.operationType || '').toUpperCase();
+    const existing = findDuplicate(data, operationType, roundQuantity(data.quantity), roundPrice(data.unitPrice));
+    if (existing) return { ...existing, duplicate: true };
     const item = createOperationCore(data);
     const investment = getById(item.investmentId);
     logActivity(
@@ -337,6 +472,85 @@ function deleteOperation(id) {
     syncLinkedGoals();
     return true;
   });
+}
+
+/**
+ * Provento registrado à mão (o automático vem de market.syncIncome).
+ * RECEBIDO entra no resultado; PREVISTO só aparece como "a receber".
+ * destination CAIXA = ficou na carteira (pode ser reinvestido sem virar aporte).
+ */
+function createIncome(data) {
+  return repo.transaction(() => {
+    required(data, ['investmentId', 'paymentDate']);
+    const investment = getById(data.investmentId);
+    const quantity = roundQuantity(data.quantity);
+    const valuePerUnit = roundPrice(data.valuePerUnit);
+    const totalAmount = roundCurrency(toNumber(data.totalAmount) || quantity * valuePerUnit);
+    if (!(totalAmount > 0)) throw new Error('Informe o valor do provento.');
+    const status = String(data.status || 'RECEBIDO').toUpperCase();
+    if (!['RECEBIDO', 'PREVISTO'].includes(status)) throw new Error('Situação do provento inválida (RECEBIDO ou PREVISTO).');
+    const destination = String(data.destination || 'EXTERNO').toUpperCase();
+    if (!CASH_SOURCES.includes(destination)) throw new Error('Destino do provento inválido (EXTERNO ou CAIXA).');
+    const paymentDate = dateOnly(data.paymentDate);
+    const given = operationKey(data);
+    if (given) {
+      const found = repo.query('SELECT id FROM investment_income WHERE investment_id = ? AND external_key = ?', [investment.id, given])[0];
+      if (found) return { ...repo.findById('investment_income', found.id), duplicate: true };
+    } else {
+      const since = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+      const found = repo.query(
+        'SELECT id FROM investment_income WHERE investment_id = ? AND payment_date = ? AND ABS(total_amount - ?) < 0.005 AND created_at >= ?',
+        [investment.id, paymentDate, totalAmount, since]
+      )[0];
+      if (found) return { ...repo.findById('investment_income', found.id), duplicate: true };
+    }
+    const id = generateId('income-investment');
+    const item = {
+      id, investmentId: investment.id,
+      incomeType: String(data.incomeType || 'DIVIDENDO').toUpperCase(),
+      exDate: data.exDate ? dateOnly(data.exDate) : '', paymentDate, valuePerUnit, quantity, totalAmount,
+      status, destination, source: 'manual', externalKey: given || `manual|${id}`,
+      notes: data.notes || '', createdAt: now(), updatedAt: now()
+    };
+    repo.insert('investment_income', item);
+    logActivity('INVESTMENT_INCOME_CREATED', `Provento de ${formatBRL(totalAmount)} de ${investment.symbol || investment.name}`, 'investmentIncome', id);
+    return item;
+  });
+}
+
+function deleteIncome(id) {
+  const item = repo.findById('investment_income', id);
+  if (!item) throw new Error('Provento não encontrado.');
+  repo.remove('investment_income', id);
+  return true;
+}
+
+/** Marca um provento previsto como recebido (e onde o dinheiro ficou). */
+function confirmIncome(id, data = {}) {
+  const item = repo.findById('investment_income', id);
+  if (!item) throw new Error('Provento não encontrado.');
+  const destination = String(data.destination || item.destination || 'EXTERNO').toUpperCase();
+  if (!CASH_SOURCES.includes(destination)) throw new Error('Destino do provento inválido (EXTERNO ou CAIXA).');
+  return repo.update('investment_income', id, {
+    status: 'RECEBIDO', destination,
+    totalAmount: toNumber(data.totalAmount) > 0 ? roundCurrency(data.totalAmount) : item.totalAmount
+  });
+}
+
+/**
+ * Valor de um investimento sem cotação pública (CDB, previdência, fundo…)
+ * lido pela pessoa no app do banco, numa data. Vira a avaliação da posição.
+ */
+function setValuation(id, data = {}) {
+  const item = getById(id);
+  if (classMeta(item.assetClass || item.type).quoted) {
+    throw new Error('Este ativo tem cotação pública; atualize pela cotação ou informe o preço unitário em currentPrice.');
+  }
+  const value = roundCurrency(data.value ?? data.valor);
+  if (!(value >= 0)) throw new Error('Informe o valor atual do investimento.');
+  const date = dateOnly(data.date || now());
+  repo.update('investments', id, { currentPrice: value, quoteSource: 'Informado', quoteUpdatedAt: date });
+  return recalculateInvestment(id);
 }
 
 function portfolioSummary() {
@@ -372,9 +586,13 @@ function recordSnapshot() {
   const summary = portfolioSummary();
   const referenceDate = dateOnly(now());
   const current = repo.query('SELECT id FROM investment_snapshots WHERE reference_date = ?', [referenceDate])[0];
+  // A foto guarda também o caixa, o total líquido que entrou de fora até o dia e
+  // a cobertura das cotações — é o que permite medir rentabilidade entre fotos.
+  const report = require('./portfolio').snapshotData();
   const payload = {
     referenceDate, investedAmount: summary.investedAmount, marketValue: summary.marketValue,
-    incomeTotal: summary.incomeReceived, updatedAt: now()
+    incomeTotal: summary.incomeReceived, cashAmount: report.cash, externalNet: report.externalNet,
+    coverage: JSON.stringify(report.coverage), updatedAt: now()
   };
   if (current) return repo.update('investment_snapshots', current.id, payload);
   return repo.insert('investment_snapshots', { id: generateId('investment-snapshot'), ...payload, createdAt: now() });
@@ -510,6 +728,10 @@ function syncLinkedGoals() {
 
 module.exports = {
   ASSET_CLASSES,
+  OPERATION_TYPES,
+  UNSUPPORTED_EVENTS,
+  classMeta,
+  cashBalance,
   list,
   getById,
   create,
@@ -520,6 +742,10 @@ module.exports = {
   createOperation,
   deleteOperation,
   listIncome,
+  createIncome,
+  deleteIncome,
+  confirmIncome,
+  setValuation,
   portfolioSummary,
   recordSnapshot,
   refreshMarketData,

@@ -14,7 +14,7 @@ import time
 from google import genai
 from google.genai import types
 
-from . import store, tools
+from . import mentor, store, tools
 from .audio import OUT_RATE, audio
 from .config import settings
 from .hub import hub
@@ -113,6 +113,11 @@ Memória (um mapa: ele no centro, temas ligados a ele e memórias ligadas aos te
 - Antes de dizer que não sabe algo pessoal dele, chame buscar_memorias: ela já traz o que está ligado.
 - "Mostre minha memória", "o que você sabe sobre mim/sobre X": mostrar_memoria (foco = o tema, se houver).
 - Siga as correções e lições abaixo.
+
+{mentor.ESSENCIAL}
+- Carteira, registrar operação, perfil/política, cotação, plano de aporte e contas: assunto "investimentos"
+  (investimentos_*). Pesquisa de ativo: pesquisar_web, com a fonte e a data.
+{mentor.VOZ}
 
 {_sistemas()}
 {_assuntos()}

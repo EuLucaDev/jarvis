@@ -82,6 +82,10 @@ jobs:
           uv sync --group build --python 3.12
           uv run --group build pyinstaller jarvis-core.spec --noconfirm --log-level WARN
 
+      - name: Mentor de investimentos (núcleo + motor, sem rede)
+        working-directory: backend
+        run: uv run --python 3.12 python testes/mentor.py
+
       - name: Teste rápido do núcleo empacotado
         working-directory: backend
         run: |

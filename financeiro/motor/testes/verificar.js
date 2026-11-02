@@ -21,6 +21,7 @@ const database = require(path.join(root, 'db/database'));
 database.open(base);
 
 const load = name => require(path.join(root, 'db/services', name));
+const { roundCurrency } = require(path.join(root, 'db/utils'));
 const repo = require(path.join(root, 'db/repository'));
 const setup = load('setup');
 const accounts = load('accounts');
@@ -387,6 +388,206 @@ async function main() {
   truthy('a comparação com o ano passado responde', comparacao && typeof comparacao === 'object');
   const fechamento = insights.monthClosing('2026-03');
   truthy('o fechamento do mês responde', fechamento && typeof fechamento === 'object');
+
+  carteiraDoMentor();
+}
+
+/**
+ * Carteira do mentor de investimentos, num banco próprio (os números não se
+ * misturam com os testes acima). Cada bloco é um risco do pedido do mentor.
+ */
+function carteiraDoMentor() {
+  database.close();
+  const base2 = fs.mkdtempSync(path.join(os.tmpdir(), 'carteira-mentor-'));
+  database.open(base2);
+  const portfolio = load('portfolio');
+  const hoje = '2026-11-02';
+  const rel = () => portfolio.report({ today: hoje });
+  const ops = () => investments.listOperations().length;
+  const falha = fn => { try { fn(); return ''; } catch (error) { return error.message; } };
+  try {
+    const banco = accounts.create({ name: 'Conta corrente', bankName: 'Banco', accountType: 'CONTA_DIGITAL', initialBalance: 5000 });
+    const poupanca = accounts.create({ name: 'Outra conta', bankName: 'Banco 2', accountType: 'CONTA_DIGITAL', initialBalance: 0 });
+
+    // 1. R$ 1.000 + aporte de R$ 500, sem oscilação: patrimônio 1.500 e resultado 0
+    const etf = investments.create({ type: 'ETF', symbol: 'BOVA11', name: 'BOVA11', institution: 'Corretora A',
+      initialQuantity: 10, initialPrice: 100, purchaseDate: '2026-01-02', bankAccountId: banco.id, autoQuote: false });
+    investments.createOperation({ investmentId: etf.id, operationType: 'COMPRA', quantity: 5, unitPrice: 100, date: '2026-06-01', bankAccountId: banco.id });
+    let r = rel();
+    check('mentor 1: só com preço de compra, sem taxa inventada', r.performance.mwr.value, null);
+    repo.update('investments', etf.id, { currentPrice: 100, quoteSource: 'Yahoo Finance', quoteUpdatedAt: `${hoje}T18:00:00Z` });
+    r = rel();
+    check('mentor 1: patrimônio = 1.000 + 500 de aporte', r.equity, 1500);
+    check('mentor 1: aporte não vira resultado', r.result.total, 0);
+    check('mentor 1: do bolso = 1.500', r.external.net, 1500);
+    near('mentor 1: taxa pelos fluxos é 0%, não 50%', r.performance.mwr.value, 0, 1e-6);
+    check('mentor 1: compra pela conta tira do saldo do banco', accounts.getBalance(banco.id), 3500);
+    const mais = investments.createOperation({ investmentId: etf.id, operationType: 'COMPRA', quantity: 1, unitPrice: 120, date: '2026-06-10' });
+    r = rel();
+    check('mentor 1: cotação mais nova que a compra continua valendo', r.assets.find(a => a.id === etf.id).valuation, 'cotacao');
+    check('mentor 1: 16 cotas a 100 menos 1.620 aplicados = −20', r.result.total, -20);
+    investments.deleteOperation(mais.id);
+    repo.update('investments', etf.id, { quoteSource: '', quoteUpdatedAt: '' });
+    const mais2 = investments.createOperation({ investmentId: etf.id, operationType: 'COMPRA', quantity: 1, unitPrice: 120, date: '2026-06-10' });
+    r = rel();
+    check('mentor 1: sem cotação, comprar mais caro reavalia pelo preço da operação', r.assets.find(a => a.id === etf.id).valuation, 'preco_operacao');
+    check('mentor 1: 16 cotas a 120 menos 1.620 aplicados = 300', r.result.total, 300);
+    truthy('mentor 1: e avisa que não é cotação', r.gaps.some(g => g.code === 'preco_operacao'));
+    investments.deleteOperation(mais2.id);
+    repo.update('investments', etf.id, { currentPrice: 100, quoteSource: 'Yahoo Finance', quoteUpdatedAt: `${hoje}T18:00:00Z` });
+
+    // 2. Compra com o caixa da carteira não é aporte nem aumenta o patrimônio
+    investments.createOperation({ investmentId: etf.id, operationType: 'VENDA', quantity: 5, unitPrice: 100, date: '2026-07-01', cashSource: 'CAIXA' });
+    check('mentor 2: venda para o caixa fica na carteira', rel().cash, 500);
+    const fii = investments.create({ type: 'FII', symbol: 'HGLG11', name: 'HGLG11', institution: 'Corretora A', autoQuote: false, currentPrice: 100 });
+    investments.createOperation({ investmentId: fii.id, operationType: 'COMPRA', quantity: 5, unitPrice: 100, date: '2026-07-02', cashSource: 'CAIXA' });
+    r = rel();
+    check('mentor 2: compra com caixa não muda o patrimônio', r.equity, 1500);
+    check('mentor 2: compra com caixa não é aporte', r.external.net, 1500);
+    check('mentor 2: caixa zerado depois da compra', r.cash, 0);
+    truthy('mentor 2: caixa insuficiente é recusado', falha(() => investments.createOperation({
+      investmentId: fii.id, operationType: 'COMPRA', quantity: 1, unitPrice: 100, date: '2026-07-03', cashSource: 'CAIXA' })).includes('caixa da carteira'));
+    truthy('mentor 2: caixa com conta bancária é recusado', falha(() => investments.createOperation({
+      investmentId: fii.id, operationType: 'VENDA', quantity: 1, unitPrice: 100, date: '2026-07-03', cashSource: 'CAIXA', bankAccountId: banco.id })).includes('conta bancária'));
+
+    // 3. Provento recebido fica no caixa e é reinvestido: conta uma vez e não vira aporte
+    investments.createIncome({ investmentId: fii.id, paymentDate: '2026-08-15', totalAmount: 30, status: 'RECEBIDO', destination: 'CAIXA' });
+    r = rel();
+    check('mentor 3: provento no caixa aumenta o patrimônio', r.equity, 1530);
+    check('mentor 3: provento é resultado', r.result.total, 30);
+    investments.createOperation({ investmentId: fii.id, operationType: 'COMPRA', quantity: 0.3, unitPrice: 100, date: '2026-08-16', cashSource: 'CAIXA' });
+    r = rel();
+    check('mentor 3: reinvestir não muda o patrimônio', r.equity, 1530);
+    check('mentor 3: reinvestir não é aporte', r.external.net, 1500);
+    check('mentor 3: provento contado uma vez', r.income.received.total, 30);
+    check('mentor 3: resultado continua 30', r.result.total, 30);
+    check('mentor 3: decomposição fecha', r.result.check, 0);
+
+    // 4. Venda devolve dinheiro: custo e ganho separados, não "tudo lucro"
+    const acao = investments.create({ type: 'ACAO', symbol: 'WEGE3', name: 'WEG', institution: 'Corretora B', autoQuote: false, currentPrice: 50 });
+    investments.createOperation({ investmentId: acao.id, operationType: 'COMPRA', quantity: 10, unitPrice: 50, date: '2026-09-01' });
+    const antes = rel().result.total;
+    investments.createOperation({ investmentId: acao.id, operationType: 'VENDA', quantity: 10, unitPrice: 60, date: '2026-10-01' });
+    r = rel();
+    check('mentor 4: ganho da venda é 100, não 600', roundCurrency(r.result.total - antes), 100);
+    check('mentor 4: realizado da posição', investments.list().find(i => i.id === acao.id).realizedProfit, 100);
+    check('mentor 4: os 600 saem como fluxo externo', r.external.outflows, 600);
+    check('mentor 4: decomposição fecha', r.result.check, 0);
+
+    // 5. Transferência entre contas bancárias não é aporte nem resgate
+    const fluxoAntes = rel().external.net;
+    accounts.createTransfer({ fromAccountId: banco.id, toAccountId: poupanca.id, amount: 700, date: '2026-10-05' });
+    check('mentor 5: transferência interna não mexe nos aportes', rel().external.net, fluxoAntes);
+
+    // 6. Cotação antiga ou ausente: não inventa preço nem some do total
+    repo.update('investments', etf.id, { currentPrice: 100, quoteSource: 'Yahoo Finance', quoteUpdatedAt: '2026-10-01T18:00:00Z' });
+    r = rel();
+    check('mentor 6: cotação de um mês atrás é antiga', r.assets.find(a => a.id === etf.id).valuation, 'cotacao_antiga');
+    truthy('mentor 6: lacuna de cotação antiga', r.gaps.some(g => g.code === 'cotacao_antiga'));
+    const stock = investments.create({ type: 'STOCK', symbol: 'AAPL', name: 'Apple', institution: 'Corretora EUA', autoQuote: false, currentPrice: 0, currency: 'USD' });
+    investments.createOperation({ investmentId: stock.id, operationType: 'COMPRA', quantity: 0.5, unitPrice: 200, exchangeRate: 5.5, date: '2026-10-10' });
+    r = rel();
+    let semPreco = r.assets.find(a => a.id === stock.id);
+    check('mentor 6: sem cotação, vale o preço da compra (com o câmbio dela)', semPreco.valuation, 'preco_operacao');
+    check('mentor 6: em reais, pelo câmbio da operação', semPreco.marketValue, 550);
+    repo.update('investments', stock.id, { currentPrice: 0, quoteSource: '', quoteUpdatedAt: '' });
+    r = rel();
+    semPreco = r.assets.find(a => a.id === stock.id);
+    check('mentor 6: sem preço nenhum entra pelo custo', semPreco.valuation, 'custo');
+    check('mentor 6: e continua no patrimônio', semPreco.marketValue, 550);
+    truthy('mentor 6: lacuna de sem cotação', r.gaps.some(g => g.code === 'sem_cotacao'));
+    truthy('mentor 6: custo já está em reais, sem alerta de câmbio', !r.gaps.some(g => g.code === 'cambio'));
+    repo.update('investments', stock.id, { currentPrice: 210, exchangeRate: 1 });
+    truthy('mentor 6: preço em dólar sem câmbio é sinalizado', rel().gaps.some(g => g.code === 'cambio'));
+
+    // 7. Eventos societários preservam custo; os não suportados são recusados
+    const div = investments.create({ type: 'ACAO', symbol: 'ITSA4', name: 'Itaúsa', institution: 'Corretora B', autoQuote: false, currentPrice: 10 });
+    investments.createOperation({ investmentId: div.id, operationType: 'COMPRA', quantity: 100, unitPrice: 10, date: '2026-02-01' });
+    investments.createOperation({ investmentId: div.id, operationType: 'DESDOBRAMENTO', quantity: 100, date: '2026-03-01' });
+    investments.update(div.id, { currentPrice: 5 });
+    let pos = investments.list().find(i => i.id === div.id);
+    check('mentor 7: desdobramento dobra as cotas', pos.quantity, 200);
+    check('mentor 7: sem ganho artificial', pos.unrealizedProfit, 0);
+    check('mentor 7: preço médio cai pela metade', pos.averagePrice, 5);
+    investments.createOperation({ investmentId: div.id, operationType: 'GRUPAMENTO', quantity: 100, date: '2026-04-01' });
+    investments.update(div.id, { currentPrice: 10 });
+    pos = investments.list().find(i => i.id === div.id);
+    check('mentor 7: grupamento volta às 100 cotas', pos.quantity, 100);
+    check('mentor 7: grupamento mantém o custo', pos.costBasis, 1000);
+    truthy('mentor 7: incorporação é recusada com explicação', falha(() => investments.createOperation({
+      investmentId: div.id, operationType: 'INCORPORACAO', quantity: 1, unitPrice: 1, date: '2026-04-02' })).includes('incorporação'));
+    const papel = investments.create({ type: 'FII', symbol: 'KNCR11', name: 'KNCR11', institution: 'Corretora A', autoQuote: false, currentPrice: 90 });
+    investments.createOperation({ investmentId: papel.id, operationType: 'COMPRA', quantity: 10, unitPrice: 100, date: '2026-05-01' });
+    investments.createOperation({ investmentId: papel.id, operationType: 'AMORTIZACAO', totalAmount: 100, quantity: 0, date: '2026-05-20' });
+    pos = investments.list().find(i => i.id === papel.id);
+    check('mentor 7: amortização abate o custo', pos.costBasis, 900);
+    check('mentor 7: amortização não é lucro', pos.realizedProfit, 0);
+    check('mentor 7: decomposição fecha com eventos', rel().result.check, 0);
+
+    // 8. Registro repetido (chave, timeout, Telegram) não duplica
+    const n = ops();
+    const primeira = investments.createOperation({ investmentId: div.id, operationType: 'COMPRA', quantity: 1, unitPrice: 10, date: '2026-10-20', externalKey: 'bolso:abc' });
+    const repetida = investments.createOperation({ investmentId: div.id, operationType: 'COMPRA', quantity: 1, unitPrice: 10, date: '2026-10-20', externalKey: 'bolso:abc' });
+    check('mentor 8: chave repetida devolve a mesma operação', repetida.id, primeira.id);
+    truthy('mentor 8: e avisa que era repetida', repetida.duplicate);
+    const semChave = investments.createOperation({ investmentId: div.id, operationType: 'COMPRA', quantity: 2, unitPrice: 10, date: '2026-10-21' });
+    const deNovo = investments.createOperation({ investmentId: div.id, operationType: 'COMPRA', quantity: 2, unitPrice: 10, date: '2026-10-21' });
+    check('mentor 8: idêntica em seguida não duplica', deNovo.id, semChave.id);
+    check('mentor 8: só duas operações novas', ops(), n + 2);
+    const prov = investments.createIncome({ investmentId: fii.id, paymentDate: '2026-10-15', totalAmount: 12, externalKey: 'tg:9' });
+    check('mentor 8: provento com a mesma chave não duplica',
+      investments.createIncome({ investmentId: fii.id, paymentDate: '2026-10-15', totalAmount: 12, externalKey: 'tg:9' }).id, prov.id);
+
+    // Precisão: cripto e frações não são arredondadas a centavos
+    const btc = investments.create({ type: 'CRIPTO', symbol: 'BTC', name: 'Bitcoin', institution: 'Exchange', autoQuote: false, currentPrice: 350000.12345678 });
+    const opBtc = investments.createOperation({ investmentId: btc.id, operationType: 'COMPRA', quantity: 0.00012345, unitPrice: 350000.12345678, date: '2026-10-25' });
+    check('precisão: quantidade de cripto preservada', opBtc.quantity, 0.00012345);
+    check('precisão: preço unitário com 8 casas', opBtc.unitPrice, 350000.12345678);
+    check('precisão: total em centavos', opBtc.totalAmount, 43.21);
+
+    // Proventos a receber ficam separados dos recebidos
+    investments.createIncome({ investmentId: fii.id, paymentDate: '2026-12-15', totalAmount: 9, status: 'PREVISTO' });
+    r = rel();
+    check('proventos: a receber separado', r.income.expected.total, 9);
+    check('proventos: recebidos não incluem o previsto', r.income.received.total, 42);
+
+    // Política e perfil: só com aprovação/consentimento, com versões
+    truthy('política sem aprovação é recusada', falha(() => portfolio.savePolicy({ metas: { renda_fixa: 100 } })).includes('aprovar'));
+    truthy('metas que não somam 100 são recusadas', falha(() => portfolio.savePolicy({ aprovada: true, metas: { renda_fixa: 50 } })).includes('100%'));
+    truthy('perfil sem consentimento é recusado', falha(() => portfolio.saveProfile({ objetivo: 'aposentadoria' })).includes('autorizar'));
+    portfolio.savePolicy({ aprovada: true, metas: { renda_fixa: 40, acoes_br: 30, fii_fiagro: 20, exterior: 10 }, limite_ativo_pct: 30 }, 'primeira');
+    portfolio.savePolicy({ aprovada: true, metas: { renda_fixa: 50, acoes_br: 20, fii_fiagro: 20, exterior: 10 }, limite_ativo_pct: 30 }, 'mais conservadora');
+    check('política: a última versão vale', portfolio.currentPolicy().version, 2);
+    check('política: trilha de revisão', portfolio.history('POLITICA').length, 2);
+    r = rel();
+    const rf = r.allocation.byGroup.find(g => g.group === 'renda_fixa');
+    check('alocação: meta da política aparece', rf.target, 50);
+    truthy('alocação: falta renda fixa', rf.toTarget > 0);
+
+    // Fotos do patrimônio e XIRR
+    investments.recordSnapshot();
+    const foto = repo.all('investment_snapshots').at(-1);
+    truthy('foto guarda o total que veio de fora', foto.externalNet !== '' && foto.externalNet !== null);
+    near('xirr: 1.000 que viram 1.100 em um ano = 10%', portfolio.xirr([{ date: '2025-01-01', amount: -1000 }, { date: '2026-01-01', amount: 1100 }]), 0.1, 1e-6);
+    check('xirr: sem fluxo de sinal oposto não inventa taxa', portfolio.xirr([{ date: '2025-01-01', amount: -1000 }]), null);
+
+    // Saldo antigo sem operações: entra no total, marcado, e trava a taxa
+    investments.create({ type: 'CDB', name: 'CDB antigo', institution: 'Banco', currentAmount: 0, autoQuote: false });
+    const cdb = investments.create({ type: 'PREVIDENCIA', name: 'Previdência', institution: 'Banco', autoQuote: false });
+    repo.update('investments', cdb.id, { currentAmount: 2000 });
+    r = rel();
+    truthy('saldo sem histórico vira lacuna', r.gaps.some(g => g.code === 'sem_historico'));
+    check('saldo sem histórico bloqueia a taxa', r.performance.mwr.value, null);
+    investments.setValuation(cdb.id, { value: 2100, date: '2026-10-31' });
+    r = rel();
+    check('valor informado avalia a posição', r.assets.find(a => a.id === cdb.id).marketValue, 2100);
+    check('valor informado não apaga o custo', r.assets.find(a => a.id === cdb.id).costBasis, 2000);
+    check('decomposição fecha no fim', r.result.check, 0);
+  } finally {
+    database.close();
+    fs.rmSync(base2, { recursive: true, force: true });
+    database.open(base);
+  }
 }
 
 main()

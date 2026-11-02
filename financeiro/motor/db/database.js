@@ -171,6 +171,29 @@ const MIGRATIONS = [
         );
       }
     }
+  },
+  {
+    id: '2026-11-investment-mentor-v5',
+    // Acompanhamento da carteira: de onde veio o dinheiro de cada operação
+    // (de fora da carteira ou do caixa dela), para onde foi cada provento,
+    // chave contra registro repetido, fotos do patrimônio com caixa e fluxos,
+    // e perfil/política do investidor com histórico de revisões. Os padrões
+    // (EXTERNO) mantêm exatamente as contas que os bancos antigos já faziam.
+    run(connection) {
+      const columnsOf = table => new Set(connection.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+      const add = (table, name, definition) => {
+        if (!columnsOf(table).has(name)) connection.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+      };
+      add('investment_operations', 'cash_source', "TEXT DEFAULT 'EXTERNO'");
+      add('investment_operations', 'external_key', "TEXT DEFAULT ''");
+      add('investment_income', 'destination', "TEXT DEFAULT 'EXTERNO'");
+      add('investment_income', 'notes', "TEXT DEFAULT ''");
+      add('investment_snapshots', 'cash_amount', 'REAL DEFAULT 0');
+      add('investment_snapshots', 'external_net', 'REAL');
+      add('investment_snapshots', 'coverage', "TEXT DEFAULT ''");
+      connection.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_investment_operations_key
+        ON investment_operations (external_key) WHERE external_key <> ''`);
+    }
   }
 ];
 

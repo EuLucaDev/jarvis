@@ -697,6 +697,16 @@ async def investir(a: dict[str, Any]) -> dict[str, Any]:
     valor = abs(float(a.get("valor") or 0))
     if not conta or not valor:
         return {"erro": "Preciso do valor e de uma conta."}
+    if alvo.get("hasOperations"):
+        # Posição montada por operações: um aporte avulso não entraria nela (o relatório da carteira o marcaria como lacuna).
+        if alvo.get("quoted"):
+            return {"erro": f"{alvo.get('symbol') or alvo.get('name')} é negociado por cotas.", "nada_foi_gravado": True,
+                    "instrucao": "Use investimentos_registrar (compra ou venda com quantidade e preço unitário)."}
+        item = await chamar("investmentOperations:create", {"investmentId": alvo["id"], "operationType": "APORTE" if acao == "aportar" else "RESGATE",
+                                                             "quantity": 1, "unitPrice": valor, "bankAccountId": conta["id"],
+                                                             "date": (a.get("data") or dt.date.today().isoformat())[:10]})
+        await mudou()
+        return {"ok": True, "investimento": alvo.get("name"), "valor": brl(valor), "acao": acao, "id": item.get("id"), "repetido": bool(item.get("duplicate"))}
     item = await chamar("contributions:create", {"investmentId": alvo["id"], "bankAccountId": conta["id"],
                                                  "amount": valor if acao == "aportar" else -valor,
                                                  "date": (a.get("data") or dt.date.today().isoformat())[:10]})

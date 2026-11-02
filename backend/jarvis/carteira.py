@@ -9,6 +9,10 @@ escrita.
 `copia(pid)` monta os números no mesmo formato da cópia que o Jarvis do computador manda (copia.py), então o
 relatório, as consultas e os cartões do Telegram são os mesmos. `aplicar(...)` recebe o mesmo pedido que viraria
 pendência (nome da ferramenta do núcleo + argumentos) e grava na hora; `desfazer(id)` tira o que aquele pedido fez.
+
+Investimentos aqui são por valor (sem cotação automática): o que foi aplicado e resgatado, proventos (que ficam no
+investimento ou vão para a conta) e o valor atual que a pessoa lê no app do banco (`avaliacoes`). `relatorio_investimentos`
+devolve o mesmo formato de investimentos.compactar (do computador), com as lacunas desta modalidade.
 """
 
 from __future__ import annotations
@@ -45,7 +49,10 @@ def local(pid: str) -> bool:
 
 
 def ler(pid: str) -> dict[str, Any]:
-    return _bolso()._ler(_arquivo(pid), None) or _vazia()  # noqa: SLF001
+    c = _bolso()._ler(_arquivo(pid), None) or _vazia()  # noqa: SLF001
+    for k in ("proventos", "avaliacoes"):  # carteiras criadas antes dos investimentos completos
+        c.setdefault(k, [])
+    return c
 
 
 def gravar(pid: str, c: dict[str, Any]) -> None:
@@ -54,7 +61,10 @@ def gravar(pid: str, c: dict[str, Any]) -> None:
 
 def _vazia() -> dict[str, Any]:
     return {"versao": 1, "criada": time.time(), "contas": [], "cartoes": [], "lancamentos": [], "transferencias": [],
-            "metas": [], "depositos": [], "investimentos": [], "aportes": [], "memorias": []}
+            "metas": [], "depositos": [], "investimentos": [], "aportes": [], "proventos": [], "avaliacoes": [], "memorias": []}
+
+
+CHAVES = ("lancamentos", "transferencias", "metas", "depositos", "aportes", "proventos", "avaliacoes")
 
 
 def ativar(pid: str, nome: str) -> None:
@@ -108,7 +118,11 @@ def saldos(c: dict[str, Any]) -> dict[str, float]:
     for d in c["depositos"]:
         mexe(d.get("conta"), -d["valor"])  # valor negativo = retirada (volta para a conta)
     for a in c["aportes"]:
-        mexe(a.get("conta"), -a["valor"])  # valor negativo = resgate
+        if not a.get("interno"):
+            mexe(a.get("conta"), -a["valor"])  # valor negativo = resgate
+    for pr in c["proventos"]:
+        if pr.get("destino") == "conta":
+            mexe(pr.get("conta"), pr["valor"])
     return {k: round(v, 2) for k, v in s.items()}
 
 
@@ -116,9 +130,109 @@ def _meta_guardado(c: dict[str, Any], meta_id: str) -> float:
     return round(sum(d["valor"] for d in c["depositos"] if d["meta"] == meta_id), 2)
 
 
+def _depois(x: dict[str, Any], ref: dict[str, Any] | None) -> bool:
+    return ref is None or (x["data"], x.get("criado", 0)) > (ref["data"], ref.get("criado", 0))
+
+
+def _posicao(c: dict[str, Any], inv: dict[str, Any]) -> dict[str, Any]:
+    """Valor de um investimento por valor: o último valor informado + o que entrou/saiu depois dele."""
+    meus = [a for a in c["aportes"] if a["investimento"] == inv["id"] and not a.get("interno")]
+    provs = [p for p in c["proventos"] if p["investimento"] == inv["id"]]
+    aval = max((v for v in c["avaliacoes"] if v["investimento"] == inv["id"]), key=lambda v: (v["data"], v.get("criado", 0)), default=None)
+    base = aval["valor"] if aval else textos.num(inv.get("inicial"))
+    valor = base + sum(a["valor"] for a in meus if _depois(a, aval)) + sum(p["valor"] for p in provs if p.get("destino") == "caixa" and _depois(p, aval))
+    return {"valor": round(max(0.0, valor), 2), "aplicado": round(textos.num(inv.get("inicial")) + sum(a["valor"] for a in meus), 2),
+            "proventos": round(sum(p["valor"] for p in provs), 2), "proventos_conta": round(sum(p["valor"] for p in provs if p.get("destino") == "conta"), 2),
+            "avaliado_em": aval["data"] if aval else None}
+
+
 def _invest_valor(c: dict[str, Any], inv_id: str) -> float:
-    base = next((i for i in c["investimentos"] if i["id"] == inv_id), {}).get("inicial", 0)
-    return round(textos.num(base) + sum(a["valor"] for a in c["aportes"] if a["investimento"] == inv_id), 2)
+    inv = next((i for i in c["investimentos"] if i["id"] == inv_id), None)
+    return _posicao(c, inv)["valor"] if inv else 0.0
+
+
+def relatorio_investimentos(c: dict[str, Any], hoje: dt.date | None = None) -> dict[str, Any]:
+    """A carteira desta conta no formato de investimentos.compactar (mesmo visual e mesmas grandezas)."""
+    from . import mentor
+
+    hoje = hoje or dt.date.today()
+    lacunas: list[dict[str, Any]] = []
+    ativos, grupos = [], {}
+    patrimonio = aplicado = proventos_conta = 0.0
+    sem_aval, aval_antiga = [], []
+    for inv in c["investimentos"]:
+        p = _posicao(c, inv)
+        g = mentor.grupo(inv.get("classe"))
+        patrimonio += p["valor"]
+        aplicado += p["aplicado"]
+        proventos_conta += p["proventos_conta"]
+        grupos[g] = grupos.get(g, 0.0) + p["valor"]
+        if not p["avaliado_em"]:
+            sem_aval.append(inv["nome"])
+        elif (hoje - dt.date.fromisoformat(p["avaliado_em"])).days > 35:
+            aval_antiga.append(f"{inv['nome']} ({textos.data_br(p['avaliado_em'], hoje)})")
+        ativos.append({"ativo": inv["nome"], "classe": inv.get("classe"), "grupo": g, "instituicao": inv.get("instituicao"), "valor": p["valor"],
+                       "custo": p["aplicado"], "proventos": p["proventos"],
+                       "avaliacao": f"valor informado em {textos.data_br(p['avaliado_em'], hoje)}" if p["avaliado_em"] else "pelo valor aplicado (sem valor atual informado)"})
+    flows = [(a["data"], a["valor"]) for a in c["aportes"] if not a.get("interno")]
+    flows += [(p["data"], -p["valor"]) for p in c["proventos"] if p.get("destino") == "conta"]
+    iniciais = [i for i in c["investimentos"] if textos.num(i.get("inicial"))]
+    entrou = sum(v for _, v in flows if v > 0) + sum(textos.num(i.get("inicial")) for i in iniciais)
+    saiu = -sum(v for _, v in flows if v < 0)
+    resultado = round(patrimonio - aplicado + proventos_conta, 2)
+    janela = lambda desde: round(sum(v for d, v in flows if d >= desde), 2)  # noqa: E731
+    provs = c["proventos"]
+    if sem_aval:
+        lacunas.append({"codigo": "sem_valor_atual", "texto": "Sem valor atual informado: entram pelo valor aplicado (o resultado delas aparece como zero)", "itens": sem_aval[:8]})
+    if aval_antiga:
+        lacunas.append({"codigo": "valor_antigo", "texto": "Valor atual informado há mais de um mês", "itens": aval_antiga[:8]})
+    if iniciais:
+        lacunas.append({"codigo": "sem_historico", "texto": "Saldo inicial sem data de aplicação", "itens": [i["nome"] for i in iniciais][:8]})
+    lacunas.append({"codigo": "sem_cotacao", "texto": "Conta só Telegram: sem cotação automática nem pesquisa; o valor vem do que você informa", "itens": []})
+    xirr = {"metodo": "XIRR (taxa interna dos aportes e retiradas datados)", "no_periodo_pct": None, "ao_ano_pct": None, "dias": 0, "motivo_sem_taxa": None}
+    if not flows:
+        xirr["motivo_sem_taxa"] = "Ainda não há aportes registrados."
+    elif sem_aval or iniciais:
+        xirr["motivo_sem_taxa"] = "Falta o valor atual (ou a data dos aportes) de algum investimento: a taxa seria inventada."
+    else:
+        r = mentor.xirr([(d, -v) for d, v in flows] + [(hoje.isoformat(), patrimonio)])
+        dias = (hoje - min(dt.date.fromisoformat(d) for d, _ in flows)).days
+        xirr["dias"] = dias
+        if r is None or dias < 30:
+            xirr["motivo_sem_taxa"] = "Menos de 30 dias de histórico." if r is not None else "Os fluxos não permitem calcular uma taxa."
+        else:
+            xirr["no_periodo_pct"] = round(((1 + r) ** (dias / 365) - 1) * 100, 2)
+            xirr["ao_ano_pct"] = round(r * 100, 2) if dias >= 365 else None
+    reserva = grupos.pop("reserva", 0.0)
+    investivel = patrimonio - reserva
+    return {
+        "gerado_em": dt.datetime.now().isoformat(timespec="seconds"), "data": hoje.isoformat(),
+        "perimetro": "Investimentos registrados aqui (por valor). Saldo de conta não entra.",
+        "patrimonio": round(patrimonio, 2), "posicoes": round(patrimonio, 2), "caixa_da_carteira": 0.0, "reserva": round(reserva, 2),
+        "do_seu_bolso": {"liquido": round(entrou - saiu, 2), "entrou": round(entrou, 2), "saiu": round(saiu, 2),
+                         "no_mes": janela(hoje.strftime("%Y-%m-01")), "no_ano": janela(hoje.strftime("%Y-01-01")),
+                         "em_12_meses": janela((hoje - dt.timedelta(days=365)).isoformat()), "saldo_sem_historico": round(sum(textos.num(i.get("inicial")) for i in iniciais), 2)},
+        "resultado": {"total": resultado, "nao_realizado": None, "realizado": None, "proventos": round(sum(p["valor"] for p in provs), 2),
+                      "custos_pagos": None, "formula": "valor atual − aplicado + proventos que foram para a conta"},
+        "proventos": {"recebidos_mes": round(sum(p["valor"] for p in provs if p["data"] >= hoje.strftime("%Y-%m-01")), 2),
+                      "recebidos_ano": round(sum(p["valor"] for p in provs if p["data"] >= hoje.strftime("%Y-01-01")), 2),
+                      "recebidos_12m": round(sum(p["valor"] for p in provs if p["data"] >= (hoje - dt.timedelta(days=365)).isoformat()), 2),
+                      "recebidos_total": round(sum(p["valor"] for p in provs), 2), "a_receber": None, "a_receber_itens": [], "a_confirmar": 0,
+                      "ficaram_no_caixa": round(sum(p["valor"] for p in provs if p.get("destino") == "caixa"), 2), "estimados": None,
+                      "nota": "Aqui só entram proventos recebidos que você registra."},
+        "rentabilidade": {"xirr": xirr, "twr_aproximado": {"metodo": None, "no_periodo_pct": None, "motivo_sem_taxa": "Sem fotos do patrimônio nesta modalidade."},
+                          "benchmark": None, "benchmark_nota": "Sem série comparável guardada."},
+        "alocacao": {"denominador": "patrimônio sem a reserva", "tem_politica": False,
+                     "grupos": [{"grupo": g, "nome": mentor.NOME_GRUPO[g], "valor": round(v, 2), "pct": round(v / investivel * 100, 2) if investivel > 0 else 0,
+                                 "meta_pct": None, "desvio_pp": None, "para_a_meta": None} for g, v in sorted(grupos.items(), key=lambda kv: -kv[1]) if v]},
+        "concentracao": {"ativos_acima": [{"ativo": a["ativo"], "pct": round(a["valor"] / investivel * 100, 2)} for a in ativos
+                                          if a["grupo"] != "reserva" and investivel > 0 and a["valor"] / investivel * 100 >= 20],
+                         "referencia": "referência de 20% (sem limite aprovado)", "instituicoes": []},
+        "moedas": [{"moeda": "BRL", "valor": round(patrimonio, 2)}], "liquidez_a_conferir": [],
+        "cotacoes": {"mais_recente": None, "cobertura": None},
+        "ativos": sorted(ativos, key=lambda a: -a["valor"])[:40], "evolucao": [], "politica": None, "perfil": None,
+        "lacunas": lacunas, "eventos_nao_suportados": [],
+    }
 
 
 def dados_mes(c: dict[str, Any], mes: str) -> dict[str, Any]:
@@ -174,7 +288,8 @@ def copia(pid: str, base: dict[str, Any]) -> dict[str, Any]:
         "a_pagar": [], "orcamento": [],
         "metas": [{"nome": m["nome"], "alvo": m["alvo"], "guardado": _meta_guardado(c, m["id"]), "prazo": m.get("prazo"), "status": "ATIVA"} for m in c["metas"]],
         "investimentos": {"total": sum(_invest_valor(c, i["id"]) for i in c["investimentos"]),
-                          "ativos": [{"nome": i["nome"], "valor": _invest_valor(c, i["id"]), "instituicao": i.get("instituicao")} for i in c["investimentos"]]},
+                          "ativos": [{"nome": i["nome"], "valor": _invest_valor(c, i["id"]), "instituicao": i.get("instituicao")} for i in c["investimentos"]],
+                          "relatorio": relatorio_investimentos(c)},
         "categorias": {"gastos": [{"name": n} for n in CATEGORIAS_GASTO], "entradas": [{"name": n} for n in CATEGORIAS_ENTRADA]},
     }
     return {**base, "versao": 1, "gerado": time.time(), "financeiro": fin, "memorias": [{"tipo": "nota", "texto": t} for t in c["memorias"][-400:]],
@@ -229,11 +344,15 @@ def aplicar(pid: str, ident: str, ferramenta: str, a: dict[str, Any]) -> dict[st
             c["investimentos"].append(inv)
         v = abs(textos.num(a.get("valor"))) * (1 if a.get("acao", "aportar") == "aportar" else -1)
         c["aportes"].append({"id": ident, "investimento": inv["id"], "valor": round(v, 2), "conta": a.get("conta"), "data": str(a.get("data") or hoje)[:10]})
+    elif ferramenta == "investimentos_registrar":
+        res = _registrar_investimento(c, ident, a, hoje)
+        if res.get("erro"):
+            return res
     elif ferramenta == "lembrar":
         c["memorias"].append(str(a.get("texto", ""))[:400])
     else:
         return {"erro": "Isso não está disponível na conta só Telegram."}
-    for chave in ("lancamentos", "transferencias", "metas", "depositos", "aportes"):
+    for chave in CHAVES:
         for x in c[chave]:
             if x.get("id") == ident:
                 x["criado"] = time.time()
@@ -241,15 +360,51 @@ def aplicar(pid: str, ident: str, ferramenta: str, a: dict[str, Any]) -> dict[st
     return {"ok": True}
 
 
+def _registrar_investimento(c: dict[str, Any], ident: str, a: dict[str, Any], hoje: str) -> dict[str, Any]:
+    """Operação já feita, por valor: compra/aporte somam, venda/resgate/amortização subtraem; provento e valor atual à parte."""
+    from . import mentor
+
+    falta = mentor.faltam_registro(a)
+    if falta:
+        return {"erro": "Falta " + ", ".join(falta) + "."}
+    op = str(a.get("operacao")).lower()
+    data = str(a.get("data") or hoje)[:10]
+    inv = _achar(a.get("ativo") or "", c["investimentos"])
+    if not inv:
+        if op not in ("compra", "aporte", "provento", "valor_atual", "bonificacao"):
+            return {"erro": f"Não achei o investimento '{a.get('ativo')}' para {op}."}
+        inv = {"id": f"i{secrets.token_hex(4)}", "nome": str(a.get("ativo"))[:40], "inicial": 0, "instituicao": str(a.get("instituicao") or "")[:40],
+               "classe": str(a.get("classe") or "").upper() or None}
+        c["investimentos"].append(inv)
+    qtd, preco, taxas = textos.num(a.get("quantidade")), textos.num(a.get("preco")), abs(textos.num(a.get("taxas")))
+    valor = abs(textos.num(a.get("valor"))) or (qtd * preco)
+    interno = str(a.get("origem") or "").lower().startswith("caixa")
+    if op in ("compra", "aporte"):
+        c["aportes"].append({"id": ident, "investimento": inv["id"], "valor": round(valor + taxas, 2), "conta": a.get("conta"), "data": data,
+                             "operacao": op, "quantidade": qtd or None, "preco": preco or None, "interno": interno})
+    elif op in ("venda", "resgate", "amortizacao"):
+        c["aportes"].append({"id": ident, "investimento": inv["id"], "valor": -round(max(0.0, valor - taxas), 2), "conta": a.get("conta"), "data": data,
+                             "operacao": op, "quantidade": qtd or None, "preco": preco or None, "interno": interno})
+    elif op == "provento":
+        c["proventos"].append({"id": ident, "investimento": inv["id"], "valor": round(valor, 2), "data": data,
+                               "destino": "caixa" if interno or str(a.get("destino") or "").lower().startswith("caixa") else "conta",
+                               "conta": a.get("conta") or (c["contas"][0]["nome"] if c["contas"] else None)})
+    elif op == "valor_atual":
+        c["avaliacoes"].append({"id": ident, "investimento": inv["id"], "valor": round(valor, 2), "data": data})
+    else:  # desdobramento, grupamento, bonificação: sem dinheiro; fica no histórico
+        c["aportes"].append({"id": ident, "investimento": inv["id"], "valor": 0.0, "data": data, "operacao": op, "quantidade": qtd or None, "interno": True})
+    return {"ok": True}
+
+
 def tem(pid: str, ident: str) -> bool:
     c = ler(pid)
-    return any(x.get("id") == ident for k in ("lancamentos", "transferencias", "metas", "depositos", "aportes") for x in c[k])
+    return any(x.get("id") == ident for k in CHAVES for x in c[k])
 
 
 def desfazer(pid: str, ident: str | None = None) -> dict[str, Any] | None:
     """Tira o que o pedido `ident` gravou (sem ident: o último registro). Devolve o que saiu."""
     c = ler(pid)
-    chaves = ("lancamentos", "transferencias", "metas", "depositos", "aportes")
+    chaves = CHAVES
     if not ident:
         ultimos = [(x.get("criado", 0), x["id"]) for k in chaves for x in c[k]]
         if not ultimos:
@@ -273,4 +428,8 @@ def resumo_item(x: dict[str, Any]) -> str:
         return f"Transferência {x['de']} → {x['para']} · {textos.brl(x['valor'])}"
     if x["_k"] == "metas":
         return f"Meta {x['nome']}"
+    if x["_k"] == "proventos":
+        return f"Provento {textos.brl(x['valor'])}"
+    if x["_k"] == "avaliacoes":
+        return f"Valor atual {textos.brl(x['valor'])}"
     return textos.brl(abs(x.get("valor", 0)))

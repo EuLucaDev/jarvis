@@ -851,6 +851,9 @@ def assuntos_disponiveis() -> dict[str, str]:
 
     out = {"financeiro": "dinheiro pessoal no dia a dia: lançar e ver gastos e entradas, contas fixas, faturas, orçamento, metas, "
                          "investimentos (resumo), extratos"}
+    out["investimentos"] = ("mentor de investimentos: a carteira dele (patrimônio, do seu bolso, resultado, proventos, alocação, lacunas), "
+                            "registrar compras/vendas/proventos já feitos, perfil e política, cotação com data, plano de aporte e contas "
+                            "(taxa, juro real, valuation)")
     if finance_completo._catalogo:  # noqa: SLF001 - o resto do financeiro, por área, quando o motor está no ar
         out.update({k: f"financeiro a fundo: {v[0]}" for k, v in finance_completo.ASSUNTOS.items()})
     for s in sistemas.lista():
@@ -894,6 +897,10 @@ def todas(assuntos: set[str] | None = None) -> list[types.Tool]:
     from . import finance_completo
 
     extras += [d for a in finance_completo.ASSUNTOS if tudo or a in carregados for d in finance_completo.declaracoes(a)]
+    if tudo or "investimentos" in carregados:
+        from . import investimentos
+
+        extras += [types.FunctionDeclaration(**d) for d in investimentos.DECLS]
     faltam = {k: v for k, v in assuntos_disponiveis().items() if k not in carregados}
     if not tudo and faltam:
         base.append(types.FunctionDeclaration(
@@ -1334,6 +1341,10 @@ async def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
             visao = args.get("visao")
             await hub.broadcast({"type": "painel", "visao": None if visao == "fechar" else visao})
             return {"ok": True, "instrucao": "Painel na tela. Confirme numa frase curta, sem ler o conteúdo."}
+        if name.startswith("investimentos_"):
+            from . import investimentos
+
+            return await investimentos.run(name, args)
         if name.startswith("financeiro_"):
             from . import finance_voz as fv
             from .finance import FinErro

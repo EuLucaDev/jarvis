@@ -9,7 +9,7 @@
 const path = require('node:path');
 const { handlers } = require('./db/router');
 
-const SO_LEITURA = /^(app:(initialData|refresh|needsOnboarding))|:(get|list|grouped|status|details|movements|balance|categorize|parseEntry|full|statement|categories|comparison|ledger|csv|export|folder|suggestTargets|subscriptions|monthClosing|calendar|nextActions|usedLimit|items|deposits|batches|portfolio|classes|search|pace|sameMonthLastYear|suggestBudgets|checkOutlier)$/;
+const SO_LEITURA = /^(app:(initialData|refresh|needsOnboarding))|:(get|list|grouped|status|details|movements|balance|categorize|parseEntry|full|statement|categories|comparison|ledger|csv|export|folder|suggestTargets|subscriptions|monthClosing|calendar|nextActions|usedLimit|items|deposits|batches|portfolio|report|currentProfile|currentPolicy|history|classes|search|pace|sameMonthLastYear|suggestBudgets|checkOutlier)$/;
 
 const servicos = {};
 function servico(nome) {

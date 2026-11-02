@@ -25,7 +25,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from . import carteira, textos
+from . import carteira, mentor, textos
 
 log = logging.getLogger("jarvis.bolso")
 
@@ -283,6 +283,27 @@ DECLS = [
         "lançamentos antigos, pagar contas, fixas, mexer no computador). Ele faz e responde aqui assim que o computador ligar."),
      "parameters": {"type": "OBJECT", "properties": {"texto": {"type": S, "description": "O pedido completo, como ele disse."}}, "required": ["texto"]}},
     {"name": "pendentes", "description": "O que foi registrado aqui pelo celular e ainda vai entrar no computador.", "parameters": {"type": "OBJECT", "properties": {}}},
+    {"name": "carteira_investimentos", "description": (
+        "A carteira de investimentos (da última cópia, calculada pelo motor do computador): patrimônio, do seu bolso, resultado, "
+        "proventos, rentabilidade com método, alocação × política, concentração e lacunas. Manda a mensagem diagramada. "
+        "visao: resumo, proventos, alocacao, evolucao, lacunas, completo."),
+     "parameters": {"type": "OBJECT", "properties": {"visao": {"type": S, "enum": ["resumo", "proventos", "alocacao", "evolucao", "lacunas", "completo"]}}}},
+    {"name": "registrar_investimento", "description": (
+        "Registra uma operação que ele JÁ FEZ (nunca sugestão): compra, venda, aporte, resgate, amortizacao, provento, "
+        "desdobramento, grupamento, bonificacao, valor_atual (quanto um investimento vale hoje no app do banco). Compra/venda: "
+        "ativo, quantidade e preço unitário. Data AAAA-MM-DD (sem data = hoje). origem 'caixa' = pagou com dinheiro que já estava "
+        "na carteira. Ativo novo: classe e instituicao. Faltou algo: pergunte antes."),
+     "parameters": {"type": "OBJECT", "properties": {
+         "operacao": {"type": S, "enum": ["compra", "venda", "aporte", "resgate", "amortizacao", "provento", "desdobramento", "grupamento", "bonificacao", "valor_atual"]},
+         "ativo": {"type": S}, "quantidade": {"type": N}, "preco": {"type": N}, "valor": {"type": N}, "taxas": {"type": N}, "data": {"type": S},
+         "origem": {"type": S, "enum": ["fora", "caixa"]}, "conta": {"type": S}, "classe": {"type": S}, "instituicao": {"type": S},
+         "situacao": {"type": S, "enum": ["recebido", "previsto"]}}, "required": ["operacao", "ativo"]}},
+    {"name": "investimentos_planejar", "description": (
+        "Plano de aporte (SIMULAÇÃO, não grava) com a carteira e a política da cópia: divide o valor pelos grupos abaixo da meta, "
+        "medindo com o patrimônio depois do aporte. metas_json só como hipótese; candidatos_json com preços que ele informou."),
+     "parameters": {"type": "OBJECT", "properties": {"valor": {"type": N}, "metas_json": {"type": S}, "candidatos_json": {"type": S}}, "required": ["valor"]}},
+    mentor.CALCULAR_DECL,
+    mentor.METODOLOGIA_DECL,
 ]
 DECL_CADASTRO = {"name": "cadastrar_conta", "description": "Cadastra uma conta bancária (com o saldo atual) ou um cartão (de crédito ou vale).",
                  "parameters": {"type": "OBJECT", "properties": {"tipo": {"type": S, "enum": ["conta", "credito", "vale"]}, "nome": {"type": S},
@@ -315,7 +336,8 @@ async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict
     local = bool(c.get("local"))
     nota = "" if local else f"Cópia de {_quando(c)}."
     aviso = "Registrado no seu financeiro." if local else "⏳ Entra no seu financeiro quando o computador ligar."
-    if nome in ("consultar", "lancamentos", "relatorio_financeiro", "lancar", "transferir", "meta", "investir") and not fin:
+    if nome in ("consultar", "lancamentos", "relatorio_financeiro", "lancar", "transferir", "meta", "investir", "carteira_investimentos",
+                "registrar_investimento", "investimentos_planejar") and not fin:
         return {"erro": "O financeiro não veio na cópia deste computador."}
     if nome == "consultar":
         assunto = a.get("assunto") or "resumo_mes"
@@ -473,6 +495,8 @@ async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict
             ("💼", "Posição antes", textos.brl(alvo.get("valor")))], nota=f"Rentabilidade não incluída. {aviso}")
         resp.mensagens.append({"texto": msg, "teclado": {"inline_keyboard": [[{"text": "Desfazer", "callback_data": f"n:d:{item['id']}"}]]}})
         return {"ok": True, "ja_mostrado": "O cartão já foi mandado. No máximo uma frase curta."}
+    if nome in ("carteira_investimentos", "registrar_investimento", "investimentos_planejar", "investimentos_calcular", "investimentos_metodologia"):
+        return _investimentos(pid, chat, nome, a, c, resp, local, aviso)
     if nome == "desfazer":
         x = tirar_pendencia(pid)
         return {"ok": True, "desfeito": x.get("resumo")} if x else {"erro": "Não há nada feito aqui pelo celular para desfazer."}
@@ -519,6 +543,78 @@ async def _ferramenta(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict
     return {"erro": "Isso não está disponível aqui."}
 
 
+def _pendentes_invest(pid: str) -> list[str]:
+    return [x.get("resumo") or x["ferramenta"] for x in pendencias(pid) if x["ferramenta"] in ("investimentos_registrar", "financeiro_investir")]
+
+
+def _investimentos(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict[str, Any], resp: Resposta, local: bool, aviso: str) -> dict[str, Any]:
+    """Mentor de investimentos no bolso: os números vêm prontos da cópia (os mesmos do computador); nada de internet aqui."""
+    if nome == "investimentos_metodologia":
+        return mentor.metodologia(a.get("tema"))
+    if nome == "investimentos_calcular":
+        try:
+            dados = json.loads(a.get("dados_json") or "{}")
+        except json.JSONDecodeError:
+            return {"erro": "dados_json não é um JSON válido."}
+        return {**mentor.calcular(str(a.get("tipo") or ""), dados), "simulacao": True}
+    inv = (c.get("financeiro") or {}).get("investimentos") or {}
+    rel = inv.get("relatorio")
+    pend = [] if local else _pendentes_invest(pid)
+    if nome == "carteira_investimentos":
+        if not rel:
+            return {"erro": "A cópia deste computador ainda não traz a carteira completa (o Jarvis do computador precisa da versão nova).",
+                    "total": textos.brl(inv.get("total")), "ativos": [f"{x['nome']}: {textos.brl(x.get('valor'))}" for x in inv.get("ativos") or []]}
+        resp.mensagens.append({"texto": textos.carteira(rel, copia_de="" if local else _quando(c), pendentes=pend)})
+        out = mentor.visao(rel, a.get("visao"))
+        out["copia_de"] = None if local else _quando(c)
+        out["pendentes_de_sincronizacao"] = pend or None
+        out["ja_mostrado"] = "A carteira já foi mandada diagramada. Comente o principal em uma ou duas frases, sem repetir os números."
+        return out
+    if nome == "investimentos_planejar":
+        if not rel:
+            return {"erro": "A cópia ainda não traz a carteira completa."}
+        try:
+            metas = json.loads(a["metas_json"]) if a.get("metas_json") else None
+            candidatos = json.loads(a["candidatos_json"]) if a.get("candidatos_json") else None
+        except json.JSONDecodeError:
+            return {"erro": "metas_json ou candidatos_json não é um JSON válido."}
+        r = mentor.plano_da_carteira(rel, textos.num(a.get("valor")), metas, candidatos)
+        r["copia_de"] = None if local else _quando(c)
+        return r
+    # registrar_investimento
+    falta = mentor.faltam_registro(a)
+    if falta:
+        return {"faltam": falta, "nada_foi_gravado": True, "instrucao": "Pergunte só o que falta, uma coisa por vez."}
+    ativos = [x.get("ativo") for x in (rel or {}).get("ativos") or []] or [x["nome"] for x in inv.get("ativos") or []]
+    existe = _achar(a.get("ativo") or "", [{"nome": n} for n in ativos if n])
+    if not existe and not local and a.get("operacao") not in ("provento",) and (not a.get("classe") or not a.get("instituicao")):
+        return {"faltam": [x for x, v in (("classe do ativo", a.get("classe")), ("instituição/corretora", a.get("instituicao"))) if not v],
+                "nada_foi_gravado": True, "ativos_da_copia": ativos[:30], "instrucao": "Ativo novo: pergunte a classe e a corretora."}
+    campos = ("operacao", "ativo", "quantidade", "preco", "valor", "taxas", "origem", "conta", "classe", "instituicao", "situacao")
+    args = {k: a[k] for k in campos if a.get(k) not in (None, "")}
+    if existe:
+        args["ativo"] = existe["nome"]
+    args["data"] = str(a.get("data") or _hoje(c).isoformat())[:10]  # a data fica fixa na hora do registro
+    op = str(a["operacao"]).lower()
+    valor = textos.num(a.get("valor")) or textos.num(a.get("quantidade")) * textos.num(a.get("preco"))
+    rot = {"compra": "Compra", "venda": "Venda", "aporte": "Aporte", "resgate": "Resgate", "amortizacao": "Amortização", "provento": "Provento",
+           "desdobramento": "Desdobramento", "grupamento": "Grupamento", "bonificacao": "Bonificação", "valor_atual": "Valor atual"}.get(op, op)
+    resumo = f"{rot} {args['ativo']}" + (f" · {textos.brl(valor)}" if valor else "") + (f" · {textos.num(a.get('quantidade')):g} un." if a.get("quantidade") else "")
+    try:
+        item = _por_pendencia(pid, {"chat": chat, "ferramenta": "investimentos_registrar", "args": args, "resumo": resumo})
+    except ValueError as exc:
+        return {"erro": str(exc), "nada_foi_gravado": True}
+    tipo = "resgate" if op in ("venda", "resgate", "amortizacao") else "investimento"
+    linhas = [("📈", "Ativo", args["ativo"]), ("🏷️", "Operação", rot), ("🔢", "Quantidade", f"{textos.num(a.get('quantidade')):g}" if a.get("quantidade") else None),
+              ("💲", "Preço unitário", textos.brl(a.get("preco")) if a.get("preco") else None), ("📅", "Data", textos.data_br(args["data"], _hoje(c))),
+              ("💵", "Dinheiro", "do caixa da carteira" if str(a.get("origem") or "").startswith("caixa") else "de fora da carteira" if op in ("compra", "aporte") else None)]
+    nota = aviso if op != "valor_atual" else ("Valor atual guardado." if local else aviso)
+    resp.mensagens.append({"texto": textos.registro(tipo, valor, linhas, nota=f"Aporte não é rendimento. {nota}" if op in ("compra", "aporte") else nota),
+                           "teclado": {"inline_keyboard": [[{"text": "Desfazer", "callback_data": f"n:d:{item['id']}"}]]}})
+    return {"ok": True, "registrado_em": "financeiro desta conta" if local else "pendência: entra no computador quando ele ligar",
+            "ja_mostrado": "O cartão do registro já foi mandado. No máximo uma frase curta."}
+
+
 def _prompt(c: dict[str, Any]) -> str:
     nome, chamar = c.get("nome") or "", c.get("chamar") or ""
     trato = f'Chame a pessoa de "{chamar}".' if chamar and chamar != nome else f"Chame a pessoa pelo nome, {nome}."
@@ -552,6 +648,13 @@ Agora são {agora}. Cidade: {c.get('cidade') or ''}.
   proponha o lançamento e só lance depois do sim.
 - Não invente números: consulte. Se a pergunta for sobre algo depois da cópia, diga de quando é a cópia.
 - NUNCA diga que registrou ou guardou algo sem ter chamado a ferramenta e recebido ok.
+
+{mentor.ESSENCIAL}
+- Aqui (Telegram sem computador) não há cotação nem pesquisa na internet: use o dado da cópia dizendo a data, ou diga que
+  a pesquisa fica para o computador{'' if c.get('local') else ' (pedido_para_o_computador)'}. Carteira: carteira_investimentos.
+  Registrar operação feita: registrar_investimento. Plano de aporte: investimentos_planejar. Contas: investimentos_calcular.
+  Regras detalhadas de um tema: investimentos_metodologia.{' Nesta conta os investimentos são por valor: o valor atual vem do que a pessoa informa (registrar_investimento valor_atual).' if c.get('local') else ' O que for registrado aqui fica fora dos números da carteira até o computador ligar: diga isso.'}
+{mentor.TEXTO}
 
 Contas: {contas}. Cartões: {cartoes}. Categorias dele: {', '.join(nomes_cat) or 'as de sempre'}.
 
@@ -610,7 +713,7 @@ async def responder(pid: str, chat: int, partes: list[dict[str, Any]], resumo: s
     modelos = [m for m in [c.get("modelo"), *RESERVA] if m]
     for _ in range(PASSOS):
         r = await _gerar(chave, modelos, {"systemInstruction": {"parts": [{"text": _prompt(c)}]}, "contents": contents,
-                                          "tools": [{"functionDeclarations": ([d for d in DECLS if d["name"] not in SO_COMPUTADOR] + [DECL_CADASTRO])
+                                          "tools": [{"functionDeclarations": ([d for d in DECLS if d["name"] not in SO_COMPUTADOR | {"investir"}] + [DECL_CADASTRO])
                                                      if c.get("local") else DECLS}]})
         if not r or r.get("erro_chave"):
             resp.texto = ("A chave da Gemini do seu Jarvis não foi aceita. Abra o Jarvis no computador para atualizar."

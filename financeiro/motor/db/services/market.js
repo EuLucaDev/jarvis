@@ -253,14 +253,15 @@ async function refreshQuotes() {
     .filter(item => item.status === 'ATIVO' && item.autoQuote !== 0 && item.symbol);
   const updated = [];
   const failures = [];
-  let exchange = { USD: 1, EUR: 1, BRL: 1 };
+  // Sem câmbio novo, cada ativo fica com o último câmbio salvo: nunca 1 por
+  // falta de resposta (isso converteria dólar em real sem avisar).
+  let exchange = { BRL: 1 };
+  let exchangeAt = '';
   try {
     const fx = await fetchJson('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL', {}, 5000);
-    exchange = {
-      ...exchange,
-      USD: toNumber(fx?.USDBRL?.bid) || 1,
-      EUR: toNumber(fx?.EURBRL?.bid) || 1
-    };
+    if (toNumber(fx?.USDBRL?.bid) > 0) exchange.USD = toNumber(fx.USDBRL.bid);
+    if (toNumber(fx?.EURBRL?.bid) > 0) exchange.EUR = toNumber(fx.EURBRL.bid);
+    exchangeAt = fx?.USDBRL?.create_date || now();
   } catch (error) { /* mantém o último câmbio salvo por ativo */ }
 
   for (const item of assets) {
@@ -271,7 +272,7 @@ async function refreshQuotes() {
     }
     repo.update('investments', item.id, {
       name: item.name || quote.name || item.symbol,
-      currentPrice: roundCurrency(quote.price),
+      currentPrice: Math.round(toNumber(quote.price) * 100000000) / 100000000,
       currency: quote.currency || item.currency || 'BRL',
       exchangeRate: exchange[String(quote.currency || item.currency || 'BRL').toUpperCase()] || item.exchangeRate || 1,
       dayChangePercent: quote.changePercent,
@@ -283,7 +284,7 @@ async function refreshQuotes() {
   }
 
   return {
-    updated, failures, tokenConfigured: Boolean(current.brapiToken),
+    updated, failures, tokenConfigured: Boolean(current.brapiToken), exchange, exchangeAt,
     message: updated.length
       ? `${updated.length} cotação(ões) atualizada(s).`
       : assets.length ? 'As fontes gratuitas não responderam para os ativos cadastrados.' : 'Nenhum ativo com cotação automática.'

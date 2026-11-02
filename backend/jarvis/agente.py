@@ -80,12 +80,13 @@ def _declaracoes(assuntos: set[str]) -> list[types.Tool]:
         n = d.name or ""
         if n in SEM:
             continue
-        if n in PERMITIDAS or n.startswith(("financeiro_", "fin_")) or "__" in n:
+        if n in PERMITIDAS or n.startswith(("financeiro_", "fin_", "investimentos_")) or "__" in n:
             # "não bloquear" (behavior) só existe na voz ao vivo; no texto a Gemini recusa a ferramenta inteira
             decls.append(d.model_copy(update={"behavior": None}) if getattr(d, "behavior", None) else d)
     return [types.Tool(function_declarations=[*decls, LEMBRETE_DECL, RELATORIO_DECL, PERFIL_DECL])]
 
 
+from .mentor import ESSENCIAL as MENTOR, TEXTO as MENTOR_TEXTO  # noqa: E402 - as mesmas regras de investimento da voz e do bolso
 from .textos import ESTILO  # noqa: E402 - o mesmo jeito de escrever do Jarvis de bolso
 
 
@@ -116,6 +117,11 @@ carregar_assunto (é instantâneo). Assuntos: {assuntos}.
 - Não invente números: use as ferramentas. Nunca peça nem repita senhas ou dados completos de cartão.
 - NUNCA diga que guardou, lançou, criou, apagou, agendou ou fez qualquer coisa sem ter chamado a ferramenta
   nesta mesma resposta e recebido ok. "Guarda/lembra que…" → lembrar. "Me lembra de…" → criar_lembrete.
+
+{MENTOR}
+- Carteira, registrar operação, perfil/política, cotação, plano de aporte e contas: assunto "investimentos"
+  (investimentos_*). Pesquisa de ativo: pesquisar_web, com a fonte original e a data.
+{MENTOR_TEXTO}
 """
 
 
@@ -158,7 +164,7 @@ async def _ferramenta(nome: str, args: dict[str, Any], assuntos: set[str], resp:
             log.warning("relatório falhou: %s", exc)
             return {"erro": f"Não consegui montar o relatório ({str(exc)[:120]})."}
         return {"ok": True, "instrucao": "O relatório já vai na conversa. Comente em uma ou duas frases o principal, sem repetir os números."}
-    if nome not in PERMITIDAS and not nome.startswith(("financeiro_", "fin_")) and "__" not in nome:
+    if nome not in PERMITIDAS and not nome.startswith(("financeiro_", "fin_", "investimentos_")) and "__" not in nome:
         return {"erro": "Isso não está disponível por aqui."}
     return await tools.run(nome, args)
 

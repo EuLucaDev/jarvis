@@ -100,6 +100,9 @@ async def startup():
         from . import finance_completo
 
         asyncio.create_task(finance_completo.preparar())  # catálogo das operações para as ações completas
+        from . import investimentos
+
+        asyncio.create_task(investimentos.loop())  # cotações, proventos e foto do patrimônio, uma vez por dia
     log.info("Jarvis %s no ar em http://127.0.0.1:%s (%s)", VERSION, settings.port, pc.SISTEMA)
 
 

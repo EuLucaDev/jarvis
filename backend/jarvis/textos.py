@@ -370,9 +370,80 @@ _ROTULO_EMOJI = {"pago com": "💳", "recebido em": "🏦", "data": "📅", "de"
                  "saldo após lançamento": "💰", "parcelas": "🧾"}
 
 
+def _pct_br(v: Any) -> str:
+    return (f"{num(v):+.2f}".replace(".", ",") + "%") if v is not None else "—"
+
+
+def carteira(c: dict[str, Any], copia_de: str = "", pendentes: list[str] | None = None) -> str:
+    """A carteira de investimentos (resumo compactado do motor) no visual do app de banco.
+
+    Patrimônio, do seu bolso, resultado e proventos ficam em blocos separados: são grandezas diferentes.
+    Cabe numa mensagem do Telegram (limite de 4096 caracteres): no máximo 6 ativos e 4 lacunas.
+    """
+    bolso, res, prov = c.get("do_seu_bolso") or {}, c.get("resultado") or {}, c.get("proventos") or {}
+    rent = (c.get("rentabilidade") or {}).get("xirr") or {}
+    sub = f"cópia de {copia_de}" if copia_de else f"em {data_br(c.get('data') or '')}".replace("em Hoje", "hoje")
+    partes = [titulo("🟣", "Carteira de investimentos", sub), f"<b>{brl(c.get('patrimonio'))}</b>"]
+    linhas = [campo("📦", "Em posições", brl(c.get("posicoes")))]
+    if num(c.get("caixa_da_carteira")):
+        linhas.append(campo("💵", "Caixa da carteira", brl(c.get("caixa_da_carteira"))))
+    if num(c.get("reserva")):
+        linhas.append(campo("🛟", "Reserva (fora das metas)", brl(c.get("reserva"))))
+    partes += [SEP, "\n".join(linhas), SEP, secao("De onde veio"),
+               "\n".join([campo("🔵", "Do seu bolso (líquido)", brl(bolso.get("liquido"))),
+                          campo("📥", "No ano", brl(bolso.get("no_ano"), sinal=True)),
+                          campo("📈" if num(res.get("total")) >= 0 else "📉", "Resultado dos investimentos", brl(res.get("total"), sinal=True))])]
+    dec = [(r, v) for r, v in (("Valorização em aberto", res.get("nao_realizado")), ("Ganho realizado", res.get("realizado")),
+                                ("Proventos", res.get("proventos"))) if v is not None]
+    if dec:
+        partes.append("<pre>" + "\n".join(f"{e(r):<22}{brl(v, sinal=True):>14}" for r, v in dec) + "</pre>")
+    partes += [SEP, secao("Proventos"), "\n".join(x for x in [
+        campo("🟢", "Recebidos em 12 meses", brl(prov.get("recebidos_12m"))),
+        campo("🗓️", "A receber (anunciados)", brl(prov.get("a_receber"))) if num(prov.get("a_receber")) else "",
+        campo("⚠️", "Previstos a confirmar", prov.get("a_confirmar")) if prov.get("a_confirmar") else "",
+    ] if x)]
+    if rent.get("no_periodo_pct") is not None:
+        txt = f"{_pct_br(rent['no_periodo_pct'])} em {rent.get('dias')} dias" + (f" · {_pct_br(rent['ao_ano_pct'])} ao ano" if rent.get("ao_ano_pct") is not None else "")
+        partes += [SEP, campo("🧮", "Rentabilidade (XIRR)", txt) + (f"\n<i>{e(rent['ressalva'])}</i>" if rent.get("ressalva") else "")]
+    elif rent.get("motivo_sem_taxa"):
+        partes += [SEP, f"🧮 <b>Rentabilidade:</b> <i>{e(rent['motivo_sem_taxa'])}</i>"]
+    bm = (c.get("rentabilidade") or {}).get("benchmark") or {}
+    if bm.get("valor") is not None:
+        partes.append(campo("📊", "No CDI, nas mesmas datas", f"{brl(bm['valor'])} (carteira {brl(bm.get('carteira'))}, {brl(bm.get('diferenca'), sinal=True)})"))
+    grupos = [g for g in (c.get("alocacao") or {}).get("grupos") or [] if num(g.get("valor")) or g.get("meta_pct") is not None]
+    if grupos:
+        linhas = []
+        for g in grupos[:7]:
+            nome = (g["nome"][:13] + "…") if len(g["nome"]) > 14 else g["nome"].ljust(14)
+            meta = f" meta {num(g['meta_pct']):.0f}%" if g.get("meta_pct") is not None else ""
+            linhas.append(f"{e(nome)} {barra(num(g.get('pct')), 100)} {pct_txt(num(g.get('pct'))):>4}{meta}")
+        partes += [SEP, secao("Alocação") + (" <i>(sem política aprovada)</i>" if not (c.get("alocacao") or {}).get("tem_politica") else ""),
+                   "<pre>" + "\n".join(linhas) + "</pre>"]
+    ativos = (c.get("ativos") or [])[:6]
+    if ativos:
+        partes += [SEP, secao("Maiores posições"), "\n".join(
+            f"• <b>{e(a['ativo'])}</b> {brl(a.get('valor'))}" + (f" · <i>{e(a['avaliacao'])}</i>" if a.get("avaliacao") and a["avaliacao"] != "cotação de mercado" else "")
+            for a in ativos)]
+    alertas = [f"⚠️ {e(l['texto'])}" + (f" ({e(', '.join(l['itens'][:3]))})" if l.get("itens") else "") for l in (c.get("lacunas") or [])[:4]]
+    if pendentes:
+        alertas.insert(0, f"⏳ Pendentes de sincronização (fora destes números): {e('; '.join(pendentes[:4]))}")
+    conc = (c.get("concentracao") or {}).get("ativos_acima") or []
+    if conc:
+        alertas.append(f"⚠️ Concentração: {e(', '.join(f'{x['ativo']} {pct_txt(num(x['pct']))}' for x in conc[:3]))} ({e((c.get('concentracao') or {}).get('referencia') or '')})")
+    if alertas:
+        partes += [SEP, "\n".join(alertas)]
+    cot = (c.get("cotacoes") or {}).get("mais_recente")
+    partes.append(f"<i>Cotação mais recente: {e(str(cot)[:16].replace('T', ' '))}. Aporte não é rendimento: o resultado já desconta o que veio do seu bolso.</i>"
+                  if cot else "<i>Aporte não é rendimento: o resultado já desconta o que veio do seu bolso.</i>")
+    texto = "\n".join(p for p in partes if p)
+    return texto if len(texto) < 4000 else texto[:3990] + "…"
+
+
 def cartao(card: dict[str, Any]) -> str | None:
     """O cartão que a ferramenta mostraria na tela, como texto (ou None quando não acrescenta nada)."""
     k, d = card.get("kind"), card.get("data") or {}
+    if k == "financeiro" and d.get("modo") == "carteira" and d.get("carteira"):
+        return carteira(d["carteira"])
     if k == "financeiro":
         if d.get("modo") == "lancamento":
             sinal = d.get("sinal")

@@ -72,6 +72,13 @@ async def _financeiro() -> dict[str, Any] | None:
                                             "instituicao": i.get("institution")} for i in ativos if i.get("status") == "ATIVO"]}
     except finance.FinErro:
         out["investimentos"] = None
+    try:  # o mesmo resumo da carteira que a voz e o Telegram do computador usam (números iguais nos canais)
+        from . import investimentos
+
+        if out["investimentos"] is not None:
+            out["investimentos"]["relatorio"] = await investimentos.relatorio()
+    except finance.FinErro as exc:
+        log.warning("cópia: relatório da carteira: %s", exc)
     try:
         cats = await chamar("categories:list") or {}
         out["categorias"] = cats if isinstance(cats, dict) else {"todas": cats}
@@ -196,8 +203,11 @@ async def aplicar(itens: list[dict[str, Any]], conversas: dict[str, list[dict[st
             continue
         cartoes: list[dict[str, Any]] = []
         token = coletor.set(cartoes)
+        args = dict(p.get("args") or {})
+        if p["ferramenta"] == "investimentos_registrar":
+            args["chave"] = f"bolso:{pid}"  # o motor recusa a mesma operação duas vezes, mesmo se a reconexão repetir
         try:
-            res = await tools.run(p["ferramenta"], dict(p.get("args") or {}))
+            res = await tools.run(p["ferramenta"], args)
         except Exception as exc:  # noqa: BLE001
             res = {"erro": str(exc)[:200]}
         finally:
@@ -210,6 +220,7 @@ async def aplicar(itens: list[dict[str, Any]], conversas: dict[str, list[dict[st
             u = finance_voz._ultimos[-1] if p["ferramenta"] in ("financeiro_lancar", "financeiro_transferir", "financeiro_meta") and finance_voz._ultimos else None  # noqa: SLF001
             feitos[pid] = {"em": time.time(), "tipo": u and u["tipo"], "ref": u and u["id"]}
         ids.append(pid)
+        store.put("bolso_aplicadas", feitos)  # a cada item: se cair no meio, a reconexão não aplica de novo
     if len(feitos) > 500:
         feitos = dict(sorted(feitos.items(), key=lambda kv: kv[1]["em"])[-500:])
     store.put("bolso_aplicadas", feitos)
