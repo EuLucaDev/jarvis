@@ -249,7 +249,8 @@ async def registrar(a: dict[str, Any]) -> dict[str, Any]:
     ativos = await chamar("investments:list") or []
     nome = str(a.get("ativo") or "").strip()
     alvo = _achar(nome, ativos, ("symbol", "name")) if nome else None
-    faltam = mentor.faltam_registro(a)
+    cotado = bool(alvo.get("quoted")) if alvo else (str(a["classe"]).upper() in mentor.COM_COTA if a.get("classe") else None)
+    faltam = mentor.faltam_registro(a, cotado)
     if faltam:
         return {"faltam": faltam, "nada_foi_gravado": True, "ativos_cadastrados": [x.get("symbol") or x.get("name") for x in ativos][:30],
                 "instrucao": "Pergunte só o que falta, uma coisa por vez, e chame de novo com tudo."}
@@ -285,6 +286,8 @@ async def registrar(a: dict[str, Any]) -> dict[str, Any]:
     if not tipo:
         return {"erro": f"Operação '{op}' desconhecida.", "operacoes": [*OPERACOES, "provento", "valor_atual", "desfazer"]}
     qtd, preco = _num(a, "quantidade"), _num(a, "preco")
+    if tipo in ("COMPRA", "VENDA") and cotado is False and not (qtd and preco) and _num(a, "valor"):
+        tipo = "APORTE" if tipo == "COMPRA" else "RESGATE"  # renda fixa, previdência…: "comprei/vendi" por valor
     if tipo in ("APORTE", "RESGATE") and not (qtd and preco) and _num(a, "valor"):
         qtd, preco = 1.0, _num(a, "valor")  # CDB, previdência…: aplicação por valor (uma "cota" do valor aplicado)
     if tipo != "AMORTIZACAO" and not qtd:
@@ -399,7 +402,8 @@ DECLS: list[dict[str, Any]] = [
     {"name": "investimentos_registrar",
      "description": ("Registra uma operação que ele JÁ FEZ (nunca uma sugestão). operacao: compra, venda, aporte, resgate, amortizacao, "
                      "provento, desdobramento, grupamento, bonificacao, valor_atual (quanto um CDB/previdência vale hoje), desfazer. "
-                     "Precisa de ativo, quantidade e preço unitário (compra/venda), data (AAAA-MM-DD; sem data = hoje). "
+                     "Ações, FIIs, ETFs, cripto e Tesouro: ativo, quantidade e preço unitário; CDB, LCI, previdência, fundo: o valor basta. "
+                     "Data AAAA-MM-DD (sem data = hoje). Uma vez por operação; pergunta nunca registra. "
                      "origem: 'caixa' se pagou com o dinheiro que estava na carteira (venda/provento anterior); senão é dinheiro de fora. "
                      "conta: conta bancária de onde saiu (opcional). Ativo novo: classe e instituicao. Se faltar algo, pergunte."),
      "parameters": {"type": "OBJECT", "properties": {

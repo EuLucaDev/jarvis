@@ -30,7 +30,6 @@ from . import carteira, mentor, textos
 log = logging.getLogger("jarvis.bolso")
 
 GEMINI = os.getenv("BOLSO_GEMINI_URL", "https://generativelanguage.googleapis.com/v1beta")
-RESERVA = ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
 PASSOS = 8
 HISTORICO = 16
 _travas: dict[str, asyncio.Lock] = {}
@@ -128,11 +127,22 @@ def pendencias(pid: str) -> list[dict[str, Any]]:
     return _ler(_p().DADOS / "bolso" / pid / "pendencias.json", []) or []
 
 
+_recentes: dict[str, tuple[float, dict[str, Any]]] = {}  # mesmo registro pedido duas vezes seguidas (o modelo repetiu)
+
+
 def _por_pendencia(pid: str, item: dict[str, Any]) -> dict[str, Any]:
+    assinatura = f"{pid}|{item['ferramenta']}|{json.dumps(item.get('args') or {}, sort_keys=True, ensure_ascii=False)}"
+    agora = time.time()
+    for k in [k for k, (t, _) in _recentes.items() if agora - t > 120]:
+        _recentes.pop(k, None)
+    if assinatura in _recentes and item["ferramenta"] != "pedido":
+        return _recentes[assinatura][1]  # já gravado há instantes: não grava de novo
     item = {"id": f"b{secrets.token_hex(5)}", "em": time.time(), **item}
+    _recentes[assinatura] = (agora, item)
     if carteira.local(pid):  # conta só Telegram: grava na hora
         res = carteira.aplicar(pid, item["id"], item["ferramenta"], item.get("args") or {})
         if res.get("erro"):
+            _recentes.pop(assinatura, None)
             raise ValueError(res["erro"])
         return item
     lista = pendencias(pid) + [item]
@@ -290,8 +300,9 @@ DECLS = [
      "parameters": {"type": "OBJECT", "properties": {"visao": {"type": S, "enum": ["resumo", "proventos", "alocacao", "evolucao", "lacunas", "completo"]}}}},
     {"name": "registrar_investimento", "description": (
         "Registra uma operação que ele JÁ FEZ (nunca sugestão): compra, venda, aporte, resgate, amortizacao, provento, "
-        "desdobramento, grupamento, bonificacao, valor_atual (quanto um investimento vale hoje no app do banco). Compra/venda: "
-        "ativo, quantidade e preço unitário. Data AAAA-MM-DD (sem data = hoje). origem 'caixa' = pagou com dinheiro que já estava "
+        "desdobramento, grupamento, bonificacao, valor_atual (quanto um investimento vale hoje no app do banco). Ações, FIIs, ETFs e "
+        "cripto: ativo, quantidade e preço unitário; renda fixa, Tesouro na conta só Telegram, previdência: aporte com o valor basta. "
+        "Uma vez por operação; pergunta (saldo, como está) nunca registra. Data AAAA-MM-DD (sem data = hoje). origem 'caixa' = pagou com dinheiro que já estava "
         "na carteira. Ativo novo: classe e instituicao. Faltou algo: pergunte antes."),
      "parameters": {"type": "OBJECT", "properties": {
          "operacao": {"type": S, "enum": ["compra", "venda", "aporte", "resgate", "amortizacao", "provento", "desdobramento", "grupamento", "bonificacao", "valor_atual"]},
@@ -582,7 +593,7 @@ def _investimentos(pid: str, chat: int, nome: str, a: dict[str, Any], c: dict[st
         r["copia_de"] = None if local else _quando(c)
         return r
     # registrar_investimento
-    falta = mentor.faltam_registro(a)
+    falta = mentor.faltam_registro(a, cotado=False if local else None)
     if falta:
         return {"faltam": falta, "nada_foi_gravado": True, "instrucao": "Pergunte só o que falta, uma coisa por vez."}
     ativos = [x.get("ativo") for x in (rel or {}).get("ativos") or []] or [x["nome"] for x in inv.get("ativos") or []]
@@ -674,17 +685,17 @@ async def _gerar(chave: str, modelos: list[str], corpo: dict[str, Any]) -> dict[
     vivos = [m for m in modelos if _pausados.get(m, 0) < agora] or modelos[-1:]
     for m in vivos:
         try:
-            r = await _p().http().post(f"{GEMINI}/models/{m}:generateContent", json=corpo, headers={"x-goog-api-key": chave}, timeout=20)
+            r = await _p().http().post(f"{GEMINI}/models/{m}:generateContent", json=corpo, headers={"x-goog-api-key": chave}, timeout=12)
             if r.status_code == 200:
                 return r.json()
-            if r.status_code in (429, 500, 503):
-                _pausados[m] = time.time() + 600
+            if r.status_code in (429, 500, 503, 404):
+                _pausados[m] = time.time() + (120 if r.status_code in (500, 503) else 600)  # sobrecarga: 2 min; cota ou sumiu: 10 min
             log.warning("bolso %s: %s %s", m, r.status_code, r.text[:160].replace("\n", " "))
             if r.status_code in (400, 401, 403) and "API key" in r.text:
                 return {"erro_chave": True}
         except Exception as exc:  # noqa: BLE001
             log.warning("bolso %s: %s", m, repr(exc)[:120])
-            _pausados[m] = time.time() + 600
+            _pausados[m] = time.time() + 120  # lento agora: volta logo
         if len(modelos) > 1 and m in modelos:
             modelos.remove(m)
     return None
@@ -710,7 +721,7 @@ async def responder(pid: str, chat: int, partes: list[dict[str, Any]], resumo: s
     chave = _chave(pid)
     linhas = _conversa(pid, str(chat), c)
     contents = [{"role": x["papel"], "parts": [{"text": x["texto"]}]} for x in linhas] + [{"role": "user", "parts": partes}]
-    modelos = [m for m in [c.get("modelo"), *RESERVA] if m]
+    modelos = list(textos.MODELOS_TELEGRAM)  # texto: modelos leves, com cota separada da voz
     for _ in range(PASSOS):
         r = await _gerar(chave, modelos, {"systemInstruction": {"parts": [{"text": _prompt(c)}]}, "contents": contents,
                                           "tools": [{"functionDeclarations": ([d for d in DECLS if d["name"] not in SO_COMPUTADOR | {"investir"}] + [DECL_CADASTRO])

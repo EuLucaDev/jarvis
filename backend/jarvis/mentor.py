@@ -247,13 +247,25 @@ def grupo(classe: str | None) -> str:
     return GRUPO_DA_CLASSE.get(str(classe or "").upper(), "outros")
 
 
-def faltam_registro(a: dict[str, Any]) -> list[str]:
-    """O que falta para registrar uma operação já feita (mesma regra no computador e no bolso)."""
+# Classes negociadas por cota (quantidade × preço); as outras (CDB, LCI, previdência, fundo…) podem ser por valor.
+COM_COTA = {"ACAO", "FII", "FIAGRO", "ETF", "BDR", "STOCK", "REIT", "ETF_INTERNACIONAL", "CRIPTO", "TESOURO_DIRETO", "RENDA_VARIAVEL", "FUNDO_IMOBILIARIO"}
+
+
+def faltam_registro(a: dict[str, Any], cotado: bool | None = None) -> list[str]:
+    """O que falta para registrar uma operação já feita (mesma regra no computador e no bolso).
+
+    cotado: o ativo é negociado por cotas (True), por valor (False) ou não se sabe (None). Por valor basta o valor;
+    por cotas, quantidade e preço. Sem saber, compra/venda pedem cotas e aporte/resgate aceitam o valor.
+    """
     op = str(a.get("operacao") or "").lower()
     falta = [] if a.get("ativo") else ["ativo"]
     tem = lambda k: a.get(k) not in (None, "", 0)  # noqa: E731
+    if cotado is None and a.get("classe"):
+        cotado = str(a["classe"]).upper() in COM_COTA
     if op in ("compra", "venda", "aporte", "resgate"):
-        falta += [n for k, n in (("quantidade", "quantidade"), ("preco", "preço unitário")) if not tem(k)] if not tem("valor") or op in ("compra", "venda") else []
+        por_valor = tem("valor") and (cotado is False or (cotado is None and op in ("aporte", "resgate")))
+        if not por_valor:
+            falta += [n for k, n in (("quantidade", "quantidade"), ("preco", "preço unitário")) if not tem(k)]
     elif op in ("desdobramento", "grupamento", "bonificacao"):
         falta += [] if tem("quantidade") else ["quantidade"]
     elif op in ("amortizacao", "valor_atual"):

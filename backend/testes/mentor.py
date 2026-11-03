@@ -201,6 +201,11 @@ async def so_telegram() -> None:
     check("só Telegram 3: provento que fica soma no patrimônio", rel["patrimonio"], 1570.0)
     check("só Telegram 3: e não é aporte", rel["do_seu_bolso"]["liquido"], 1500.0)
     check("só Telegram: nada de pendência (grava na hora)", bolso.pendencias(pid), [])
+    antes = len(carteira.ler(pid)["aportes"])
+    await reg(operacao="compra", ativo="CDB Inter", valor=300, data="2026-11-02")
+    await reg(operacao="compra", ativo="CDB Inter", valor=300, data="2026-11-02")
+    check("só Telegram: o modelo repetir a chamada não grava duas vezes", len(carteira.ler(pid)["aportes"]), antes + 1)
+    check("só Telegram: compra por valor sem conta sai da conta principal", carteira.saldos(carteira.ler(pid))["Nubank"], 1200.0)
     vista = await bolso._ferramenta(pid, 3, "carteira_investimentos", {}, bolso.copia(pid), r)  # noqa: SLF001
     check("só Telegram: a carteira vem da conta, sem 'cópia de'", vista.get("copia_de"), None)
     verdade("só Telegram: diz que não tem cotação", any(l["codigo"] == "sem_cotacao" for l in vista["lacunas"]))
@@ -224,6 +229,9 @@ def calculos() -> None:
     perto("CDI: retirada deixa de render", mentor.valor_no_cdi([("2026-01-01", 1000), ("2026-01-05", -500)], serie, "2026-01-06"),
           1000 * 1.0005 ** 3 - 500 * 1.0005, 1e-6)
     check("CDI: série que não cobre o período não compara", mentor.valor_no_cdi([("2025-06-01", 1000)], serie, "2026-01-06"), None)
+    check("registro: CDB comprado por valor basta", mentor.faltam_registro({"operacao": "compra", "ativo": "CDB", "valor": 500}, cotado=False), [])
+    check("registro: ação por valor pede cotas", mentor.faltam_registro({"operacao": "compra", "ativo": "PETR4", "valor": 500, "classe": "ACAO"}),
+          ["quantidade", "preço unitário"])
     plano = mentor.plano_aporte(300, {"renda_fixa": 700, "acoes_br": 300}, {"renda_fixa": 50, "acoes_br": 50},
                                 [{"ativo": "BOVA11", "grupo": "acoes_br", "preco": 120, "lote": 1}])
     check("plano: vai para o grupo abaixo da meta", list(plano["divisao_por_grupo"]), ["acoes_br"])

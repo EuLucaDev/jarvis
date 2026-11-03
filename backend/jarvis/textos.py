@@ -42,6 +42,10 @@ ESTILO = """visual de app de banco, só texto (nada de imagens), a informação 
 - Lançamento simples e claro: registra e responde. Faltou o valor, ou parece duplicado: pergunte antes.
 - Relatório do mês, fechamento, "me manda o relatório": relatorio_financeiro (ele manda o relatório com botões)."""
 
+# Modelos da Gemini para o Telegram (texto): leves e rápidos (~1 s), com cota própria (não disputam com o 3.8
+# que a voz e a memória usam). Na ordem; o que falhar fica 10 min de lado. Vale no computador e no bolso.
+MODELOS_TELEGRAM = ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-3.5-flash"]
+
 COR = {"entrada": "🟢", "saida": "🔴", "transferencia": "🔵", "investimento": "🟣", "meta": "🎯", "alerta": "⚠️"}
 _CATEGORIAS = [
     (("aliment", "comida", "restaur", "lanche", "ifood", "padaria"), "🍔"), (("mercado", "supermerc"), "🛒"),

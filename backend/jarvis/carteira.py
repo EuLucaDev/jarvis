@@ -72,7 +72,7 @@ def ativar(pid: str, nome: str) -> None:
     if not local(pid):
         gravar(pid, _vazia())
     _bolso()._gravar(_bolso()._pasta(pid) / "perfil.bin", {"nome": nome, "chamar": nome.split(" ")[0], "cidade": "", "fuso": "America/Sao_Paulo",  # noqa: SLF001
-                                                          "modelo": "gemini-3.8-flash", "chat": None})
+                                                          "modelo": textos.MODELOS_TELEGRAM[0], "chat": None})
 
 
 def perfil(pid: str) -> dict[str, Any]:
@@ -364,7 +364,7 @@ def _registrar_investimento(c: dict[str, Any], ident: str, a: dict[str, Any], ho
     """Operação já feita, por valor: compra/aporte somam, venda/resgate/amortização subtraem; provento e valor atual à parte."""
     from . import mentor
 
-    falta = mentor.faltam_registro(a)
+    falta = mentor.faltam_registro(a, cotado=False)  # aqui tudo é por valor
     if falta:
         return {"erro": "Falta " + ", ".join(falta) + "."}
     op = str(a.get("operacao")).lower()
@@ -379,6 +379,8 @@ def _registrar_investimento(c: dict[str, Any], ident: str, a: dict[str, Any], ho
     qtd, preco, taxas = textos.num(a.get("quantidade")), textos.num(a.get("preco")), abs(textos.num(a.get("taxas")))
     valor = abs(textos.num(a.get("valor"))) or (qtd * preco)
     interno = str(a.get("origem") or "").lower().startswith("caixa")
+    if not a.get("conta") and not interno and c["contas"] and op in ("compra", "aporte", "venda", "resgate", "amortizacao"):
+        a = {**a, "conta": c["contas"][0]["nome"]}  # sem dizer a conta: a principal (a primeira cadastrada)
     if op in ("compra", "aporte"):
         c["aportes"].append({"id": ident, "investimento": inv["id"], "valor": round(valor + taxas, 2), "conta": a.get("conta"), "data": data,
                              "operacao": op, "quantidade": qtd or None, "preco": preco or None, "interno": interno})
