@@ -66,7 +66,7 @@ Como responder:
   frase. Conta que repete todo mês ("despesa fixa", "aluguel todo dia 5", "salário cai dia 10") → financeiro_fixa. "Quanto gastei / tenho / o que vence / como está o orçamento" → financeiro_consultar. Transferência
   entre contas dele → financeiro_transferir. Pagar conta ou fatura → financeiro_pagar (pede o sim). Metas e
   caixinhas → financeiro_meta. Extratos → financeiro_importar. "Desfaz" logo depois de um lançamento →
-  financeiro_desfazer. "Abre o financeiro / os relatórios" → financeiro_abrir. Sem conta cadastrada, ofereça
+  financeiro_desfazer. "Recebo no fim do mês para pagar o mês seguinte" → financeiro_competencia ligar. "Abre o financeiro / os relatórios" → financeiro_abrir. Sem conta cadastrada, ofereça
   financeiro_cadastrar. Mensagem "[Fechamento do mês]": conduza o fechamento com financeiro_consultar fechamento.
 - Dinheiro da agência x pessoal: o financeiro (financeiro_*) é o dinheiro pessoal dele; faturas, contratos e despesas
   da agência ficam no WorkFlow. Na dúvida ("paguei 300 de freelancer"), pergunte de qual é. Quando um cliente pagar uma
@@ -309,7 +309,10 @@ class Voice:
 
     async def send_image(self, jpeg: bytes) -> None:
         if self.session:
-            await self.session.send_realtime_input(video=types.Blob(data=jpeg, mime_type="image/jpeg"))
+            try:
+                await self.session.send_realtime_input(video=types.Blob(data=jpeg, mime_type="image/jpeg"))
+            except Exception as exc:  # noqa: BLE001 - a sessão fechou no meio: a foto da tela simplesmente não vai
+                log.info("imagem não enviada (sessão fechando): %s", type(exc).__name__)
 
     def _flush_turn(self) -> None:
         for papel, buf in (("usuario", self.user_buf), ("jarvis", self.model_buf)):
@@ -361,8 +364,14 @@ class Voice:
                         _sem_modelo_pensa = True  # tenta de novo já com o modelo comum, sem contar como falha
                         log.warning("modelo de voz que pensa indisponível (%s); usando %s", exc, settings.live_model)
                         continue
-                    if self.handle and any(k in str(exc).lower() for k in ("resum", "handle")):
-                        self.handle = None  # a retomada não aceitou a configuração nova: conversa segue sem o histórico
+                    if self.handle:
+                        # Retomada vencida ("session not found or expired") ou recusada: reconectar com o mesmo ponto
+                        # falharia sempre. A próxima tentativa abre uma sessão nova (a conversa recente vai junto).
+                        self.handle = None
+                        if any(k in str(exc).lower() for k in ("not found", "expired", "resum", "handle")):
+                            log.info("retomada da voz vencida; abrindo sessão nova")
+                            await asyncio.sleep(0.5)
+                            continue
                     falhas += 1
                     log.warning("sessão de voz caiu: %s", exc)
                     await hub.set_status(voice="error", error=str(exc)[:300])

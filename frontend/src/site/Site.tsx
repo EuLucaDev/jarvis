@@ -66,6 +66,7 @@ type Eu = Conta & {
   bolso?: Bolso
   sessoes?: number
   chave_ok?: boolean
+  extra_ok?: boolean
 }
 type Versao = { versao: string; data: string; notas?: string }
 
@@ -760,6 +761,63 @@ function Inicio({ eu, ir }: { eu: Eu; ir: (p: Pagina) => void }) {
   )
 }
 
+/** Opcional: chave grátis da Groq. Ela responde primeiro (rápida) e a Gemini fica de reserva. */
+function ChaveExtra({ ok: inicial }: { ok: boolean }) {
+  const [chave, setChave] = useState('')
+  const [aberto, setAberto] = useState(false)
+  const [indo, setIndo] = useState(false)
+  const [erro, setErro] = useState('')
+  const [ok, setOk] = useState(inicial)
+  const salvar = async (e: FormEvent) => {
+    e.preventDefault()
+    setErro('')
+    setIndo(true)
+    try {
+      await chamar('/api/site/chave', 'POST', { chave: chave.trim() })
+      setOk(true)
+      setAberto(false)
+      setChave('')
+    } catch (x) {
+      setErro((x as Error).message)
+    } finally {
+      setIndo(false)
+    }
+  }
+  return (
+    <section className="jv-painel">
+      <div className="jv-faixa">
+        <span className={`jv-quad ${ok ? 'bom' : ''}`}>{ok ? <Check /> : <KeyRound />}</span>
+        <div>
+          <b>Opcional: resposta mais rápida (Groq)</b>
+          <p className="jv-mudo">
+            {ok
+              ? 'Ligada. A Groq responde primeiro; se ela estiver no limite, a Gemini assume.'
+              : 'Também é grátis: crie a conta em console.groq.com, vá em “API Keys” → “Create API Key” e cole aqui (começa com gsk_).'}
+          </p>
+        </div>
+        {!aberto && (
+          <Botao tipo="fantasma" onClick={() => setAberto(true)}>
+            {ok ? 'Trocar' : 'Colar chave'}
+          </Botao>
+        )}
+      </div>
+      {aberto && (
+        <form className="jv-form jv-corpo estreito" onSubmit={salvar}>
+          <Campo rotulo="Chave da Groq" dica="Fica guardada cifrada, só para o seu Jarvis.">
+            <Senha valor={chave} mudar={setChave} placeholder="gsk_…" />
+          </Campo>
+          <Erro texto={erro} />
+          <div>
+            <Botao tipo="primario" carregando={indo} icone={<KeyRound size={16} />}>
+              Guardar a chave
+            </Botao>
+          </div>
+        </form>
+      )}
+    </section>
+  )
+}
+
 function InicioTelegram({ eu }: { eu: Eu }) {
   const [chave, setChave] = useState('')
   const [trocar, setTrocar] = useState(false)
@@ -827,6 +885,7 @@ function InicioTelegram({ eu }: { eu: Eu }) {
           </form>
         )}
       </section>
+      <ChaveExtra ok={!!eu.extra_ok} />
       <section className="jv-painel">
         <div className="jv-faixa">
           <span className={`jv-quad ${eu.telegram_ligado ? 'bom' : ''}`}>{eu.telegram_ligado ? <Check /> : <Send />}</span>

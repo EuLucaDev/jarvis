@@ -1,2 +1,2 @@
 Mexer neste arquivo (e enviar) publica a portaria no Coolify.
-Última publicação pedida: 2026-11-03 (Jarvis 2.13.1: Telegram com modelos leves e sem registro repetido)
+Última publicação pedida: 2026-11-04 (Jarvis 2.14: Groq de reserva no Telegram, chave no site)

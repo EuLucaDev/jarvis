@@ -10,7 +10,7 @@ const catalog = require('./catalog');
 // evita duas versões da mesma consulta divergirem com o tempo.
 const { paidByCategory } = require('./dashboard');
 const { normalize } = require('./parser');
-const { toNumber, roundCurrency, dateOnly, addMonths, monthKey, sum, MONTH_LABELS } = require('../utils');
+const { toNumber, roundCurrency, dateOnly, addMonths, monthKey, sum, MONTH_LABELS, INCOME_MONTH_SQL } = require('../utils');
 
 const goalsService = () => require('./goals');
 
@@ -232,7 +232,7 @@ function monthClosing(referenceMonth) {
     items: openInvoices.slice(0, 5)
   });
 
-  const income = sum(repo.query('SELECT amount FROM incomes WHERE substr(date,1,7) = ?', [month]), 'amount');
+  const income = sum(repo.query(`SELECT amount FROM incomes WHERE ${INCOME_MONTH_SQL} = ?`, [month]), 'amount');
   const spent = sum(repo.query(`SELECT amount FROM expenses WHERE status='PAGO' AND substr(date,1,7) = ?`, [month]), 'amount');
   const profile = catalog.getProfile() || { monthlyGoal: 0 };
   const leftover = roundCurrency(income - spent);

@@ -119,7 +119,8 @@ async def lancar(a: dict[str, Any]) -> dict[str, Any]:
     if p.get("isIncome"):
         categoria = p.get("category") or "Outros"
         item = await chamar("incomes:create", {"source": descricao, "category": categoria, "bankAccountId": conta["id"],
-                                               "amount": p["amount"], "date": data, "description": ""})
+                                               "amount": p["amount"], "date": data, "description": "",
+                                               **({"competenceMonth": str(a["competencia"])[:7]} if a.get("competencia") else {})})
         tipo, onde = "income", conta["name"]
         if categoria_dita:
             await chamar("rules:learn", descricao, categoria, "income")
@@ -712,3 +713,23 @@ async def investir(a: dict[str, Any]) -> dict[str, Any]:
                                                  "date": (a.get("data") or dt.date.today().isoformat())[:10]})
     await mudou()
     return {"ok": True, "investimento": alvo.get("name"), "valor": brl(valor), "acao": acao, "id": item.get("id")}
+
+
+# ---------- competência (salário no fim do mês para pagar o mês seguinte) ----------
+
+
+async def competencia(a: dict[str, Any]) -> dict[str, Any]:
+    """Regra: entradas destas categorias, a partir deste dia, contam no mês seguinte nos relatórios (o saldo segue a data)."""
+    acao = a.get("acao") or "ver"
+    if acao == "ver":
+        r = await chamar("incomes:competenceRule") or {}
+    else:
+        dados: dict[str, Any] = {"day": 0} if acao == "desligar" else {"day": int(a.get("dia") or 25)}
+        if a.get("categorias"):
+            dados["categories"] = a["categorias"]
+        r = await chamar("incomes:setCompetenceRule", dados) or {}
+        await mudou()
+    return {"ligada": bool(r.get("active")), "a_partir_do_dia": r.get("day") or None, "categorias": r.get("categories"),
+            "entradas_ajustadas": r.get("changed"),
+            "instrucao": ("Explique em uma frase: o dinheiro entra no saldo na data real, mas nos relatórios do mês conta no mês "
+                          "seguinte." if r.get("active") else "Confirme numa frase.")}

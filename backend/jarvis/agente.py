@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
 from google.genai import types
 
 from . import store, tools
@@ -190,6 +191,7 @@ async def responder(chave: str, partes: list[types.Part], resumo_usuario: str, c
     contents = [*_historico(chave), types.Content(role="user", parts=partes)]
     cartoes: list[dict[str, Any]] = []
     token = coletor.set(cartoes)
+
     agora = time.time()
     from .textos import MODELOS_TELEGRAM
 
@@ -210,7 +212,13 @@ async def responder(chave: str, partes: list[types.Part], resumo_usuario: str, c
                     _pausados[m] = time.time() + (600 if cota else 120)  # cota: 10 min; lento ou sobrecarregado: 2 min
                     modelos = [x for x in modelos if x != m] or [FALLBACK]
             if r is None or not r.candidates:
-                resp.texto = "Os modelos da Gemini não responderam agora. Tente de novo em um minuto."
+                # Gemini fora (sobrecarga, cota, lentidão): a IA grátis de reserva (Groq) responde, se ainda nada rodou
+                try:
+                    if not resp.ferramentas and await _pela_extra(chave, partes, assuntos, resp, cartoes, canal, resumo_usuario):
+                        break
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("IA de reserva falhou: %s", exc)
+                resp.texto = "Os modelos de IA não responderam agora. Tente de novo em um minuto."
                 break
             conteudo = r.candidates[0].content or types.Content(role="model", parts=[])
             chamadas = [p.function_call for p in (conteudo.parts or []) if p.function_call]
@@ -244,6 +252,55 @@ async def responder(chave: str, partes: list[types.Part], resumo_usuario: str, c
         resp.texto = "Pronto."
     _guardar(chave, resumo_usuario, resp.texto)
     return resp
+
+
+async def _pela_extra(chave: str, partes: list[types.Part], assuntos: set[str], resp: Resposta, cartoes: list, canal: str,
+                      resumo: str) -> bool:
+    """Reserva quando a Gemini não responde: a IA grátis fora dela (Groq), se há chave. False = não deu (foto, PDF, falha)."""
+    from . import ia_texto
+
+    extra = (settings.chave_extra or "").strip()
+    if not ia_texto.provedor(extra):
+        return False
+    textos_msg: list[str] = []
+    assuntos.add("financeiro")  # já com as ferramentas do dia a dia (estes modelos não seguem bem o "carregar assunto")
+    async with httpx.AsyncClient() as http:
+        for p in partes:
+            if p.text:
+                textos_msg.append(p.text)
+            elif p.inline_data and (p.inline_data.mime_type or "").startswith("audio/"):
+                falado = await ia_texto.transcrever(http, extra, p.inline_data.data or b"", p.inline_data.mime_type)
+                if not falado:
+                    return False
+                textos_msg.append(f"(áudio) {falado}")
+            elif p.inline_data:
+                return False  # foto ou PDF: só a Gemini lê
+        if not textos_msg:
+            return False
+        linhas = (store.get(f"conversa:{chave}") or {}).get("linhas", [])[-HISTORICO:]
+        historico = [{"role": "assistant" if l["papel"] == "model" else "user", "content": l["texto"]} for l in linhas]
+
+        async def executar(nome: str, args: dict[str, Any]) -> dict[str, Any]:
+            antes = len(cartoes)
+            res = _limpo(await _ferramenta(nome, args, assuntos, resp, chave))
+            res = res if isinstance(res, dict) else {"resultado": res}
+            res.pop("_imagem", None)
+            if len(cartoes) > antes:
+                res["ja_mostrado"] = ("Estes números já aparecem para ele numa mensagem própria. NÃO repita os valores: "
+                                      "comente o principal em uma ou duas frases.")
+            return res
+
+        curto = ia_texto.prompt_curto(settings.user_name, time.strftime("%A, %d/%m/%Y, %H:%M"),
+                                      f'Chame a pessoa de "{settings.chamar}".')
+        r = await ia_texto.conversar(http, extra, curto, [*historico[-6:], {"role": "user", "content": "\n".join(textos_msg)}],
+                                     lambda: ia_texto.ferramentas(ia_texto.essenciais(_declaracoes(assuntos)[0].function_declarations or [])),
+                                     executar, PASSOS)
+    if r is None:
+        return False
+    resp.texto, resp.ferramentas = r[0], list(r[1])
+    if not resp.texto and not (cartoes or resp.mensagens):
+        resp.texto = "Feito." if r[1] else ""
+    return bool(resp.texto or cartoes or resp.mensagens)
 
 
 async def texto(chave: str, mensagem: str) -> Resposta:

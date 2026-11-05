@@ -30,8 +30,10 @@ function createIncome(data) {
   const amount = roundCurrency(data.amount);
   if (amount <= 0) throw new Error('O valor da entrada deve ser maior que zero.');
 
+  const competence = competenceFor(data);
   const item = {
     id: generateId('income'),
+    competenceMonth: competence.month, competenceSource: competence.source,
     source: String(data.source).trim(),
     category: data.category,
     bankAccountId: data.bankAccountId,
@@ -52,13 +54,79 @@ function createIncome(data) {
 function updateIncome(id, data) {
   if (!repo.findById('incomes', id)) throw new Error('Entrada não encontrada.');
   required(data, ['source', 'category', 'bankAccountId', 'amount', 'date']);
+  const current = repo.findById('incomes', id);
+  const competence = data.competenceMonth !== undefined || current.competenceSource !== 'manual'
+    ? competenceFor({ ...current, ...data })
+    : { month: current.competenceMonth, source: current.competenceSource };
   const result = repo.update('incomes', id, {
     ...data,
+    competenceMonth: competence.month, competenceSource: competence.source,
     amount: roundCurrency(data.amount),
     date: dateOnly(data.date)
   });
   accounts.syncBalances();
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Competência das entradas
+//
+// Quem recebe no fim do mês para pagar o mês seguinte liga a regra: entradas das categorias escolhidas, a partir
+// de um dia do mês, contam no mês seguinte nos relatórios. A data (e o saldo) continuam os reais.
+// ---------------------------------------------------------------------------
+
+const normalizeText = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+function competenceRule() {
+  const settings = require('./catalog').getSettings();
+  const day = Math.max(0, Math.min(31, Math.round(toNumber(settings.income_next_month_day))));
+  const categories = String(settings.income_next_month_categories || 'Salário,Comissão')
+    .split(',').map(item => item.trim()).filter(Boolean);
+  return { day, categories, active: day > 0 };
+}
+
+function nextMonth(date) {
+  const [year, month] = dateOnly(date).split('-').map(Number);
+  return month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`;
+}
+
+/** Competência de uma entrada: a dita pela pessoa (AAAA-MM), a da regra, ou nenhuma (vale o mês da data). */
+function competenceFor(data) {
+  const given = String(data.competenceMonth ?? '').trim();
+  if (given) {
+    if (!/^\d{4}-\d{2}$/.test(given)) throw new Error('Competência no formato AAAA-MM.');
+    return given === dateOnly(data.date).slice(0, 7) ? { month: '', source: 'manual' } : { month: given, source: 'manual' };
+  }
+  if (data.competenceMonth === '' && data.competenceSource === 'manual') return { month: '', source: 'manual' };
+  const rule = competenceRule();
+  const day = Number(dateOnly(data.date).slice(8, 10));
+  const wanted = rule.categories.map(normalizeText);
+  if (rule.active && day >= rule.day && wanted.includes(normalizeText(data.category))) {
+    return { month: nextMonth(data.date), source: 'regra' };
+  }
+  return { month: '', source: '' };
+}
+
+/** Liga, muda ou desliga a regra (day = 0 desliga) e reaplica nas entradas que não têm competência dita à mão. */
+function setCompetenceRule(data = {}) {
+  const catalog = require('./catalog');
+  return repo.transaction(() => {
+    if (data.day !== undefined) catalog.setSetting('income_next_month_day', Math.max(0, Math.min(31, Math.round(toNumber(data.day)))), 'number');
+    if (data.categories !== undefined) {
+      const list = Array.isArray(data.categories) ? data.categories : String(data.categories).split(',');
+      catalog.setSetting('income_next_month_categories', list.map(item => String(item).trim()).filter(Boolean).join(','), 'text');
+    }
+    let changed = 0;
+    for (const item of repo.all('incomes')) {
+      if (item.competenceSource === 'manual') continue;
+      const next = competenceFor({ ...item, competenceMonth: undefined });
+      if (next.month !== (item.competenceMonth || '')) {
+        repo.update('incomes', item.id, { competenceMonth: next.month, competenceSource: next.source });
+        changed++;
+      }
+    }
+    return { ...competenceRule(), changed };
+  });
 }
 
 function deleteIncome(id) {
@@ -617,6 +685,8 @@ function listPayables(windowDays = 30) {
 }
 
 module.exports = {
+  competenceRule,
+  setCompetenceRule,
   BANK_METHODS,
   PAYMENT_METHODS,
   listIncomes,

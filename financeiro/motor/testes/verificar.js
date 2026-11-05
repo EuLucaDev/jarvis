@@ -389,7 +389,59 @@ async function main() {
   const fechamento = insights.monthClosing('2026-03');
   truthy('o fechamento do mês responde', fechamento && typeof fechamento === 'object');
 
+  extratoComLancamentoManual();
   carteiraDoMentor();
+}
+
+/** O extrato traz com outra descrição o que já foi lançado à mão: não lança de novo (e conta fixa pendente vira paga). */
+function extratoComLancamentoManual() {
+  database.close();
+  const base3 = fs.mkdtempSync(path.join(os.tmpdir(), 'carteira-manual-'));
+  database.open(base3);
+  try {
+    const conta = accounts.create({ name: 'Inter', bankName: 'Inter', accountType: 'CONTA_DIGITAL', initialBalance: 0 });
+    transactions.createExpense({ description: 'Moto Yamaha', category: 'Financiamento', paymentMethod: 'PIX', bankAccountId: conta.id,
+      amount: 877.07, date: '2026-11-17', status: 'PENDENTE', fixedExpenseId: 'fixed_x' });
+    transactions.createExpense({ description: 'Claro Casa', category: 'Internet', paymentMethod: 'PIX', bankAccountId: conta.id,
+      amount: 125.6, date: '2026-11-01', status: 'PAGO' });
+    const linha = (date, description, amount, isIncome = false) => ({ date, description, amount, isIncome, kind: isIncome ? 'income' : 'expense' });
+    const sessao = importer.buildSession([{ fileName: 'extrato.pdf', documentType: 'extrato', bank: 'Inter', rows: [
+      linha('2026-11-04', 'SANTANDER SOC. CRED. FINANC. E', 877.74),
+      linha('2026-11-01', 'CLARO NXT TELECOMUNICACOES SA', 125.6),
+      linha('2026-11-02', 'CLARO NXT TELECOMUNICACOES SA', 125.6),
+      linha('2026-11-01', 'STER BOM', 21.84)
+    ] }]);
+    const porDesc = d => sessao.rows.filter(r => r.description.startsWith(d));
+    truthy('extrato: a fixa pendente é reconhecida mesmo com outro nome e valor', !porDesc('SANTANDER')[0].selected);
+    check('extrato: o lançamento manual casa uma vez só', porDesc('CLARO').filter(r => r.selected).length, 1);
+    truthy('extrato: o que é novo entra', porDesc('STER')[0].selected);
+    importer.commit(sessao, { 'extrato.pdf': { accountId: conta.id } }, { reconcile: false });
+    const moto = repo.query("SELECT * FROM expenses WHERE description = 'Moto Yamaha'")[0];
+    check('extrato: a fixa vira paga com o valor e a data do extrato', [moto.status, moto.amount, moto.date], ['PAGO', 877.74, '2026-11-04']);
+    check('extrato: sem duplicar o que já estava lançado', repo.count('expenses', '1=1'), 4);
+
+    // Salário recebido no último dia do mês para pagar o mês seguinte
+    const salario = transactions.createIncome({ source: 'Salário LPC', category: 'Salário', bankAccountId: conta.id, amount: 2108.65, date: '2026-10-30' });
+    const mes = m => dashboard.getData({ year: 2026, month: m }).totalIncome;
+    check('competência: sem a regra, o salário conta em outubro', [mes(10), mes(11)], [2108.65, 0]);
+    const saldoAntes = accounts.getBalance(conta.id);
+    const regra = transactions.setCompetenceRule({ day: 25, categories: 'Salário,Comissão' });
+    check('competência: ligar a regra reaplica nas entradas antigas', regra.changed, 1);
+    check('competência: com a regra, conta em novembro', [mes(10), mes(11)], [0, 2108.65]);
+    check('competência: o saldo da conta não muda (vale a data real)', accounts.getBalance(conta.id), saldoAntes);
+    const freela = transactions.createIncome({ source: 'Freela', category: 'Freelance', bankAccountId: conta.id, amount: 500, date: '2026-10-29' });
+    check('competência: outra categoria fica no mês da data', repo.findById('incomes', freela.id).competenceMonth, '');
+    const comissao = transactions.createIncome({ source: 'Comissão', category: 'Comissão', bankAccountId: conta.id, amount: 300, date: '2026-10-10' });
+    check('competência: antes do dia da regra fica no mês', repo.findById('incomes', comissao.id).competenceMonth, '');
+    transactions.updateIncome(comissao.id, { source: 'Comissão', category: 'Comissão', bankAccountId: conta.id, amount: 300, date: '2026-10-10', competenceMonth: '2026-12' });
+    check('competência: dita à mão vale', repo.findById('incomes', comissao.id).competenceMonth, '2026-12');
+    transactions.setCompetenceRule({ day: 0 });
+    check('competência: desligar a regra não mexe na dita à mão', [repo.findById('incomes', salario.id).competenceMonth, repo.findById('incomes', comissao.id).competenceMonth], ['', '2026-12']);
+  } finally {
+    database.close();
+    fs.rmSync(base3, { recursive: true, force: true });
+    database.open(base);
+  }
 }
 
 /**

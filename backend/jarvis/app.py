@@ -86,6 +86,8 @@ async def startup():
     proativo.presenca.loop = loop
     asyncio.create_task(proativo.loop())
     asyncio.create_task(protocols.loop())
+    if finance.motor.disponivel():  # antes da ponte: as pendências do Telegram precisam do motor no ar
+        await asyncio.to_thread(finance.motor.start)
     if not teste:
         from . import telegram
 
@@ -95,7 +97,6 @@ async def startup():
 
         asyncio.create_task(copia.loop())  # cópia para o Jarvis de bolso (Telegram com o computador desligado)
     if finance.motor.disponivel():
-        await asyncio.to_thread(finance.motor.start)
         asyncio.create_task(finance.motor.vigiar())
         from . import finance_completo
 
@@ -423,7 +424,8 @@ async def nuvem_estado():
 
     out: dict[str, Any] = {"ligado": nuvem.ligado(), "url": c.get("url", ""), "pelo_launcher": bool(c.get("pelo_launcher")),
                            "ponte": nuvem.estado.get("conectado", False), "erro": nuvem.estado.get("erro"),
-                           "bolso": {"ativo": copia.ligado(), "enviada": (store.get("bolso_envio") or {}).get("em"), "erro": copia.estado.get("erro")}}
+                           "bolso": {"ativo": copia.ligado(), "enviada": (store.get("bolso_envio") or {}).get("em"), "erro": copia.estado.get("erro")},
+                           "ia_extra": settings.public()["chave_extra"]}
     if nuvem.ligado():
         try:
             import httpx
@@ -458,6 +460,25 @@ async def nuvem_ligar(body: dict = Body(...)):
         return {"ok": False, "erro": f"Não consegui falar com o Jarvis: {str(exc)[:140]}"}
     store.put("nuvem", {"url": url, "token": token, "perfil": eu["perfil"], "ativo": True})
     return {"ok": True, "conta": eu}
+
+
+@app.put("/api/nuvem/ia")
+async def nuvem_ia(body: dict = Body(...)):
+    """Chave grátis da Groq (ou Cerebras) para o Telegram: responde primeiro, a Gemini fica de reserva. Vazia = remove."""
+    import httpx
+
+    from . import copia, ia_texto
+
+    chave = str(body.get("chave") or "").strip()
+    if chave:
+        if not ia_texto.provedor(chave):
+            return {"ok": False, "erro": "Essa não parece uma chave da Groq (começa com gsk_)."}
+        async with httpx.AsyncClient() as http:
+            if not await ia_texto.conferir(http, chave):
+                return {"ok": False, "erro": "A Groq não aceitou essa chave. Confira se copiou inteira."}
+    settings.update(chave_extra=chave)
+    copia.pedir_copia()  # o Jarvis de bolso passa a usar também
+    return {"ok": True, "ia_extra": settings.public()["chave_extra"]}
 
 
 @app.put("/api/nuvem/bolso")

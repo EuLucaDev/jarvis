@@ -1085,7 +1085,45 @@ type NuvemEstado = {
   ponte: boolean
   erro?: string | null
   bolso?: { ativo: boolean; enviada?: number | null; erro?: string | null }
+  ia_extra?: { tem: boolean; final: string }
   conta?: { perfil: string; nome: string; email?: string; dono: boolean; telegram_ligado: boolean; robo?: string; robo_configurado: boolean; telegram_link?: string | null }
+}
+
+/** Chave grátis da Groq para o Telegram: responde primeiro (rápida); a Gemini fica de reserva e lê fotos e PDFs. */
+function IaExtra({ estado, toast, recarregar }: { estado?: { tem: boolean; final: string }; toast: (t: string) => void; recarregar: () => void }) {
+  const [chave, setChave] = useState('')
+  const [busy, setBusy] = useState(false)
+  const salvar = async (valor: string) => {
+    setBusy(true)
+    try {
+      const r = await api<{ ok: boolean; erro?: string }>('/api/nuvem/ia', { method: 'PUT', json: { chave: valor } })
+      if (!r.ok) return toast(r.erro || 'Não deu certo')
+      toast(valor ? 'Groq ligada no Telegram' : 'Groq removida: o Telegram volta a usar só a Gemini')
+      setChave('')
+      recarregar()
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Panel
+      title="IA grátis para o Telegram (Groq)"
+      desc="Opcional. Com a chave da Groq, o Telegram responde em cerca de 1 segundo e entende áudios; se ela estiver no limite do plano grátis, a Gemini assume. Fotos e PDFs continuam na Gemini. Crie a chave em console.groq.com → API Keys."
+    >
+      {estado?.tem ? <p className="muted">Ligada (chave terminando em {estado.final}).</p> : null}
+      <div className="row">
+        <input type="password" value={chave} onChange={(x) => setChave(x.target.value)} placeholder="gsk_…" autoComplete="off" />
+        <button className="btn primary" disabled={busy || !chave.trim()} onClick={() => salvar(chave.trim())}>
+          Guardar
+        </button>
+        {estado?.tem ? (
+          <button className="btn" disabled={busy} onClick={() => salvar('')}>
+            Remover
+          </button>
+        ) : null}
+      </div>
+    </Panel>
+  )
 }
 
 /** A conta deste computador (o launcher liga sozinho) e a ponte do Telegram. Contas e o robô ficam no site. */
@@ -1174,6 +1212,7 @@ function NuvemPage() {
           ) : null}
         </Panel>
       )}
+      {e.ligado && <IaExtra estado={e.ia_extra} toast={toast} recarregar={carregar} />}
       {e.ligado && e.bolso && (
         <Panel
           title="Telegram com o computador desligado"

@@ -4,7 +4,7 @@ const repo = require('../repository');
 const accounts = require('./accounts');
 const cards = require('./cards');
 const dashboard = require('./dashboard');
-const { MONTH_LABELS, toNumber, roundCurrency, sum, matchesPeriod, monthKey } = require('../utils');
+const { MONTH_LABELS, toNumber, roundCurrency, sum, matchesPeriod, monthKey, incomeRefDate } = require('../utils');
 
 /**
  * Relatórios: as visões que a planilha não dava — comparativo ano a ano,
@@ -24,7 +24,7 @@ function monthlyStatement(year) {
   const rows = [];
   for (let month = 1; month <= 12; month++) {
     const scope = { year, month };
-    const income = sum(incomes.filter(i => matchesPeriod(i.date, scope)), 'amount');
+    const income = sum(incomes.filter(i => matchesPeriod(incomeRefDate(i), scope)), 'amount');
     const fixed = sum(
       expenses.filter(e => e.type === 'FIXA' && e.status === 'PAGO' && e.paymentMethod !== 'CARTAO_CREDITO' && matchesPeriod(e.date, scope)),
       'amount'
@@ -158,7 +158,7 @@ function periodLedger(filters = {}) {
   const rows = [];
 
   for (const item of repo.all('incomes')) {
-    if (!matchesPeriod(item.date, filters)) continue;
+    if (!matchesPeriod(incomeRefDate(item), filters)) continue;
     rows.push({
       kind: 'Entrada', date: item.date, description: item.source || item.description,
       category: item.category, account: accountsById.get(item.bankAccountId) || '',

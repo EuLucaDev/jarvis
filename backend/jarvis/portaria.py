@@ -325,7 +325,8 @@ async def ponte_copia(request: Request):
     copia = dados.get("copia")
     if not isinstance(copia, dict):
         raise HTTPException(400)
-    await asyncio.to_thread(bolso.guardar_copia, pid, copia, str(dados.get("chave") or ""))
+    await asyncio.to_thread(bolso.guardar_copia, pid, copia, str(dados.get("chave") or ""),
+                            str(dados["extra"]) if "extra" in dados else None)
     return {"ok": True, "ligado": True}
 
 

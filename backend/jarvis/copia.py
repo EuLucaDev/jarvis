@@ -134,12 +134,12 @@ async def enviar(forcar: bool = False) -> None:
         return
     copia = await montar()
     corpo = json.dumps({k: v for k, v in copia.items() if k != "gerado"}, sort_keys=True, ensure_ascii=False, default=str)
-    marca = hashlib.sha256((corpo + settings.gemini_api_key).encode()).hexdigest()
+    marca = hashlib.sha256((corpo + settings.gemini_api_key + (settings.chave_extra or "")).encode()).hexdigest()
     ultimo = store.get("bolso_envio") or {}
     if not forcar and ultimo.get("marca") == marca and time.time() - ultimo.get("em", 0) < 1800:
         return
     async with httpx.AsyncClient(timeout=60) as c:
-        r = await c.post(nuvem.url("/api/ponte/copia"), json={"copia": copia, "chave": settings.gemini_api_key}, headers=nuvem.cabecalho())
+        r = await c.post(nuvem.url("/api/ponte/copia"), json={"copia": copia, "chave": settings.gemini_api_key, "extra": settings.chave_extra or ""}, headers=nuvem.cabecalho())
     r.raise_for_status()
     store.put("bolso_envio", {"marca": marca, "em": time.time()})
     estado.update(enviada=time.time(), erro=None, tamanho=len(corpo))
@@ -169,6 +169,11 @@ def pedir_copia() -> None:
 
 
 # ---------------------------------------------------------------- pendências feitas pelo celular
+
+
+def _sem_motor(erro: str) -> bool:
+    e = str(erro).lower()
+    return any(k in e for k in ("ainda está abrindo", "indisponível", "connection", "não abriu", "conectar"))
 
 
 async def aplicar(itens: list[dict[str, Any]], conversas: dict[str, list[dict[str, Any]]] | None = None) -> list[str]:
@@ -212,6 +217,9 @@ async def aplicar(itens: list[dict[str, Any]], conversas: dict[str, list[dict[st
             res = {"erro": str(exc)[:200]}
         finally:
             coletor.reset(token)
+        if isinstance(res, dict) and res.get("erro") and _sem_motor(res["erro"]):
+            log.warning("pendência %s fica para depois: %s", pid, res["erro"])
+            break  # o financeiro não estava pronto: nada é marcado; vai de novo na próxima conexão, na mesma ordem
         if isinstance(res, dict) and res.get("erro"):
             linhas_erro.append(f"⚠️ {textos.e(p.get('resumo') or p['ferramenta'])}: {textos.e(res['erro'])}")
             feitos[pid] = {"em": time.time(), "erro": True}

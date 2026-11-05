@@ -8,7 +8,8 @@ const transactions = require('./transactions');
 const catalog = require('./catalog');
 const {
   MONTH_LABELS, toNumber, roundCurrency, sum, monthKey, addMonths,
-  matchesPeriod, filterList, invoiceDueDate, dateOnly, now
+  matchesPeriod, filterList, invoiceDueDate, dateOnly, now,
+  INCOME_MONTH_SQL, incomeRefDate, withIncomeRef
 } = require('../utils');
 
 const goalsService = () => require('./goals');
@@ -43,7 +44,7 @@ function getData(filters = {}) {
   };
 
   // --- Recortes do período -------------------------------------------------
-  const periodIncomes = filterList(allIncomes, scope);
+  const periodIncomes = filterList(withIncomeRef(allIncomes), scope, { dateField: 'refDate' });
   const periodExpenses = filterList(allExpenses, scope);
   const periodContributions = filterList(allContributions, scope);
   const periodInvoices = allInvoices.filter(invoice => {
@@ -81,7 +82,7 @@ function getData(filters = {}) {
   const monthSeries = [];
   for (let index = 1; index <= 12; index++) {
     const monthScope = { year, month: index };
-    const income = sum(allIncomes.filter(item => matchesPeriod(item.date, monthScope)), 'amount');
+    const income = sum(allIncomes.filter(item => matchesPeriod(incomeRefDate(item), monthScope)), 'amount');
     const expense = sum(
       allExpenses.filter(item => item.status === 'PAGO' && item.paymentMethod !== 'CARTAO_CREDITO' && matchesPeriod(item.date, monthScope)),
       'amount'
@@ -218,7 +219,7 @@ function paidByCategory(year, month) {
 
 function averageMonthlyIncome(year) {
   const rows = repo.query(
-    `SELECT substr(date, 1, 7) AS ref, SUM(amount) AS total FROM incomes WHERE substr(date, 1, 4) = ? GROUP BY ref`,
+    `SELECT ${INCOME_MONTH_SQL} AS ref, SUM(amount) AS total FROM incomes WHERE substr(${INCOME_MONTH_SQL}, 1, 4) = ? GROUP BY ref`,
     [String(year)]
   );
   const active = rows.map(r => toNumber(r.total)).filter(v => v > 0);
@@ -343,7 +344,7 @@ function streak(profile) {
   let count = 0;
   for (let index = 0; index < 24; index++) {
     const ref = monthKey(addMonths(now().slice(0, 10), -index));
-    const income = sum(repo.query('SELECT amount FROM incomes WHERE substr(date,1,7) = ?', [ref]), 'amount');
+    const income = sum(repo.query(`SELECT amount FROM incomes WHERE ${INCOME_MONTH_SQL} = ?`, [ref]), 'amount');
     const spent = sum(repo.query(`SELECT amount FROM expenses WHERE status='PAGO' AND substr(date,1,7) = ?`, [ref]), 'amount');
     const left = income - spent;
     if (index === 0 && left === 0) continue;

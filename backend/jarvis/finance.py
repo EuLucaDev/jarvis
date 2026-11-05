@@ -121,10 +121,20 @@ class Motor:
             await asyncio.to_thread(self.start)
             if not self.ligado:
                 raise FinErro(self.erro or "Financeiro indisponível.")
-        if self._cliente is None:
-            self._cliente = httpx.AsyncClient(base_url=f"http://127.0.0.1:{self.porta}", timeout=120,
-                                              headers={"x-token": self.token})
-        r = await self._cliente.post(f"/c/{canal}", content=json.dumps({"args": list(args)}, ensure_ascii=False))
+        corpo_req = json.dumps({"args": list(args)}, ensure_ascii=False)
+        for tentativa in range(6):  # motor subindo ou reiniciando (porta nova): espera um pouco em vez de falhar
+            if self._cliente is None:
+                self._cliente = httpx.AsyncClient(base_url=f"http://127.0.0.1:{self.porta}", timeout=120,
+                                                  headers={"x-token": self.token})
+            try:
+                r = await self._cliente.post(f"/c/{canal}", content=corpo_req)
+                break
+            except httpx.ConnectError:
+                if tentativa == 5:
+                    raise FinErro("O financeiro ainda está abrindo. Tente de novo em instantes.") from None
+                await asyncio.sleep(1)
+                if not self.ligado:
+                    await asyncio.to_thread(self.start)
         corpo = r.json()
         if not corpo.get("ok"):
             raise FinErro(corpo.get("error") or "Erro no financeiro.")

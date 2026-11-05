@@ -339,9 +339,21 @@ DECLARATIONS = [
                 "data": {"type": S, "description": "AAAA-MM-DD."},
                 "categoria": {"type": S},
                 "descricao": {"type": S},
+                "competencia": {"type": S, "description": "Só entrada: AAAA-MM do mês que ela paga, se ele disser ('o salário que caiu hoje é de novembro')."},
             },
             "required": ["frase"],
         },
+    ),
+    types.FunctionDeclaration(
+        name="financeiro_competencia",
+        description=(
+            "Para quem recebe no fim do mês para pagar o mês seguinte ('recebo dia 30 para pagar as contas do mês que vem'): "
+            "ligar faz as entradas das categorias (padrão Salário e Comissão) a partir do dia (padrão 25) contarem no mês "
+            "seguinte nos relatórios e no resumo do mês; o saldo da conta continua pela data real. ver, ligar, desligar."
+        ),
+        parameters={"type": "OBJECT", "properties": {"acao": {"type": S, "enum": ["ver", "ligar", "desligar"]}, "dia": {"type": "INTEGER"},
+                                                      "categorias": {"type": S, "description": "Separadas por vírgula, ex.: Salário,Comissão"}},
+                    "required": ["acao"]},
     ),
     types.FunctionDeclaration(
         name="financeiro_fixa",
@@ -1358,7 +1370,7 @@ async def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
                       "financeiro_editar": fv.editar, "financeiro_orcamento": fv.orcamento, "financeiro_regra": fv.regra,
                       "financeiro_fatura": fv.fatura, "financeiro_investir": fv.investir, "financeiro_avancado": fv.avancado, "financeiro_consultar": fv.consultar, "financeiro_transferir": fv.transferir,
                       "financeiro_pagar": fv.pagar, "financeiro_meta": fv.meta, "financeiro_importar": fv.importar,
-                      "financeiro_cadastrar": fv.cadastrar}[name]
+                      "financeiro_cadastrar": fv.cadastrar, "financeiro_competencia": fv.competencia}[name]
                 return await fn(args)
             except FinErro as exc:
                 return {"erro": str(exc)}

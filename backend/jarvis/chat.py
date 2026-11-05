@@ -25,7 +25,9 @@ async def reply(history: list[dict[str, str]], text: str) -> dict[str, Any]:
     contents.append(types.Content(role="user", parts=[types.Part(text=text)]))
     config = types.GenerateContentConfig(
         system_instruction=system_prompt() + "\nVocê está no chat por texto do painel: pode usar listas curtas e markdown simples.",
-        tools=[types.Tool(function_declarations=tools.todas()[-1].function_declarations)],
+        # "não bloquear" (behavior) só existe na voz ao vivo; no texto a Gemini recusa a lista inteira
+        tools=[types.Tool(function_declarations=[d.model_copy(update={"behavior": None}) if getattr(d, "behavior", None) else d
+                                                 for d in tools.todas()[-1].function_declarations or []])],
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
     used: list[str] = []

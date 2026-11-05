@@ -194,6 +194,16 @@ const MIGRATIONS = [
       connection.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_investment_operations_key
         ON investment_operations (external_key) WHERE external_key <> ''`);
     }
+  },
+  {
+    id: '2026-11-income-competence-v6',
+    // Mês de competência da entrada (vazio = o mês da data) e de onde ele veio: 'manual' (dito pela pessoa) ou
+    // 'regra' (salário no fim do mês conta no seguinte). Bancos antigos ficam como estavam (tudo vazio).
+    run(connection) {
+      const existing = new Set(connection.prepare('PRAGMA table_info(incomes)').all().map(c => c.name));
+      if (!existing.has('competence_month')) connection.exec("ALTER TABLE incomes ADD COLUMN competence_month TEXT DEFAULT ''");
+      if (!existing.has('competence_source')) connection.exec("ALTER TABLE incomes ADD COLUMN competence_source TEXT DEFAULT ''");
+    }
   }
 ];
 

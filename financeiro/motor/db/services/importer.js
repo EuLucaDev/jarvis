@@ -60,6 +60,7 @@ async function readPasted(text, options = {}) {
  */
 function buildSession(documents, errors = []) {
   const existing = existingFingerprints();
+  const manual = manualCandidates();
   const seen = new Map();
   const rows = [];
 
@@ -67,6 +68,7 @@ function buildSession(documents, errors = []) {
   const ordered = [...documents].sort((a, b) =>
     (a.documentType === 'extrato' ? 0 : 1) - (b.documentType === 'extrato' ? 0 : 1));
 
+  let match = null;
   for (const document of ordered) {
     for (const row of document.rows || []) {
       const item = {
@@ -103,6 +105,15 @@ function buildSession(documents, errors = []) {
         // de verdade — descartar um deles quebraria o saldo.
         item.duplicate = `repetido em ${seen.get(fingerprint)}`;
         item.selected = false;
+      } else if (document.documentType === 'extrato' && (match = takeManualMatch(manual, item))) {
+        // Lançado à mão antes (outra descrição, data perto): o extrato não lança de novo. Se estava pendente,
+        // a importação marca como pago — é o extrato dizendo que o dinheiro saiu.
+        item.duplicate = `já lançado à mão: "${match.description}" (${match.date.split('-').reverse().join('/')})${match.status === 'PENDENTE' ? ' — vai ser marcado como pago' : ''}`;
+        item.selected = false;
+        if (match.status === 'PENDENTE') item.settleExpenseId = match.id;
+        if (match.status === 'PENDENTE' && Math.round(toNumber(match.amount) * 100) !== Math.round(Math.abs(toNumber(item.amount)) * 100)) {
+          item.duplicate += ` com o valor do extrato (${Math.abs(toNumber(item.amount)).toFixed(2).replace('.', ',')})`;
+        }
       } else if (item.kind === 'invoicePayment' && document.documentType === 'fatura') {
         // O pagamento já veio (ou virá) pelo extrato da conta.
         item.duplicate = 'pagamento de fatura — já contabilizado pelo extrato';
@@ -331,6 +342,51 @@ function makeFingerprint(row) {
   return `${row.date}|${Math.round(toNumber(row.amount) * 100)}|${head}`;
 }
 
+const dayDiff = (a, b) => Math.round((new Date(`${a}T12:00:00`) - new Date(`${b}T12:00:00`)) / 86400000);
+
+/**
+ * Lançamentos feitos à mão (pela voz, Telegram ou tela), que o extrato vai repetir com outra descrição
+ * ("Moto Yamaha" × "SANTANDER SOC. CRED"). Só os que saem da conta (Pix, débito, dinheiro) e não vieram
+ * de uma importação ainda ativa.
+ */
+function manualCandidates() {
+  const imported = new Set();
+  for (const batch of repo.query("SELECT payload FROM import_batches WHERE status = 'ATIVO'")) {
+    try {
+      const added = JSON.parse(batch.payload || '{}').added || {};
+      for (const ids of Object.values(added)) for (const id of ids || []) imported.add(id);
+    } catch { /* lote antigo sem payload legível */ }
+  }
+  const expenses = repo.query(
+    "SELECT id, date, amount, description, status, fixed_expense_id FROM expenses WHERE payment_method IN ('PIX', 'DEBITO', 'DINHEIRO')"
+  ).filter(row => !imported.has(row.id)).map(row => ({ ...row, income: false }));
+  const incomes = repo.query('SELECT id, date, amount, source AS description FROM incomes')
+    .filter(row => !imported.has(row.id)).map(row => ({ ...row, status: 'PAGO', income: true }));
+  return [...expenses, ...incomes];
+}
+
+/** O lançamento manual que é esta linha do extrato: mesmo valor, mesmo sentido, data perto. Cada um casa uma vez. */
+function takeManualMatch(manual, item) {
+  if (!['expense', 'income', 'transfer', undefined].includes(item.kind) && !(item.kind === 'invoicePayment' && !item.cardPayment)) return null;
+  const income = Boolean(item.isIncome);
+  const cents = Math.round(Math.abs(toNumber(item.amount)) * 100);
+  let best = null;
+  for (const row of manual) {
+    if (row.used || row.income !== income) continue;
+    const rowCents = Math.round(Math.abs(toNumber(row.amount)) * 100);
+    // Conta fixa pendente tem valor estimado: aceita até 5% de diferença (o extrato traz o valor de verdade).
+    const estimated = row.status === 'PENDENTE' && row.fixedExpenseId;
+    if (rowCents !== cents && !(estimated && Math.abs(rowCents - cents) <= Math.max(1, Math.round(rowCents * 0.05)))) continue;
+    const diff = dayDiff(item.date, row.date); // extrato − lançado
+    // Pago: até 4 dias de diferença. Pendente (conta fixa gerada no vencimento): pago até 15 dias antes ou 5 depois.
+    const ok = row.status === 'PENDENTE' ? diff >= -15 && diff <= 5 : Math.abs(diff) <= 4;
+    if (ok && (!best || Math.abs(diff) < Math.abs(best.diff))) best = { row, diff };
+  }
+  if (!best) return null;
+  best.row.used = true;
+  return best.row;
+}
+
 /** Tudo que já está no banco, para não importar duas vezes. */
 function existingFingerprints() {
   const set = new Set();
@@ -460,6 +516,21 @@ function commit(session, targets = {}, options = {}) {
       if (!row.categoryEdited || !row.category) continue;
       categorizer.learn(row.description, row.category, row.isIncome ? 'income' : 'variableExpense', 'user');
       report.learned++;
+    }
+
+    // Linhas do extrato que eram lançamentos manuais pendentes: o dinheiro saiu, então ficam pagos.
+    for (const row of session.rows || []) {
+      if (row.selected || !row.settleExpenseId) continue;
+      try {
+        const expense = repo.findById('expenses', row.settleExpenseId);
+        if (expense && expense.status === 'PENDENTE') {
+          repo.update('expenses', expense.id, { amount: roundCurrency(Math.abs(toNumber(row.amount))), date: dateOnly(row.date) });
+          transactions.markExpenseAsPaid(expense.id);
+          report.settled = (report.settled || 0) + 1;
+        }
+      } catch (error) {
+        report.errors.push(`${row.description}: ${error.message}`);
+      }
     }
 
     cards.rebuildInvoices();

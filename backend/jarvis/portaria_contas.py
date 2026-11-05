@@ -225,6 +225,7 @@ async def site_eu(request: Request):
     return {**_publica(cid, c), "telegram_ligado": bool(pf.get("tg")), "robo": r.get("telegram", {}).get("usuario"),
             "conectado": p.conectado(c["perfil"]), "bolso": p.bolso.estado(c["perfil"]),
             "chave_ok": (p.DADOS / "bolso" / c["perfil"] / "chave.bin").exists(),
+            "extra_ok": bool(p.bolso._extra(c["perfil"])) if (p.DADOS / "bolso" / c["perfil"] / "chave.bin").exists() else False,  # noqa: SLF001
             "sessoes": sum(1 for v in r["sessoes"].values() if v["conta"] == cid and v["expira"] > time.time()),
             "versoes": {s: _ultima(r, "jarvis", s) for s in SISTEMAS},
             "launcher": {s: bool(_ultima(r, "instalador", s)) for s in SISTEMAS}}
@@ -240,6 +241,14 @@ async def site_chave(request: Request):
     if not re.fullmatch(r"[A-Za-z0-9_.\-]{20,120}", chave):
         raise HTTPException(400, "Isso não parece uma chave da Gemini. Copie de novo do Google AI Studio.")
     p = _p()
+    from . import ia_texto
+
+    if ia_texto.provedor(chave):  # chave da Groq (gsk_…) ou Cerebras (csk-…): IA grátis rápida, com a Gemini de reserva
+        if not await ia_texto.conferir(p.http(), chave):
+            raise HTTPException(400, "A Groq não aceitou essa chave. Confira se copiou inteira.")
+        atual = p.bolso._chave(c["perfil"])  # noqa: SLF001
+        p.bolso.guardar_chave(c["perfil"], atual, chave)
+        return {"ok": True, "extra": True}
     r = await p.http().get(f"{p.bolso.GEMINI}/models", headers={"x-goog-api-key": chave}, params={"pageSize": 1})
     if r.status_code != 200:
         raise HTTPException(400, "O Google não aceitou essa chave. Confira se copiou inteira.")

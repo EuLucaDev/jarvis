@@ -127,6 +127,12 @@ function matchesPeriod(date, filters = {}) {
   return true;
 }
 
+// Mês em que uma entrada conta nos relatórios: a competência (salário recebido no último dia de outubro para pagar
+// novembro conta em novembro) ou, sem ela, o mês da data. O saldo da conta usa sempre a data real.
+const INCOME_MONTH_SQL = "COALESCE(NULLIF(competence_month, ''), substr(date, 1, 7))";
+const incomeRefDate = item => (item && item.competenceMonth ? `${item.competenceMonth}-01` : item?.date);
+const withIncomeRef = items => (items || []).map(item => ({ ...item, refDate: incomeRefDate(item) }));
+
 function filterList(items, filters = {}, options = {}) {
   return (items || []).filter(item => {
     const date = item[options.dateField || 'date'];
@@ -142,6 +148,9 @@ const formatBRL = value =>
   `R$ ${toNumber(value).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 
 module.exports = {
+  INCOME_MONTH_SQL,
+  incomeRefDate,
+  withIncomeRef,
   MONTH_LABELS,
   generateId,
   now,

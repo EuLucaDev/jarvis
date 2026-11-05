@@ -36,6 +36,7 @@ CONFIG_FILE = HOME / "config.json"
 DEFAULTS: dict[str, Any] = {
     "configurado": False,
     "gemini_api_key": "",
+    "chave_extra": "",  # IA grátis fora da Gemini para o Telegram (Groq gsk_… ou Cerebras csk-…); vazia = só Gemini
     "user_name": "",
     "tratamento": "Senhor",  # como o Jarvis chama a pessoa: "Senhor", "Senhora" ou "" (pelo nome)
     "city": "",
@@ -86,6 +87,8 @@ class Settings:
         self._load()
         out = dict(self._cfg)
         out["tem_chave"] = bool(out.pop("gemini_api_key", ""))
+        extra = out.pop("chave_extra", "")
+        out["chave_extra"] = {"tem": bool(extra), "final": extra[-4:] if extra else ""}  # nunca a chave inteira na tela
         return out
 
     def __getattr__(self, name: str) -> Any:

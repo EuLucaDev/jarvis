@@ -80,11 +80,11 @@ def _ler(f: Path, padrao: Any = None) -> Any:
         return padrao
 
 
-def guardar_copia(pid: str, copia: dict[str, Any], chave: str) -> None:
+def guardar_copia(pid: str, copia: dict[str, Any], chave: str, extra: str | None = None) -> None:
     d = _pasta(pid)
     _gravar(d / "copia.bin", copia)
-    if chave:
-        _gravar(d / "chave.bin", {"chave": chave})
+    if chave or extra is not None:
+        guardar_chave(pid, chave or _chave(pid), extra)
 
 
 def apagar_copia(pid: str) -> None:
@@ -99,12 +99,18 @@ def copia(pid: str) -> dict[str, Any] | None:
     return _ler(_pasta(pid) / "copia.bin")
 
 
-def guardar_chave(pid: str, chave: str) -> None:
-    _gravar(_pasta(pid) / "chave.bin", {"chave": chave})
+def guardar_chave(pid: str, chave: str, extra: str | None = None) -> None:
+    """Chave da Gemini e, opcional, a da IA grátis fora dela (Groq/Cerebras). extra=None mantém a que já estava."""
+    atual = _ler(_pasta(pid) / "chave.bin", {}) or {}
+    _gravar(_pasta(pid) / "chave.bin", {"chave": chave, "extra": atual.get("extra", "") if extra is None else extra})
 
 
 def _chave(pid: str) -> str:
     return (_ler(_pasta(pid) / "chave.bin", {}) or {}).get("chave", "")
+
+
+def _extra(pid: str) -> str:
+    return (_ler(_pasta(pid) / "chave.bin", {}) or {}).get("extra", "")
 
 
 def disponivel(pid: str) -> bool:
@@ -715,6 +721,52 @@ def _guardar_conversa(pid: str, chat: str, linhas: list[dict[str, Any]]) -> None
     _gravar(_pasta(pid) / "conversa.json", conv)
 
 
+async def _pela_extra(pid: str, chat: int, partes: list[dict[str, Any]], c: dict[str, Any], resp: Resposta,
+                      linhas: list[dict[str, Any]], decls: list[dict[str, Any]]) -> bool:
+    """Reserva quando a Gemini não responde: a IA grátis fora dela (Groq), se a pessoa deu a chave. False = não deu."""
+    from . import ia_texto
+
+    extra = _extra(pid)
+    if not ia_texto.provedor(extra):
+        return False
+    msg: list[str] = []
+    for p in partes:
+        if p.get("text"):
+            msg.append(p["text"])
+        elif (p.get("inlineData") or {}).get("mimeType", "").startswith("audio/"):
+            falado = await ia_texto.transcrever(_p().http(), extra, base64.b64decode(p["inlineData"]["data"]), p["inlineData"]["mimeType"])
+            if not falado:
+                return False
+            msg.append(f"(áudio) {falado}")
+        else:
+            return False  # foto ou PDF: a Gemini lê
+    if not msg:
+        return False
+    historico = [{"role": "assistant" if x["papel"] == "model" else "user", "content": x["texto"]} for x in linhas]
+
+    async def executar(nome: str, args: dict[str, Any]) -> dict[str, Any]:
+        return await _ferramenta(pid, chat, nome, args, c, resp)
+
+    try:
+        fin = c.get("financeiro") or {}
+        situacao = ("Conta só Telegram: o que você registra entra na hora." if c.get("local") else
+                    f"O computador dele está desligado: você usa a cópia de {_quando(c)}; registros entram quando ele ligar.")
+        curto = ia_texto.prompt_curto(c.get("chamar") or c.get("nome") or "", dt.datetime.now(_fuso(c)).strftime("%A, %d/%m/%Y, %H:%M"),
+                                      f"- {situacao}\n- Contas: {', '.join(x['nome'] for x in fin.get('contas') or []) or 'nenhuma'}. "
+                                      f"Cartões: {', '.join(x['nome'] for x in fin.get('cartoes') or []) or 'nenhum'}.")
+        r = await ia_texto.conversar(_p().http(), extra, curto, [*historico[-6:], {"role": "user", "content": "\n".join(msg)}],
+                                     ia_texto.ferramentas(ia_texto.essenciais(decls)), executar, PASSOS)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("bolso IA extra: %s", exc)
+        return False
+    if r is None:
+        return False
+    resp.texto, resp.ferramentas = r[0], list(r[1])
+    if not resp.texto and not resp.mensagens:
+        resp.texto = "Feito." if r[1] else ""
+    return bool(resp.texto or resp.mensagens)
+
+
 async def responder(pid: str, chat: int, partes: list[dict[str, Any]], resumo: str) -> Resposta:
     c = copia(pid) or {}
     resp = Resposta()
@@ -722,10 +774,12 @@ async def responder(pid: str, chat: int, partes: list[dict[str, Any]], resumo: s
     linhas = _conversa(pid, str(chat), c)
     contents = [{"role": x["papel"], "parts": [{"text": x["texto"]}]} for x in linhas] + [{"role": "user", "parts": partes}]
     modelos = list(textos.MODELOS_TELEGRAM)  # texto: modelos leves, com cota separada da voz
+    decls = ([d for d in DECLS if d["name"] not in SO_COMPUTADOR | {"investir"}] + [DECL_CADASTRO]) if c.get("local") else DECLS
     for _ in range(PASSOS):
         r = await _gerar(chave, modelos, {"systemInstruction": {"parts": [{"text": _prompt(c)}]}, "contents": contents,
-                                          "tools": [{"functionDeclarations": ([d for d in DECLS if d["name"] not in SO_COMPUTADOR | {"investir"}] + [DECL_CADASTRO])
-                                                     if c.get("local") else DECLS}]})
+                                          "tools": [{"functionDeclarations": decls}]})
+        if (not r or r.get("erro_chave")) and not resp.ferramentas and await _pela_extra(pid, chat, partes, c, resp, linhas, decls):
+            break  # Gemini fora: a IA grátis de reserva (Groq) respondeu
         if not r or r.get("erro_chave"):
             resp.texto = ("A chave da Gemini do seu Jarvis não foi aceita. Abra o Jarvis no computador para atualizar."
                           if r else "Os modelos da Gemini não responderam agora. Tente de novo em um minuto.")

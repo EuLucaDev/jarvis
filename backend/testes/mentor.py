@@ -238,6 +238,17 @@ def calculos() -> None:
     check("plano: lotes inteiros, sobra declarada", (plano["compras"][0]["quantidade"], plano["sobra"]), (2.0, 60.0))
 
 
+def ia_reserva() -> None:
+    from jarvis import ia_texto
+
+    check("reserva: chave da Groq reconhecida", ia_texto.provedor("gsk_abc"), "groq")
+    check("reserva: chave da Gemini não é da reserva", ia_texto.provedor("AIzaXYZ"), None)
+    conv = ia_texto.ferramentas([{"name": "lancar", "description": "x", "parameters": {"type": "OBJECT", "properties": {"v": {"type": "NUMBER"}},
+                                                                                     "required": ["v"]}}])
+    check("reserva: tipos no formato OpenAI", conv[0]["function"]["parameters"], {"type": "object", "properties": {"v": {"type": "number"}}, "required": ["v"]})
+    check("reserva: só as ferramentas essenciais", [d["name"] for d in ia_texto.essenciais([{"name": "lancar"}, {"name": "abrir_app"}])], ["lancar"])
+
+
 def prompts() -> None:
     from jarvis import agente, live
 
@@ -254,6 +265,7 @@ def prompts() -> None:
 async def main() -> None:
     try:
         calculos()
+        ia_reserva()
         prompts()
         await computador()
         await so_telegram()
